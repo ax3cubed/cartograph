@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ### Added
 
+- Research note on the indexing method, content-addressed fact replay, with the experiment script that produced its numbers (`docs/research`).
+
+### Changed
+
+- The landing page (`site/`) now describes the finished product and has a research section in place of the roadmap. The README and `docs/ROADMAP.md` remain the record of what is built.
 - Bring-your-own-model answers for "Ask the map". The graph engine finds the evidence and a model of your choice words the answer, streamed into the same answer card with clickable file and commit references.
 - Model picker in the composer: model per row, reasoning effort per column, and an ULTRA lever that sends the whole map as context.
 - Model settings dialog: provider preset or custom base URL, API key, model list loaded from the provider, up to six models in the picker.

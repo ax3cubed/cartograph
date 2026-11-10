@@ -161,7 +161,7 @@ The work ahead is split into seven stages:
 6. AI: a tool-calling Ask agent with checked citations, and an MCP server.
 7. Hardening: fuzzing, fault injection and performance gates.
 
-Details and a "done when" line for each stage are in [docs/ROADMAP.md](docs/ROADMAP.md).
+Details and a "done when" line for each stage are in [docs/ROADMAP.md](docs/ROADMAP.md). The indexing method and the experiment behind it are written up in [docs/research](docs/research/README.md).
 
 ## Contributing
 
