@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in Cartograph does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        Do not use this form for a security vulnerability. Follow SECURITY.md in the repository root.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest list of steps that shows the problem.
+      placeholder: |
+        1. Run `pnpm dev` and open http://localhost:3000
+        2. Switch to the Ontology layout
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Cartograph version or commit
+      placeholder: v0.1.0, or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: run-mode
+    attributes:
+      label: How the app was run
+      options:
+        - pnpm dev
+        - pnpm build and pnpm start
+        - Other (describe above)
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Chrome, Firefox or Safari, with the version number
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS, Linux or Windows, with the version
+  - type: input
+    id: node
+    attributes:
+      label: Node and pnpm versions
+      placeholder: Node 22.16.0, pnpm 11.23.0
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console or terminal output
+      description: Paste any errors from the browser console or the terminal. This field is formatted as code.
+      render: shell
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag images here if they help show the problem.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the existing issues and did not find this one.
+          required: true
