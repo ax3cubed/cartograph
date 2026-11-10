@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest a feature, an improvement or a change to the roadmap.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cartograph is an early prototype. The roadmap in docs/ROADMAP.md lists what is planned. Check it first, then tell us what you need.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: Describe the feature or change. Sketches and examples help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Roadmap stage
+      description: Which stage of docs/ROADMAP.md does this relate to?
+      options:
+        - Current prototype (map UI, Ask the map)
+        - 1. Core indexer
+        - 2. Breadth
+        - 3. Real-data UI
+        - 4. Cross-service links
+        - 5. Symbols and calls
+        - 6. AI
+        - 7. Hardening
+        - A change to the roadmap itself
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to work on this myself.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the existing issues and did not find this one.
+          required: true
