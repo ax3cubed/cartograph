@@ -7,7 +7,7 @@ This is the plan for taking Cartograph from a prototype on demo data to a tool t
 Cartograph is an early prototype.
 
 - **Released:** v0.1.0 (2026-11-10). The interactive map on a bundled demo workspace called `northwind`, hand-authored in `lib/workspace.ts`. See the [changelog](../CHANGELOG.md) for the feature list.
-- **In review, targeted at v0.2.0:** bring-your-own-model answers for "Ask the map". This is a small first step towards stage 6.
+- **Released:** v0.2.0 (2026-11-10). Bring-your-own-model answers for "Ask the map". This is a small first step towards stage 6.
 - **Not built yet:** the indexer. Real repositories cannot be loaded. No stage below has been completed.
 
 | Stage | Status |
@@ -17,7 +17,7 @@ Cartograph is an early prototype.
 | 3. Real-data UI | Not started |
 | 4. Cross-service links | Not started |
 | 5. Symbols and calls | Not started |
-| 6. AI | Not started. A first step is in review for v0.2.0 |
+| 6. AI | Not started. A first step shipped in v0.2.0 |
 | 7. Hardening | Not started |
 
 ## Stage 1: Core indexer
