@@ -13,6 +13,7 @@ export interface Answer {
   nodes: string[]; // evidence to highlight on the map
   links: string[]; // `${from}>${to}`
   steps: string[]; // how the answer was reached
+  by?: string; // model that worded `lines`; absent when the graph engine's own wording is shown
 }
 
 const DAY = 86_400_000;
