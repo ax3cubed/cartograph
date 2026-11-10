@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cartograph</title>
+<meta name="description" content="Cartograph is an open-source codebase map. Services, modules and files each get a plain description, and every link between them is tied to the git commit that added or removed it. Early prototype, MIT licensed.">
+<link rel="icon" href="assets/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Sora:wght@400;600;700&display=swap">
+<style>
+:root{
+  --bg:#141821;--band:#191e29;--panel:#1f2533;--line:#2a3142;--line-2:#4b5672;
+  --text:#e8ebf3;--muted:#9aa2b6;
+  --accent:#1aa3ff;--accent-hi:#52b9ff;--accent-text:#4cb6ff;--accent-ink:#062338;--focus:#52b9ff;
+  --up:#8fd14f;--up-text:#8fd14f;--down:#ff5d5d;--down-text:#ff7070;
+  --ring:#343d52;--hdr:rgba(20,24,33,.88);--shadow:0 32px 80px -32px rgba(0,0,0,.75);
+  --s1:#d9ad3c;--s2:#46b99c;--s3:#cf5b80;--s4:#9d83d6;--s5:#79b3cc;--s6:#e3894f;
+  --shot:#141821;--shot-bar:#1f2533;--shot-line:#2e3648;--shot-text:#9aa2b6;--shot-edge:#3d4760;--shot-dot:#4b5672;
+  --on-dark:block;--on-light:none;
+  --sans:Sora,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --bg:#f5f7fb;--band:#ecf0f6;--panel:#ffffff;--line:#d6dce8;--line-2:#8d99b2;
+    --text:#131a2a;--muted:#4d576e;
+    --accent:#1aa3ff;--accent-hi:#49b5ff;--accent-text:#0a62ab;--accent-ink:#062338;--focus:#0a62ab;
+    --up:#4e9216;--up-text:#376c0e;--down:#e03c3c;--down-text:#b32626;
+    --ring:#b9c3d6;--hdr:rgba(245,247,251,.9);--shadow:0 28px 64px -28px rgba(19,26,42,.45);
+    --s1:#b98a14;--s2:#1f9a7c;--s3:#c2476f;--s4:#7f62c4;--s5:#4a8fae;--s6:#cf6e30;
+    --shot-edge:#141821;
+    --on-dark:none;--on-light:block;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f5f7fb;--band:#ecf0f6;--panel:#ffffff;--line:#d6dce8;--line-2:#8d99b2;
+  --text:#131a2a;--muted:#4d576e;
+  --accent:#1aa3ff;--accent-hi:#49b5ff;--accent-text:#0a62ab;--accent-ink:#062338;--focus:#0a62ab;
+  --up:#4e9216;--up-text:#376c0e;--down:#e03c3c;--down-text:#b32626;
+  --ring:#b9c3d6;--hdr:rgba(245,247,251,.9);--shadow:0 28px 64px -28px rgba(19,26,42,.45);
+  --s1:#b98a14;--s2:#1f9a7c;--s3:#c2476f;--s4:#7f62c4;--s5:#4a8fae;--s6:#cf6e30;
+  --shot-edge:#141821;
+  --on-dark:none;--on-light:block;
+  color-scheme:light;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:84px}
+body{margin:0;background:var(--bg);color:var(--text);font:400 1rem/1.65 var(--sans);font-feature-settings:"tnum";-webkit-font-smoothing:antialiased;overflow-wrap:break-word}
+h1,h2,h3{margin:0;font-weight:700;line-height:1.15;letter-spacing:-.025em;text-wrap:balance}
+h2{font-size:clamp(1.65rem,1.1rem + 2.1vw,2.5rem)}
+h3{font-size:1.3rem;font-weight:600;letter-spacing:-.015em}
+p,ul,ol,dl,dd,figure{margin:0}
+ul,ol{padding:0;list-style:none}
+img,svg{display:block}
+a{color:var(--accent-text);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+a:hover{text-decoration-thickness:2px}
+code,pre{font-family:var(--mono);font-size:.875em}
+code{overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:6px}
+::selection{background:var(--accent);color:var(--accent-ink)}
+
+.wrap{width:100%;max-width:1152px;margin-inline:auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.skip{position:absolute;left:16px;top:-80px;z-index:20;padding:10px 16px;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-weight:600;text-decoration:none}
+.skip:focus{top:12px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 22px;border:1px solid var(--line-2);border-radius:10px;background:transparent;color:var(--text);font:600 .95rem/1 var(--sans);text-decoration:none;transition:background-color .15s,border-color .15s}
+.btn:hover{background:var(--panel);border-color:var(--muted)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn-primary:hover{background:var(--accent-hi);border-color:var(--accent-hi)}
+.btn-sm{min-height:38px;padding:0 14px;font-size:.875rem}
+
+/* header */
+.hdr{position:sticky;top:0;z-index:10;background:var(--hdr);border-bottom:1px solid var(--line);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.hdr-in{display:flex;align-items:center;gap:8px 28px;min-height:64px}
+.brand{display:inline-flex;align-items:center;gap:10px;color:var(--text);font-weight:700;font-size:1.125rem;letter-spacing:-.02em;text-decoration:none}
+.mark-dark{display:var(--on-dark)}
+.mark-light{display:var(--on-light)}
+.nav{display:flex;gap:26px;margin-left:auto;font-size:.9rem;white-space:nowrap}
+.nav a{padding:8px 0;color:var(--muted);text-decoration:none}
+.nav a:hover{color:var(--text)}
+.hdr-act{display:flex;align-items:center;gap:8px}
+.toggle{display:grid;place-items:center;width:38px;height:38px;padding:0;border:1px solid var(--line-2);border-radius:10px;background:transparent;color:var(--text);cursor:pointer}
+.toggle:hover{background:var(--panel);border-color:var(--muted)}
+.toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ico-sun{display:var(--on-dark)}
+.ico-moon{display:var(--on-light)}
+
+/* bands */
+.band{padding-block:clamp(64px,9vw,128px)}
+.band-alt{background:var(--band);border-block:1px solid var(--line)}
+.head{max-width:44rem;margin-bottom:clamp(40px,6vw,72px)}
+.head p{margin-top:18px;color:var(--muted);font-size:1.0625rem}
+
+/* hero */
+.hero{position:relative;overflow:hidden;padding-block:clamp(56px,8vw,112px) clamp(64px,9vw,128px)}
+.hero .wrap{position:relative}
+.orbit{position:absolute;z-index:0;top:-150px;right:-150px;width:620px;height:620px;pointer-events:none}
+.orbit .ring{fill:none;stroke:var(--ring);stroke-width:1.25;stroke-dasharray:2 8;stroke-linecap:round}
+.orbit .link{stroke:var(--line-2);stroke-width:1.25}
+.orbit .file{fill:var(--bg);stroke-width:2}
+.orbit g{transform-origin:300px 300px}
+.hero-text,.hero .shot{position:relative;z-index:1}
+.hero-text{max-width:47rem}
+h1{font-size:clamp(2.1rem,1rem + 5vw,4.4rem);line-height:1.05;letter-spacing:-.035em}
+.hero-sub{margin-top:26px;max-width:39rem;color:var(--muted);font-size:clamp(1.05rem,.95rem + .5vw,1.25rem);line-height:1.55}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}
+.statusline{margin-top:22px;color:var(--muted);font-size:.875rem}
+.hero .shot{margin-top:clamp(44px,6vw,76px)}
+
+/* screenshot frame: the app is always dark, so the chrome is too */
+.shot{border:1px solid var(--shot-edge);border-radius:12px;overflow:hidden;background:var(--shot);box-shadow:var(--shadow)}
+.shot-bar{display:flex;align-items:center;gap:6px;height:34px;padding:0 13px;background:var(--shot-bar);border-bottom:1px solid var(--shot-line);color:var(--shot-text);font-size:.75rem}
+.shot-bar i{width:9px;height:9px;border:1.5px solid var(--shot-dot);border-radius:50%}
+.shot-bar span{margin-left:8px}
+.shot a{display:block}
+.shot a:focus-visible{outline-offset:-3px}
+.shot img{width:100%;height:auto;aspect-ratio:16/10;background:var(--shot);color:var(--shot-text);font-size:.8125rem}
+
+/* features */
+.feat{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,8fr);gap:clamp(24px,5vw,72px);align-items:center}
+.feat + .feat{margin-top:clamp(56px,8vw,112px)}
+.feat-flip{grid-template-columns:minmax(0,8fr) minmax(0,5fr)}
+.feat-flip .feat-text{order:2}
+.feat-text p{margin-top:14px;color:var(--muted)}
+.feat-text p + p{margin-top:12px}
+.trio{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:clamp(56px,8vw,112px);border-top:1px solid var(--line)}
+.trio > div{padding:30px 30px 0 0}
+.trio > div + div{padding-left:30px;border-left:1px solid var(--line)}
+.trio p{margin-top:12px;color:var(--muted);font-size:.9688rem}
+
+/* how it works */
+.model{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(40px,6vw,88px)}
+.model h3{margin-bottom:8px}
+.model .sub{color:var(--muted);margin-bottom:26px}
+.tree li{position:relative;display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;margin-left:calc(var(--d) * 24px);padding-bottom:20px}
+.tree li + li::before{content:"";position:absolute;left:-16px;top:-10px;width:12px;height:22px;border-left:1px solid var(--line-2);border-bottom:1px solid var(--line-2);border-bottom-left-radius:6px}
+.tree svg{width:18px;height:18px;margin-top:4px}
+.tree .lvl{display:block;font-weight:600}
+.tree .lvl code{margin-left:6px;color:var(--muted);font-weight:400}
+.tree p{color:var(--muted);font-size:.9375rem}
+.tree-note{margin-top:4px;color:var(--muted);font-size:.875rem}
+.types > div{display:grid;grid-template-columns:104px minmax(0,1fr);gap:16px;padding:13px 0;border-top:1px solid var(--line)}
+.types > div:last-child{border-bottom:1px solid var(--line)}
+.types dt{font-weight:600}
+.types dd{color:var(--muted)}
+.types-note{margin-top:20px;color:var(--muted)}
+
+.life{margin-top:clamp(56px,8vw,96px);padding-top:clamp(40px,5vw,56px);border-top:1px solid var(--line)}
+.life > p{max-width:44rem;margin-top:14px;color:var(--muted)}
+.life-link{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:34px 0 30px;font-size:.9375rem}
+.life-link code{padding:5px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.life-link span{color:var(--muted)}
+.track{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.track li{position:relative;padding:22px 28px 0 0;border-top:2px solid var(--accent)}
+.track li.gone{border-top-style:dashed;border-top-color:var(--line-2)}
+.track li::before{content:"";position:absolute;left:0;top:-8px;width:14px;height:14px;border-radius:50%;box-shadow:0 0 0 4px var(--bg)}
+.track li.add::before{background:var(--up)}
+.track li.gone::before{background:var(--down)}
+.track li.live::before{display:none}
+.ev{display:flex;align-items:center;gap:8px;font-weight:600}
+.ev svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round}
+.add .ev{color:var(--up-text)}
+.gone .ev{color:var(--down-text)}
+.track .meta{margin-top:8px;font-size:.9375rem}
+.track .meta code{margin-right:8px}
+.track p{color:var(--muted);font-size:.9375rem}
+.life figcaption{max-width:44rem;margin-top:30px;color:var(--muted);font-size:.875rem}
+
+/* ask */
+.qs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:clamp(24px,5vw,72px);margin:20px 0 clamp(36px,5vw,56px);border-top:1px solid var(--line)}
+.qs li{padding:12px 0;border-bottom:1px solid var(--line)}
+#ask .feat{margin-top:clamp(56px,8vw,112px)}
+.tag{display:inline-flex;align-items:center;gap:8px;margin-bottom:14px;padding:4px 12px 4px 10px;border:1px solid var(--line-2);border-radius:99px;font-size:.8125rem;font-weight:600}
+.tag svg,.status svg{width:13px;height:13px;flex:none}
+
+/* roadmap */
+.stage{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,8fr);gap:24px clamp(24px,5vw,72px);padding:clamp(32px,4vw,48px) 0;border-top:1px solid var(--line)}
+.stage:last-child{padding-bottom:0}
+.status{display:flex;align-items:center;gap:9px;margin-bottom:12px;font-size:.9375rem;font-weight:600}
+.dot-full{fill:var(--accent)}
+.dot-ring{fill:none;stroke:var(--accent);stroke-width:2}
+.dot-dash{fill:none;stroke:var(--muted);stroke-width:2;stroke-dasharray:2.4 2.4}
+.stage-head p:last-child{margin-top:10px;color:var(--muted);font-size:.9375rem}
+.items li{position:relative;padding:0 0 12px 22px}
+.items li::before{content:"";position:absolute;left:2px;top:.72em;width:8px;height:1.5px;background:var(--line-2)}
+.items li:last-child{padding-bottom:0}
+.note{margin:22px 0 24px;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.note h4{margin:0 0 8px;font-size:1rem;font-weight:600}
+.note p{color:var(--muted);font-size:.9375rem}
+.note b{color:var(--text);font-weight:600}
+.then{margin-bottom:12px;font-weight:600}
+
+/* open source */
+.oss{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:clamp(40px,6vw,88px)}
+.oss h3{margin-bottom:10px}
+.oss p{color:var(--muted)}
+.oss p + h3{margin-top:40px}
+pre{margin:20px 0 14px;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);line-height:1.8;overflow-x:auto;white-space:pre;-webkit-overflow-scrolling:touch}
+.fine{font-size:.875rem}
+.support{align-self:start;padding:28px;border:1px solid var(--line-2);border-radius:14px}
+.support .cta{margin-top:22px}
+
+/* footer */
+.foot{padding-block:36px;border-top:1px solid var(--line);color:var(--muted);font-size:.875rem}
+.foot-in{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px 28px}
+.foot .brand{font-size:1rem}
+.foot ul{display:flex;flex-wrap:wrap;gap:8px 24px}
+
+@media (max-width:1100px){
+  .orbit g{display:none}
+}
+@media (max-width:860px){
+  .feat,.model,.stage,.oss{grid-template-columns:minmax(0,1fr)}
+  .feat-flip .feat-text{order:0}
+  .trio,.qs{grid-template-columns:minmax(0,1fr)}
+  .trio{border-top:0}
+  .trio > div,.trio > div + div{padding:26px 0 0;margin-top:26px;border-left:0;border-top:1px solid var(--line)}
+  .track{grid-template-columns:minmax(0,1fr)}
+  .track li{padding:0 0 26px 26px;border-top:0;border-left:2px solid var(--accent)}
+  .track li.gone{border-left-style:dashed;border-left-color:var(--line-2);padding-bottom:0}
+  .track li::before{left:-8px;top:2px}
+  .orbit{width:460px;height:460px;top:-215px;right:-200px}
+}
+@media (max-width:720px){
+  html{scroll-padding-top:16px}
+  .hdr{position:static}
+  .hdr-in{flex-wrap:wrap;padding-top:10px}
+  .hdr-act{margin-left:auto}
+  .nav{order:3;width:100%;margin:0;gap:8px;justify-content:space-between;overflow-x:auto;font-size:.8125rem}
+  .nav a{padding:8px 0 12px}
+  .cta .btn{flex:1 1 auto}
+  .types > div{grid-template-columns:84px minmax(0,1fr);gap:12px}
+  .tree li{margin-left:calc(var(--d) * 16px)}
+  .tree li + li::before{left:-12px;width:9px}
+  .support{padding:22px}
+}
+@media (prefers-reduced-motion:no-preference){
+  html{scroll-behavior:smooth}
+  .orbit .o1{animation:spin 150s linear infinite}
+  .orbit .o2{animation:spin 230s linear infinite reverse}
+  .orbit .o3{animation:spin 320s linear infinite}
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hdr" id="top">
+  <div class="wrap hdr-in">
+    <a class="brand" href="#top" aria-label="Cartograph, back to top">
+      <img class="mark-dark" src="assets/cartograph-mark-dark.svg" width="28" height="28" alt="">
+      <img class="mark-light" src="assets/cartograph-mark-light.svg" width="28" height="28" alt="">
+      <span>cartograph</span>
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#open-source">Open source</a>
+    </nav>
+    <div class="hdr-act">
+      <button class="toggle" id="theme" type="button" aria-label="Switch colour theme">
+        <svg class="ico-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.5 1.5M17.2 17.2l1.5 1.5M5.3 18.7l1.5-1.5M17.2 6.8l1.5-1.5"/></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8 8 0 0 1 9.8 4a8 8 0 1 0 10.2 10.2z"/></svg>
+      </button>
+      <a class="btn btn-sm" href="https://github.com/ax3cubed/cartograph" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap">
+    <svg class="orbit" viewBox="0 0 600 600" aria-hidden="true" focusable="false">
+      <circle class="ring" cx="300" cy="300" r="110"/>
+      <circle class="ring" cx="300" cy="300" r="190"/>
+      <circle class="ring" cx="300" cy="300" r="270"/>
+      <g class="o1">
+        <path class="link" d="M300 300 390.1 236.9"/>
+        <circle cx="390.1" cy="236.9" r="7" fill="var(--s1)"/>
+        <circle class="file" cx="204.7" cy="355" r="5" stroke="var(--s2)"/>
+      </g>
+      <g class="o2">
+        <circle cx="395" cy="464.5" r="6" fill="var(--s2)"/>
+        <circle cx="121.5" cy="235" r="6" fill="var(--s3)"/>
+        <circle class="file" cx="395" cy="135.5" r="5" stroke="var(--s4)"/>
+      </g>
+      <g class="o3">
+        <circle cx="553.7" cy="392.3" r="6" fill="var(--s4)"/>
+        <circle cx="126.4" cy="506.8" r="6" fill="var(--s5)"/>
+        <circle cx="207.7" cy="46.3" r="6" fill="var(--s6)"/>
+        <circle class="file" cx="346.9" cy="565.9" r="5" stroke="var(--s1)"/>
+        <circle class="file" cx="473.6" cy="93.2" r="5" stroke="var(--s3)"/>
+      </g>
+      <circle cx="300" cy="300" r="24" fill="var(--accent)" opacity=".16"/>
+      <circle cx="300" cy="300" r="10" fill="var(--accent)"/>
+    </svg>
+
+    <div class="hero-text">
+      <h1 id="hero-title">Understand a codebase without reading all of it.</h1>
+      <p class="hero-sub">Cartograph draws a workspace as a map of services, modules and files, says in plain words what each one does, and ties every link between them to the commit that added or removed it.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/ax3cubed/cartograph" rel="noopener">View on GitHub</a>
+        <a class="btn" href="#roadmap">See the roadmap</a>
+      </div>
+      <p class="statusline">Early prototype · MIT · runs on a demo workspace today</p>
+    </div>
+
+    <figure class="shot">
+      <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>Network</span></div>
+      <img src="assets/screens/network.png" width="1600" height="1000" fetchpriority="high" alt="The Cartograph map in its Network layout on the demo workspace: services as large hubs with their modules around them and links drawn between them, a list of services on the left, a side panel with link counts, a trend chart and recent relationship changes on the right, and a month timeline along the bottom.">
+    </figure>
+  </div>
+</section>
+
+<section class="band band-alt" id="features" aria-labelledby="features-title">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="features-title">What works today</h2>
+      <p>Everything in this section runs now, in version 0.1, on the demo workspace that ships with the project: six services, 32 files and 21 months of commits. It does not read your own repositories yet. That part is on the <a href="#roadmap">roadmap</a>.</p>
+    </div>
+
+    <article class="feat">
+      <div class="feat-text">
+        <h3>One map, three layouts</h3>
+        <p>Network groups modules and files around the service they belong to. Ontology arranges the same nodes by hierarchy, with the workspace at the centre and services, modules and files around it. Adaptive treats links like springs and lets you drag nodes where you want them.</p>
+        <p>Switching layout moves every node to its new position, so you can follow where things went.</p>
+      </div>
+      <figure class="shot">
+        <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>Ontology</span></div>
+        <a href="assets/screens/ontology.png"><img src="assets/screens/ontology.png" width="1600" height="1000" loading="lazy" decoding="async" alt="The same map in its Ontology layout: the workspace at the centre, its six services around it and their modules on the outer ring."></a>
+      </figure>
+    </article>
+
+    <article class="feat feat-flip">
+      <div class="feat-text">
+        <h3>Focus on one node</h3>
+        <p>Select a file, module or service and the map narrows to it. What it depends on sits on one side, what uses it on the other. You see what a file touches before you open it.</p>
+      </div>
+      <figure class="shot">
+        <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>Focus</span></div>
+        <a href="assets/screens/focus.png"><img src="assets/screens/focus.png" width="1600" height="1000" loading="lazy" decoding="async" alt="Focus view of createInvoice.ts: the file at the centre, the files it depends on to its left under Depends on, and the file that uses it to its right under Used by, joined by curved links."></a>
+      </figure>
+    </article>
+
+    <article class="feat">
+      <div class="feat-text">
+        <h3>Scrub through history</h3>
+        <p>Drag the scrubber or step one commit at a time. The map shows the links that existed on that date, and each step shows which links that commit added and which it removed.</p>
+      </div>
+      <figure class="shot">
+        <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>Timeline</span></div>
+        <a href="assets/screens/timeline.png"><img src="assets/screens/timeline.png" width="1600" height="1000" loading="lazy" decoding="async" alt="The map scrubbed back to an earlier commit on the timeline. The commit at that date is named above the map, nodes and links are dimmed, and the side panel shows the selected file's figures and relationship changes as of that date."></a>
+      </figure>
+    </article>
+
+    <div class="trio">
+      <div>
+        <h3>Figures for every node</h3>
+        <p>A side panel shows links, cross-service links, churn, fan-in and fan-out, with a trend chart, the commits that changed the node's relationships and its strongest links. Fan-in is how many links point at a node. Churn is how many links were added or removed in the 90 days before the selected date.</p>
+      </div>
+      <div>
+        <h3>Ways to find things</h3>
+        <p>A workspace tree, search, pins for the nodes you keep returning to, and a filter that shows only the link types you care about.</p>
+      </div>
+      <div>
+        <h3>Ask the map</h3>
+        <p>Type a question such as "What breaks if I change <code>schema.ts</code>?" The answer comes from walking the graph, and lists the files and commits it used. <a href="#ask">More on Ask the map</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="how-it-works" aria-labelledby="how-title">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="how-title">How the map is modelled</h2>
+      <p>Three ideas carry it: a hierarchy of nodes, typed links between them, and a commit recorded on every link.</p>
+    </div>
+
+    <div class="model">
+      <div>
+        <h3>Four levels, each with a description</h3>
+        <p class="sub">Every node says what it does in a sentence, so you can stop at the level that answers your question.</p>
+        <ol class="tree">
+          <li style="--d:0">
+            <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7" fill="var(--text)"/></svg>
+            <div><span class="lvl">Workspace <code>northwind</code></span><p>Six services and their shared libraries, mapped as one workspace.</p></div>
+          </li>
+          <li style="--d:1">
+            <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="6" fill="var(--s6)"/></svg>
+            <div><span class="lvl">Service <code>shared-libs</code></span><p>Libraries imported by every service: logging, event contracts, money.</p></div>
+          </li>
+          <li style="--d:2">
+            <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="4.5" fill="var(--s6)"/></svg>
+            <div><span class="lvl">Module <code>events</code></span><p>The event bus contract shared by producers and consumers.</p></div>
+          </li>
+          <li style="--d:3">
+            <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="4" fill="none" stroke="var(--s6)" stroke-width="2"/></svg>
+            <div><span class="lvl">File <code>schema.ts</code></span><p>Typed schemas for every domain event. Breaking changes here ripple to all consumers.</p></div>
+          </li>
+        </ol>
+        <p class="tree-note">Names and descriptions taken from the demo workspace.</p>
+      </div>
+
+      <div>
+        <h3>Five kinds of link</h3>
+        <p class="sub">A link is typed, so "imports it" and "calls it over HTTP" are never drawn as the same thing.</p>
+        <dl class="types">
+          <div><dt>Imports</dt><dd>One file imports another.</dd></div>
+          <div><dt>Calls</dt><dd>Code in one file calls a function in another.</dd></div>
+          <div><dt>HTTP</dt><dd>A client in one service requests a route in another.</dd></div>
+          <div><dt>Events</dt><dd>A file publishes to an event bus, or consumes from it.</dd></div>
+          <div><dt>Database</dt><dd>A file reads or writes a database.</dd></div>
+        </dl>
+        <p class="types-note">Several repositories and services sit in one map. A link whose two ends are in different services is a cross-service link. Those are drawn on the map and counted for every node.</p>
+      </div>
+    </div>
+
+    <figure class="life">
+      <h3>Every link remembers its commits</h3>
+      <p>A link records the commit that added it and, if it is gone, the commit that removed it. That is what lets the map be scrubbed through time, and it turns "why is this coupled?" into a commit you can read.</p>
+      <div class="life-link">
+        <code>api-gateway/src/routes/products.ts</code>
+        <span>database link to</span>
+        <code>catalog-service/src/store/postgres.py</code>
+      </div>
+      <ol class="track">
+        <li class="add">
+          <span class="ev"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 2v10M2 7h10"/></svg>Link added</span>
+          <div class="meta"><code>5d2e8b7</code><time datetime="2025-04-02">2 April 2025</time></div>
+          <p>"gateway: proxy product routes to catalog"</p>
+        </li>
+        <li class="live">
+          <span class="ev">On the map</span>
+          <p>Scrub to any date between the two commits and the link is drawn.</p>
+        </li>
+        <li class="gone">
+          <span class="ev"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10"/></svg>Link removed</span>
+          <div class="meta"><code>7b19d8c</code><time datetime="2026-06-02">2 June 2026</time></div>
+          <p>"gateway: drop direct read of catalog DB"</p>
+        </li>
+      </ol>
+      <figcaption>One link from the demo workspace, shown with the two commits it records. The gateway read another service's database for fourteen months, and the map can show both when that started and when it stopped.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="band band-alt" id="ask" aria-labelledby="ask-title">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="ask-title">Ask the map</h2>
+      <p>Answers come with their evidence. Each one is worked out by walking the graph, and shows the files and commits it used. Click any of them to go there on the map and check the answer yourself.</p>
+    </div>
+
+    <h3>Questions it answers in the demo</h3>
+    <ul class="qs">
+      <li>What breaks if I change <code>schema.ts</code>?</li>
+      <li>How does checkout reach <code>stripeAdapter</code>?</li>
+      <li>What changed in billing since June?</li>
+      <li>What does <code>auth-service</code> do?</li>
+    </ul>
+    <figure class="shot">
+      <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>Ask the map</span></div>
+      <a href="assets/screens/ask.png"><img src="assets/screens/ask.png" width="1600" height="1000" loading="lazy" decoding="async" alt="Ask the map answering the question What breaks if I change schema.ts? The answer lists the files that depend on it as clickable chips, grouped by how many hops away they are, and the same files are highlighted on the map."></a>
+    </figure>
+
+    <article class="feat feat-flip">
+      <div class="feat-text">
+        <div class="tag"><svg viewBox="0 0 12 12" aria-hidden="true"><circle class="dot-ring" cx="6" cy="6" r="4.5"/></svg>In review</div>
+        <h3>Bring your own model</h3>
+        <p>Version 0.2 is an open pull request, not merged yet. It adds a model and reasoning-effort picker to the composer and works with any OpenAI-compatible endpoint, hosted or local: Ollama, LM Studio, OpenRouter, OpenAI, Gemini, or Anthropic's compatibility endpoint.</p>
+        <p>With no model set up, answers still come from the map and nothing leaves the browser.</p>
+      </div>
+      <figure class="shot">
+        <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>Model picker</span></div>
+        <a href="assets/screens/model-picker.png"><img src="assets/screens/model-picker.png" width="1600" height="1000" loading="lazy" decoding="async" alt="The Ask the map composer with the model picker open: three models listed beside a reasoning-effort slider that runs from Low to Max."></a>
+      </figure>
+    </article>
+  </div>
+</section>
+
+<section class="band" id="roadmap" aria-labelledby="roadmap-title">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="roadmap-title">What is shipped and what is not</h2>
+      <p>Cartograph is an early prototype. The map interface is real and runs on demo data. The part that reads your repositories is still being built. Here is exactly where each piece stands.</p>
+    </div>
+
+    <div class="stage">
+      <div class="stage-head">
+        <p class="status"><svg viewBox="0 0 12 12" aria-hidden="true"><circle class="dot-full" cx="6" cy="6" r="5.5"/></svg>Shipped</p>
+        <h3>Version 0.1: the map</h3>
+        <p>Works today, on the bundled demo workspace.</p>
+      </div>
+      <ul class="items">
+        <li>The interactive map, running on a demo workspace of six services, 32 files and 21 months of commits</li>
+        <li>Network, Adaptive and Ontology layouts, with a morph between them</li>
+        <li>Focus view showing Depends on and Used by</li>
+        <li>A time scrubber that steps commit by commit and shows links added and removed</li>
+        <li>A side panel with links, cross-service links, churn, fan-in and fan-out, a trend chart, relationship changes and strongest links</li>
+        <li>Workspace tree, search, pins and a link-type filter</li>
+        <li>Ask the map, with the files and commits behind each answer as clickable evidence</li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <div class="stage-head">
+        <p class="status"><svg viewBox="0 0 12 12" aria-hidden="true"><circle class="dot-ring" cx="6" cy="6" r="4.5"/></svg>In review</p>
+        <h3>Version 0.2: bring your own model</h3>
+        <p>An open pull request. Not merged yet.</p>
+      </div>
+      <ul class="items">
+        <li>A model and reasoning-effort picker in the Ask the map composer</li>
+        <li>Works with any OpenAI-compatible endpoint, hosted or local: Ollama, LM Studio, OpenRouter, OpenAI, Gemini, Anthropic's compatibility endpoint</li>
+        <li>With no model set up, answers come from the map and nothing leaves the browser</li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <div class="stage-head">
+        <p class="status"><svg viewBox="0 0 12 12" aria-hidden="true"><circle class="dot-dash" cx="6" cy="6" r="4.5"/></svg>Being built</p>
+        <h3>The indexer, then everything that depends on it</h3>
+        <p>Not usable yet. Until it lands, the map shows demo data only.</p>
+      </div>
+      <div>
+        <ul class="items">
+          <li>The indexer: a command-line tool that reads the full git history of one repository or many and writes the real map</li>
+          <li>Its design parses each distinct version of a file once and replays history, instead of re-indexing the code at every commit</li>
+        </ul>
+        <aside class="note" aria-labelledby="exp-title">
+          <h4 id="exp-title">One early experiment, with a caveat</h4>
+          <p>To test the replay design, a throwaway script with a simplified extractor was run over a real TypeScript repository with <b>35,000 commits</b>. It processed the whole first-parent history in <b>4.4 seconds</b>, with <b>719 times fewer parses</b> than re-indexing every commit. This was an experiment, not the finished indexer. It says the design is worth building. It is not a benchmark of something you can run.</p>
+        </aside>
+        <p class="then">After the indexer</p>
+        <ul class="items">
+          <li>Go, Python and PHP support</li>
+          <li>Cross-service link detection for HTTP routes, events and tables, with a confidence level on every link</li>
+          <li>Symbol-level calls</li>
+          <li>Summaries written by a model of your choice</li>
+          <li>An MCP server, so other agents can query the map</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band band-alt" id="open-source" aria-labelledby="oss-title">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="oss-title">Open source, MIT licensed</h2>
+      <p>There is no hosted version, no account and nothing to pay for. Cartograph is code you clone and run.</p>
+    </div>
+
+    <div class="oss">
+      <div>
+        <h3>Run it locally</h3>
+        <p>You need Node.js and pnpm.</p>
+        <pre tabindex="0" aria-label="Commands to run Cartograph locally"><code>git clone https://github.com/ax3cubed/cartograph
+cd cartograph
+pnpm install
+pnpm dev</code></pre>
+        <p class="fine">Then open the local address that <code>pnpm dev</code> prints. The map opens on the demo workspace.</p>
+
+        <h3>Contribute</h3>
+        <p>Contributions are welcome. The <a href="#roadmap">roadmap</a> is the list of what is open, and <a href="https://github.com/ax3cubed/cartograph/issues" rel="noopener">issues</a> and <a href="https://github.com/ax3cubed/cartograph/pulls" rel="noopener">pull requests</a> on GitHub are where the work happens.</p>
+      </div>
+
+      <div class="support">
+        <h3>Support the project</h3>
+        <p>Cartograph is free and MIT licensed. If it is useful to you, star the repo so other people can find it, or buy the maintainer a coffee.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/ax3cubed/cartograph" rel="noopener">Star the repo</a>
+          <a class="btn" href="https://buymeacoffee.com/adeolaakin5" rel="noopener">Buy Me a Coffee</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <a class="brand" href="#top" aria-label="Cartograph, back to top">
+      <img class="mark-dark" src="assets/cartograph-mark-dark.svg" width="22" height="22" alt="" loading="lazy">
+      <img class="mark-light" src="assets/cartograph-mark-light.svg" width="22" height="22" alt="" loading="lazy">
+      <span>cartograph</span>
+    </a>
+    <p>Released under the MIT licence.</p>
+    <ul>
+      <li><a href="https://github.com/ax3cubed/cartograph" rel="noopener">GitHub</a></li>
+      <li><a href="#roadmap">Roadmap</a></li>
+      <li><a href="https://buymeacoffee.com/adeolaakin5" rel="noopener">Support</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var root=document.documentElement,btn=document.getElementById('theme'),key='cartograph-theme',saved;
+  var mq=window.matchMedia?matchMedia('(prefers-color-scheme: light)'):null;
+  try{saved=localStorage.getItem(key)}catch(e){}
+  if(saved==='light'||saved==='dark')root.dataset.theme=saved;
+  function current(){return root.dataset.theme||(mq&&mq.matches?'light':'dark')}
+  function label(){btn.setAttribute('aria-label','Switch to '+(current()==='dark'?'light':'dark')+' theme')}
+  btn.addEventListener('click',function(){
+    var next=current()==='dark'?'light':'dark';
+    root.dataset.theme=next;
+    try{localStorage.setItem(key,next)}catch(e){}
+    label();
+  });
+  if(mq&&mq.addEventListener)mq.addEventListener('change',label);
+  label();
+})();
+</script>
+</body>
+</html>
