@@ -1,0 +1,13 @@
+node_modules
+.next
+next-env.d.ts
+*.tsbuildinfo
+
+# env and OS files
+.env
+.env.*
+.DS_Store
+
+# this project uses pnpm
+package-lock.json
+yarn.lock
