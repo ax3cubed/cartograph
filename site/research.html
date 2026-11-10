@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Experiments on dating every dependency link in a git history: the method, ten measured results, prior work and limits.">
+<link rel="icon" href="assets/favicon.svg">
+<title>Cartograph Indexing Research</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Sora:wght@400;600;700&display=swap">
+<style>
+/* Layout: a research paper in Cartograph's own navy slate. One reading column; figures and tables use its full width and scroll inside their own boxes. */
+:root{
+  --bg:#141821;--band:#191e29;--panel:#1f2533;--line:#2a3142;--line-2:#4b5672;
+  --text:#e8ebf3;--muted:#9aa2b6;
+  --accent:#1aa3ff;--accent-text:#4cb6ff;--focus:#52b9ff;
+  --ok:#8fd14f;--ok-text:#8fd14f;
+  --c1:#3987e5;--c2:#d95926;--c3:#199e70;--grid:#2e3648;
+  --sans:Sora,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --bg:#f5f7fb;--band:#ecf0f6;--panel:#ffffff;--line:#d6dce8;--line-2:#8d99b2;
+    --text:#131a2a;--muted:#4d576e;
+    --accent:#1aa3ff;--accent-text:#0a62ab;--focus:#0a62ab;
+    --ok:#4e9216;--ok-text:#376c0e;
+    --c1:#2a78d6;--c2:#eb6834;--c3:#1baf7a;--grid:#e1e6ef;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f5f7fb;--band:#ecf0f6;--panel:#ffffff;--line:#d6dce8;--line-2:#8d99b2;
+  --text:#131a2a;--muted:#4d576e;
+  --accent:#1aa3ff;--accent-text:#0a62ab;--focus:#0a62ab;
+  --ok:#4e9216;--ok-text:#376c0e;
+  --c1:#2a78d6;--c2:#eb6834;--c3:#1baf7a;--grid:#e1e6ef;
+  color-scheme:light;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:400 1rem/1.7 var(--sans);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;overflow-wrap:break-word}
+.page{max-width:52rem;margin:0 auto;padding-block:clamp(40px,7vw,88px);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:clamp(56px,8vw,88px)}
+section,header{display:flex;flex-direction:column;gap:20px;min-width:0}
+h1,h2,h3,h4,p,ul,ol,dl,dd,figure,pre,table{margin:0}
+h1{font-size:clamp(1.9rem,1.2rem + 3vw,3rem);line-height:1.1;letter-spacing:-.03em;text-wrap:balance}
+h2{font-size:clamp(1.4rem,1.1rem + 1.2vw,1.85rem);line-height:1.2;letter-spacing:-.02em;text-wrap:balance}
+h3{font-size:1.125rem;font-weight:600;line-height:1.3;text-wrap:balance}
+h4{font-size:.9375rem;font-weight:600}
+p,li{max-width:44rem}
+.kicker{font:500 .8125rem/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.lede{font-size:1.125rem;color:var(--muted)}
+.muted,.cap{color:var(--muted)}
+.cap{font-size:.875rem;max-width:44rem}
+a{color:var(--accent-text);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:4px}
+code,pre{font-family:var(--mono);font-size:.875em}
+code{overflow-wrap:anywhere}
+pre{padding:18px 20px;border:1px solid var(--line);border-radius:10px;background:var(--panel);line-height:1.7;overflow-x:auto;white-space:pre}
+ul.plain{padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+ul.plain li{position:relative;padding-left:22px}
+ul.plain li::before{content:"";position:absolute;left:2px;top:.8em;width:8px;height:1.5px;background:var(--line-2)}
+ol.steps{padding-left:1.4em;display:flex;flex-direction:column;gap:10px}
+b,strong{font-weight:600}
+
+/* summary */
+.findings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;border:1px solid var(--line);border-radius:12px;background:var(--line);overflow:hidden}
+.findings > div{padding:22px 24px;background:var(--panel);display:flex;flex-direction:column;gap:6px}
+.findings dt{font-size:clamp(1.6rem,1.2rem + 1.6vw,2.2rem);font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.findings dd{color:var(--muted);font-size:.9375rem}
+.toc{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.9375rem}
+
+/* experiments */
+.exp{display:flex;flex-direction:column;gap:16px;padding-top:28px;border-top:1px solid var(--line)}
+.exp .q{color:var(--muted)}
+.verdict{display:flex;gap:10px;align-items:baseline;font-weight:600}
+.verdict svg{flex:none;width:14px;height:14px;transform:translateY(2px);fill:none;stroke:var(--ok);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+table{width:100%;border-collapse:collapse;font-size:.9375rem}
+th,td{padding:10px 16px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font-weight:600;color:var(--muted);font-size:.8125rem;white-space:nowrap}
+td.n,th.n{text-align:right;white-space:nowrap}
+figure.chart{display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0}
+figure.chart h4{font-size:1rem}
+figure.chart .sub{color:var(--muted);font-size:.875rem;margin-top:-8px}
+.plot{position:relative;min-width:0}
+.plot svg{display:block;width:100%;height:auto;overflow:visible}
+.plot text{font:400 12px var(--sans);fill:var(--muted)}
+.plot text.lab{fill:var(--text);font-weight:600}
+.tip{position:absolute;pointer-events:none;padding:8px 10px;border:1px solid var(--line-2);border-radius:8px;background:var(--bg);font-size:.8125rem;line-height:1.5;white-space:nowrap;z-index:2}
+.tip i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.8125rem;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+details{font-size:.875rem}
+summary{cursor:pointer;color:var(--muted);width:max-content}
+details .tablebox{margin-top:10px;max-height:260px;overflow:auto}
+.phases{display:flex;gap:2px;height:22px;border-radius:4px;overflow:hidden}
+.phases span{display:block;min-width:2px}
+.diagram{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px}
+.diagram svg{display:block;min-width:640px;width:100%;height:auto}
+.diagram text{font:400 12px var(--sans);fill:var(--muted)}
+.diagram text.k{fill:var(--text);font-weight:600}
+.diagram text.m{font-family:var(--mono);font-size:11.5px;fill:var(--text)}
+dl.defs{display:grid;grid-template-columns:minmax(0,11rem) minmax(0,1fr);gap:0;border-top:1px solid var(--line)}
+dl.defs dt,dl.defs dd{padding:12px 0;border-bottom:1px solid var(--line)}
+dl.defs dt{font-weight:600;padding-right:16px}
+dl.defs dd{color:var(--muted)}
+.keep{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:clamp(20px,4vw,40px)}
+.keep > div{display:flex;flex-direction:column;gap:12px;min-width:0}
+footer{color:var(--muted);font-size:.875rem;border-top:1px solid var(--line);padding-top:24px}
+@media (max-width:640px){
+  .findings,.keep{grid-template-columns:minmax(0,1fr)}
+  dl.defs{grid-template-columns:minmax(0,1fr)}
+  dl.defs dt{border-bottom:0;padding-bottom:0}
+  dl.defs dd{padding-top:4px}
+  th,td{padding:9px 12px}
+  td:first-child,th:first-child{min-width:10rem}
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+<header>
+  <p class="kicker"><a href="index.html">Cartograph</a> research note · 10 November 2026</p>
+  <h1>Dating every dependency in a codebase without re-indexing its history</h1>
+  <p class="lede">Cartograph shows when each link between two files appeared and when it went away. This note tests the method its indexer is designed around, on a real repository with 35,439 commits and on a folder of 43 repositories, and reports what held up and what did not.</p>
+  <dl class="findings">
+    <div><dt>4.6 s</dt><dd>to date every import and package link across 9,498 first-parent commits of <code>remotion</code>. Median of 9 runs; best 3.1 s.</dd></div>
+    <div><dt>330×</dt><dd>faster than indexing each commit from scratch, which would take about 25 minutes (extrapolated from 24 commits indexed that way). Three runs of the suite gave 266× to 364×.</dd></div>
+    <div><dt>24 of 24</dt><dd>sampled commits where the replayed files and links are identical to an independent from-scratch index of that commit.</dd></div>
+    <div><dt>105 ms</dt><dd>to take in 100 new commits once the history is indexed.</dd></div>
+  </dl>
+  <p>Three results changed the design. Caching by content is not where the speed comes from on a single line of history. The planned snapshot anchors are slower than a plain scan at this size. And extraction is mostly git reading objects, not parsing; how well it spreads across cores could not be settled on a busy laptop. Details are in <a href="#design">what the results change</a>.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#problem">Problem</a><a href="#model">Model</a><a href="#method">Method</a><a href="#setup">Setup</a><a href="#results">Results</a><a href="#design">Design changes</a><a href="#prior">Prior work</a><a href="#limits">Limits</a><a href="#reproduce">Reproduce</a>
+  </nav>
+</header>
+
+<section id="problem">
+  <h2>1. The problem</h2>
+  <p>A code map that can be scrubbed through time needs the dependency graph at every commit. Each link needs two dates: the commit that added it and, if it is gone, the commit that removed it. The map must also cover several repositories at once, because the links people most want to see cross a repository or service boundary.</p>
+  <p>The direct way is to check out every commit and index the tree. The cost is one parse per file per commit. On <code>remotion</code> that is 41,714,790 parses for a history in which only 103,347 distinct file versions ever existed.</p>
+  <p>The question for this note is how little work is actually needed, and whether a cheaper method gives exactly the same answer.</p>
+</section>
+
+<section id="model">
+  <h2>2. The model</h2>
+  <p>The method rests on one split. What a file says depends only on its bytes. What that means depends on the rest of the tree.</p>
+  <dl class="defs">
+    <dt>Tree <i>T<sub>t</sub></i></dt><dd>The mapping from path to git blob id after timeline step <i>t</i>. A step is one commit on a repository's first-parent chain.</dd>
+    <dt>Facts <i>F(b)</i></dt><dd>What the blob <i>b</i> says, extracted from its bytes alone: the references it makes (<code>"./db"</code>, <code>"@remotion/renderer"</code>) and what it provides (a <code>package.json</code> provides its package name). <i>F</i> is a pure function, so it is computed once per blob id.</dd>
+    <dt>Keys <i>K(T<sub>t</sub>)</i></dt><dd>Everything a reference could resolve to at step <i>t</i>: every path in the tree, and every package name provided by a <code>package.json</code> in it.</dd>
+    <dt>Reference <i>r</i></dt><dd>A pair (file, specifier) with an ordered list of candidate keys, <i>cand(r)</i>. For <code>./db</code> from <code>src/a.ts</code> the list is <code>src/db.ts</code>, <code>src/db.tsx</code>, …, <code>src/db/index.ts</code>, ….</dd>
+    <dt>Resolution</dt><dd><i>resolve(r, T<sub>t</sub>)</i> is the first key in <i>cand(r)</i> that is in <i>K(T<sub>t</sub>)</i>, or nothing.</dd>
+    <dt>Link</dt><dd>A typed pair (source, target). It is alive at <i>t</i> when at least one reference from the source resolves to the target. Its history is a set of half-open intervals [<i>added</i>, <i>removed</i>).</dd>
+    <dt>Roll-up</dt><dd>Each file belongs to a module, a service and a repository. A file link lifts to every pair of ancestors that differ, so a service-level link is the count of file links beneath it. This is a quotient of the file graph, and its intervals follow from the file intervals.</dd>
+  </dl>
+  <p><b>The property that makes a shortcut possible.</b> <i>resolve(r, T)</i> can only change when a key in <i>cand(r)</i> enters or leaves <i>K(T)</i>. So if every reference is registered under each of its candidate keys, a commit that adds or deletes a key needs to revisit exactly the references registered under that key and no others. By induction over the timeline, the replayed set of links at step <i>t</i> equals the set computed from <i>T<sub>t</sub></i> alone. The experiments check this at 24 commits against an index that shares no state with the replay.</p>
+
+  <h3>How the model maps to existing vocabularies</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>Cartograph</th><th>Closest standard term</th><th>What is borrowed</th></tr></thead>
+    <tbody>
+      <tr><td>Workspace, service, module, file</td><td>C4: software system, container, component, code. Backstage: System, Component.</td><td>The levels and the rule that a link is shown at the level you are looking at.</td></tr>
+      <tr><td>Link types: imports, calls, HTTP, events, database</td><td>Backstage relations: <code>dependsOn</code>, <code>consumesApi</code>, <code>providesApi</code>. OpenTelemetry semantic conventions for HTTP, messaging and database spans.</td><td>Names for the cross-service kinds, so a static link and a traced call can be compared later.</td></tr>
+      <tr><td>Added and removed commit on a link</td><td>PROV-O: <code>prov:wasGeneratedBy</code>, <code>prov:wasInvalidatedBy</code>, with the commit as the activity.</td><td>A standard way to say which activity created or ended a fact.</td></tr>
+      <tr><td>How a link was found, and how sure it is</td><td>CycloneDX evidence: technique and confidence.</td><td>Every inferred link carries its technique and a confidence, so an inference is not drawn as a certainty.</td></tr>
+      <tr><td>Facts per file</td><td>SCIP documents, Kythe nodes and edges.</td><td>Both describe one snapshot. They can feed <i>F(b)</i>; neither stores history.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="method">
+  <h2>3. The method</h2>
+  <ol class="steps">
+    <li><b>Walk.</b> One streaming <code>git log --first-parent --reverse --raw --no-renames</code> per repository. Each commit yields the paths it changed and their new blob ids. Dates are corrected to be strictly increasing along the chain, because committer dates are not.</li>
+    <li><b>Extract.</b> Compute <i>F(b)</i> for each blob id not seen before, in parallel. This is the only step that reads file contents.</li>
+    <li><b>Merge.</b> Order the commits of all repositories on one timeline by corrected date.</li>
+    <li><b>Replay.</b> Apply the steps in order. Keep the tree, the references, and a reverse index from key to the references waiting on it. When a file changes, diff its old and new facts. When a key appears or disappears, re-resolve only the references waiting on it. Count the references supporting each link; write an interval when the count leaves or returns to zero. A link that closes and reopens inside one commit never left.</li>
+  </ol>
+  <div class="diagram" role="img" aria-label="Timeline of five commits. A reference from a.ts to ./db waits until db.ts is added at commit 2, resolves to it until db.ts is deleted at commit 4, waits again, then resolves to db/index.ts from commit 5. Two link intervals result. The file a.ts is parsed twice, at commits 1 and 3, and never re-parsed when other files change.">
+    <svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg">
+      <g stroke="var(--line-2)" stroke-width="1"><path d="M150 44H690"/><path d="M190 38v12M310 38v12M430 38v12M550 38v12M670 38v12"/></g>
+      <g text-anchor="middle"><text class="k" x="190" y="28">c1</text><text class="k" x="310" y="28">c2</text><text class="k" x="430" y="28">c3</text><text class="k" x="550" y="28">c4</text><text class="k" x="670" y="28">c5</text></g>
+      <g text-anchor="middle"><text x="190" y="70">a.ts added</text><text x="310" y="70">db.ts added</text><text x="430" y="70">a.ts edited</text><text x="550" y="70">db.ts deleted</text><text x="670" y="70">db/index.ts added</text></g>
+      <text class="k" x="16" y="112">Parsed</text>
+      <g fill="var(--c1)"><circle cx="190" cy="108" r="5"/><circle cx="310" cy="108" r="5"/><circle cx="430" cy="108" r="5"/><circle cx="670" cy="108" r="5"/></g>
+      <g text-anchor="middle"><text x="190" y="130">a.ts</text><text x="310" y="130">db.ts</text><text x="430" y="130">a.ts</text><text x="550" y="130">nothing</text><text x="670" y="130">index.ts</text></g>
+      <text class="k" x="16" y="166">Reference</text><text x="16" y="182">a.ts → "./db"</text>
+      <g stroke-width="2" fill="none"><path d="M190 164H310" stroke="var(--line-2)"/><path d="M310 164H550" stroke="var(--c3)"/><path d="M550 164H670" stroke="var(--line-2)"/><path d="M670 164H700" stroke="var(--c3)"/></g>
+      <g text-anchor="middle"><text x="250" y="156">waiting</text><text x="430" y="156">resolves to db.ts</text><text x="610" y="156">waiting</text></g>
+      <text class="k" x="16" y="222">Links</text>
+      <g fill="var(--c2)"><rect x="310" y="208" width="240" height="14" rx="4"/><rect x="670" y="208" width="30" height="14" rx="4"/></g>
+      <text class="m" x="318" y="240">a.ts → db.ts  [c2, c4)</text><text class="m" x="700" y="240" text-anchor="end">a.ts → db/index.ts  [c5, …)</text>
+    </svg>
+  </div>
+  <p class="cap">One reference over five commits. It is re-resolved only when a key it waits on appears or disappears (c2, c4, c5). <code>a.ts</code> is parsed when its own bytes change (c1, c3) and never because another file changed.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Step</th><th>Work</th></tr></thead>
+    <tbody>
+      <tr><td>Walk</td><td>Commits plus changed paths</td></tr>
+      <tr><td>Extract</td><td>Bytes of distinct blobs, once per extractor version</td></tr>
+      <tr><td>Replay</td><td>Fact changes plus references re-resolved. Independent of tree size.</td></tr>
+      <tr><td>Index every commit (baseline)</td><td>The sum of the tree size over all commits</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="setup">
+  <h2>4. Setup</h2>
+  <p>The experiments are one Node script, <code>docs/research/bench.mjs</code>, with no dependencies. It reads repositories through git plumbing commands and writes nothing to them. It tracks two kinds of link: a relative import that resolves to a file, and a bare import that resolves to the <code>package.json</code> declaring that package name. The second kind is what makes links cross package and repository boundaries.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Corpus</th><th class="n">Repositories</th><th class="n">Commits walked</th><th class="n">Files at head</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>remotion</code></td><td class="n">1</td><td class="n">9,498</td><td class="n">9,075</td><td>Public TypeScript monorepo, 35,439 commits in total, about 100 packages, at commit <code>2b1b0c9</code>.</td></tr>
+      <tr><td><code>circle</code></td><td class="n">1</td><td class="n">166</td><td class="n">334</td><td>Small public Next.js application.</td></tr>
+      <tr><td>Workspace</td><td class="n">43</td><td class="n">14,730</td><td class="n">15,186</td><td>Every repository in one local projects folder, <code>remotion</code> included, on one merged timeline. Most of the others are private, so only counts are reported.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="cap">Files are JavaScript and TypeScript sources plus <code>package.json</code>, outside <code>node_modules</code> and build folders. Machine: Apple M4 (4 performance and 6 efficiency cores), 24 GB, git 2.52.0, Node 22.16.0. The laptop was in use during the runs, with a load average between 11 and 14, so wall-clock times vary a lot between runs. Medians and best runs are both given. Counts are exact and do not vary.</p>
+</section>
+
+<section id="results">
+  <h2>5. Results</h2>
+
+  <div class="exp" id="e1">
+    <h3>5.1 How much work is avoided</h3>
+    <p class="q">How many parses does each strategy need for the same history?</p>
+    <figure class="chart">
+      <h4>Cumulative parses over the history of remotion</h4>
+      <p class="sub">Logarithmic scale. Hover for values.</p>
+      <div class="legend"><span><i style="background:var(--c2)"></i>Index every commit</span><span><i style="background:var(--c1)"></i>Fact replay</span></div>
+      <div class="plot" id="chart-work"></div>
+      <details><summary>Data table</summary><div class="tablebox" id="table-work"></div></details>
+    </figure>
+    <div class="tablebox"><table>
+      <thead><tr><th>Strategy</th><th class="n">Parses, first-parent chain</th><th class="n">Parses, every commit</th></tr></thead>
+      <tbody>
+        <tr><td>Index every commit from scratch</td><td class="n">41,714,790</td><td class="n">not measured</td></tr>
+        <tr><td>Re-parse only changed paths</td><td class="n">105,293</td><td class="n">379,197</td></tr>
+        <tr><td>Changed paths, cached by blob id</td><td class="n">103,347</td><td class="n">145,119</td></tr>
+      </tbody>
+    </table></div>
+    <p>Indexing only what each commit changed removes 395 of every 396 parses. That is where almost all of the saving is. Of the 103,347 distinct blobs, 57,060 are source files and 46,287 are <code>package.json</code> versions, because this monorepo bumps every package on each release.</p>
+    <p><b>Caching by blob id adds only 1.8% on top of that on a single first-parent chain.</b> A file rarely returns to earlier content on one line of history. The cache matters when the same content is met more than once: indexing every commit rather than only the main line needs 2.6× fewer parses with it, because a change is seen once on its branch and again in the merge. It also makes a second run, a rebased history or a second clone cost nothing for content already seen.</p>
+  </div>
+
+  <div class="exp" id="e2">
+    <h3>5.2 End-to-end time</h3>
+    <p class="q">How long does the whole history take, and where does the time go?</p>
+    <div class="phases" role="img" aria-label="Median time per phase: walk 973 ms, extract 2,784 ms, replay 385 ms">
+      <span style="flex:973 0 0;background:var(--c1)"></span><span style="flex:2,784 0 0;background:var(--c2)"></span><span style="flex:385 0 0;background:var(--c3)"></span>
+    </div>
+    <div class="legend"><span><i style="background:var(--c1)"></i>Walk 973 ms</span><span><i style="background:var(--c2)"></i>Extract 2,784 ms</span><span><i style="background:var(--c3)"></i>Replay 385 ms</span></div>
+    <div class="tablebox"><table>
+      <thead><tr><th>Corpus</th><th class="n">Median</th><th class="n">Best</th><th class="n">Worst</th><th class="n">Runs</th></tr></thead>
+      <tbody>
+        <tr><td><code>remotion</code>, 9,498 commits</td><td class="n">4.6 s</td><td class="n">3.1 s</td><td class="n">5.6 s</td><td class="n">9</td></tr>
+        <tr><td><code>circle</code>, 166 commits</td><td class="n">61 ms</td><td class="n">56 ms</td><td class="n">83 ms</td><td class="n">5</td></tr>
+        <tr><td>Workspace, 43 repositories, 14,730 commits</td><td class="n">8.0 s</td><td class="n">6.2 s</td><td class="n">18.6 s</td><td class="n">5</td></tr>
+      </tbody>
+    </table></div>
+    <p>Extraction is 67% of the median run on <code>remotion</code>, with four worker processes. Replay, which does all the resolution and writes every interval, is 9%. Peak memory for one run was 1,001 MB, holding the whole history in memory with no index written to disk.</p>
+  </div>
+
+  <div class="exp" id="e3">
+    <h3>5.3 Against indexing every commit</h3>
+    <p class="q">How long would the direct method take, measured rather than counted?</p>
+    <figure class="chart">
+      <h4>Time to index one commit of remotion from scratch</h4>
+      <p class="sub">24 commits spread evenly through the history, each read from git, parsed and resolved with nothing carried over. Best of two tries.</p>
+      <div class="plot" id="chart-naive"></div>
+      <details><summary>Data table</summary><div class="tablebox" id="table-naive"></div></details>
+    </figure>
+    <p>The cost of one from-scratch index grows with the tree, from 22 ms early in the history to 260 ms at head. The mean over the samples is 161 ms. Across 9,498 commits that is about 1,528 seconds, or 25 minutes. Fact replay covers the same commits in 4.6 s, which averages 0.49 ms per commit.</p>
+    <p class="verdict"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7.5l3.2 3.2L12 3.5"/></svg>About 330× faster at the median, 490× on the best run.</p>
+    <p class="cap">The total for the direct method is extrapolated from the samples. It was not run in full. Two earlier runs of the whole suite the same day gave ratios of 266× and 364× at the median, so read this figure as roughly 300×.</p>
+  </div>
+
+  <div class="exp" id="e4">
+    <h3>5.4 Is the answer the same?</h3>
+    <p class="q">Does the shortcut give exactly what the direct method gives?</p>
+    <p>At each of the 24 sampled commits the from-scratch index above was compared with the replayed state at that step, by hashing the sorted list of (path, blob id) pairs and the sorted list of links.</p>
+    <ul class="plain">
+      <li><b>Files:</b> the replayed tree equals <code>git ls-tree</code> at all 24 commits. This checks the walk, including how merge commits are diffed.</li>
+      <li><b>Links:</b> the replayed links equal the from-scratch links at all 24 commits.</li>
+      <li><b>Intervals:</b> rebuilding the link set at each sampled step from the written intervals gives the same set again.</li>
+      <li><b>Workspace:</b> the final state of all 43 repositories equals a from-scratch index of each repository's head.</li>
+    </ul>
+    <p class="verdict"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7.5l3.2 3.2L12 3.5"/></svg>No difference found in any comparison, on any corpus.</p>
+    <p class="cap">The from-scratch index shares the extraction pattern and the candidate rule with the replay, so this shows the replay loses nothing. It does not show the extraction itself is right. See <a href="#limits">limits</a>.</p>
+  </div>
+
+  <div class="exp" id="e5">
+    <h3>5.5 What the reverse index buys</h3>
+    <p class="q">If references were simply re-resolved whenever a commit adds or removes a file, how much slower is replay?</p>
+    <div class="tablebox"><table>
+      <thead><tr><th>Replay variant</th><th class="n">Resolutions, remotion</th><th class="n">Time, remotion</th><th class="n">Resolutions, workspace</th></tr></thead>
+      <tbody>
+        <tr><td>Re-resolve every live reference on each structural commit</td><td class="n">37,817,975</td><td class="n">2,828 ms</td><td class="n">89,488,857</td></tr>
+        <tr><td>Reverse index</td><td class="n">60,039</td><td class="n">348 ms</td><td class="n">103,200</td></tr>
+      </tbody>
+    </table></div>
+    <p>Both variants wrote identical intervals. The reverse index does 630× fewer resolutions and replays 8× faster (best of three for each). At this size the simpler variant would still finish in seconds, so the reverse index is not what makes the method feasible here. It is what keeps replay independent of tree size, and resolution in this experiment is cheap: a few map lookups. With real module resolution each call costs far more, and the gap in time moves towards the gap in count.</p>
+  </div>
+
+  <div class="exp" id="e6">
+    <h3>5.6 Extraction and parallelism</h3>
+    <p class="q">What limits extraction, and how far does adding processes help?</p>
+    <div class="tablebox"><table>
+      <thead><tr><th>Extracting 103,347 blobs of remotion</th><th class="n">Sweep 1</th><th class="n">Sweep 2</th><th class="n">Sweep 3</th><th class="n">Sweep 4</th></tr></thead>
+      <tbody>
+        <tr><td>Tries per setting, best kept</td><td class="n">2</td><td class="n">2</td><td class="n">3</td><td class="n">9</td></tr>
+        <tr><td>1 worker, reading only, no parsing</td><td class="n">1,939 ms</td><td class="n">4,070 ms</td><td class="n">2,061 ms</td><td class="n">1,996 ms</td></tr>
+        <tr><td>1 worker</td><td class="n">3,012 ms</td><td class="n">3,568 ms</td><td class="n">2,646 ms</td><td class="n">2,544 ms</td></tr>
+        <tr><td>2 workers</td><td class="n">1,863 ms</td><td class="n">1,433 ms</td><td class="n">3,706 ms</td><td class="n">1,569 ms</td></tr>
+        <tr><td>4 workers</td><td class="n">1,252 ms</td><td class="n">1,898 ms</td><td class="n">2,292 ms</td><td class="n">2,182 ms</td></tr>
+        <tr><td>8 workers</td><td class="n">1,740 ms</td><td class="n">2,538 ms</td><td class="n">1,748 ms</td><td class="n">2,185 ms</td></tr>
+      </tbody>
+    </table></div>
+    <p class="cap">Each worker runs its own <code>git cat-file --batch</code>. The sweeps were run minutes apart on the same machine. Reading only was tried once in sweeps 1 and 2.</p>
+    <p><b>Reading the blobs out of git is most of the cost.</b> In the three sweeps where the reading-only figure is usable it is 64% to 78% of the one-worker time. The pattern match is the smaller part.</p>
+    <p><b>How far parallelism helps could not be settled on this machine.</b> The fastest setting was 4, 2, 8 and 2 workers in the four sweeps, and the best speed-up over one worker ranged from 1.5× to 2.5×. The laptop was running other work throughout, and the differences between settings are smaller than the differences between sweeps. This needs a quiet machine.</p>
+    <p>A real parser will move the balance. Parsing costs more per byte than a regular expression, so more of the time will be work that can be spread across cores.</p>
+  </div>
+
+  <div class="exp" id="e7">
+    <h3>5.7 Later runs</h3>
+    <p class="q">What does it cost to take in new commits?</p>
+    <p>The history was replayed up to 100 commits before head. Then the remaining 100 commits were walked in a new git process, their 808 unseen blobs extracted, and the steps replayed. The final state was identical to the full run.</p>
+    <div class="tablebox"><table>
+      <thead><tr><th>Update</th><th class="n">Time</th></tr></thead>
+      <tbody>
+        <tr><td>100 new commits, 808 new blobs</td><td class="n">105 ms</td></tr>
+        <tr><td>Nothing new (compare the stored tip with <code>HEAD</code>)</td><td class="n">6 ms</td></tr>
+      </tbody>
+    </table></div>
+    <p class="cap">The earlier state was held in memory. A real indexer also has to load it from disk, which is not measured here.</p>
+  </div>
+
+  <div class="exp" id="e8">
+    <h3>5.8 Jumping to a date</h3>
+    <p class="q">Does the map need stored snapshots to show the links at an arbitrary commit?</p>
+    <p>The design called for an anchor every K steps: the set of live links, so that a jump reads one anchor and applies at most K steps of changes. The alternative is to store only the intervals and scan them.</p>
+    <div class="tablebox"><table>
+      <thead><tr><th>Strategy</th><th class="n">Extra entries stored</th><th class="n">Time per query</th></tr></thead>
+      <tbody>
+        <tr><td>Scan all 36,193 intervals</td><td class="n">0</td><td class="n">0.06 ms</td></tr>
+        <tr><td>Anchor every 64 steps</td><td class="n">1,648,715</td><td class="n">0.41 ms</td></tr>
+        <tr><td>Anchor every 256 steps</td><td class="n">422,481</td><td class="n">0.42 ms</td></tr>
+        <tr><td>Anchor every 1,024 steps</td><td class="n">109,424</td><td class="n">0.42 ms</td></tr>
+        <tr><td>Anchor every 4,096 steps</td><td class="n">30,120</td><td class="n">0.55 ms</td></tr>
+      </tbody>
+    </table></div>
+    <p><b>The scan wins at every anchor spacing tried.</b> Copying an anchor into a set costs more than testing two numbers on every interval. At the scan's rate, one 16 ms frame covers about 10 million intervals. Anchors are worth building only past that size, and a sorted index on the interval bounds would likely come first.</p>
+  </div>
+
+  <div class="exp" id="e9">
+    <h3>5.9 Several repositories on one timeline</h3>
+    <p class="q">Do links that cross repositories get dates too?</p>
+    <p>All 43 repositories under one folder were walked, merged by corrected commit date into 14,730 steps and replayed together. Blob ids met in more than one repository were extracted once (395 of them).</p>
+    <ul class="plain">
+      <li>153 links crossed a repository boundary at some point, between 4 pairs of repositories. 105 are still present.</li>
+      <li>Most are a file in an application repository importing a package whose source lives in the <code>remotion</code> repository in the same folder. The most common target is the <code>remotion</code> package itself, with 114 links.</li>
+      <li>Each of these links is dated on the merged timeline, by a commit in whichever repository completed it.</li>
+    </ul>
+    <p class="cap">This demonstrates the mechanism for package links. HTTP routes, events and tables are not extracted in this experiment.</p>
+  </div>
+
+  <div class="exp" id="e10">
+    <h3>5.10 How long links live</h3>
+    <p class="q">The intervals are data in their own right. What do they say?</p>
+    <figure class="chart">
+      <h4>Share of links still present, by age</h4>
+      <p class="sub">remotion, 34,604 links over 2,254 days. Kaplan–Meier estimate; links still present at head are treated as censored.</p>
+      <div class="plot" id="chart-life"></div>
+      <details><summary>Data table</summary><div class="tablebox" id="table-life"></div></details>
+    </figure>
+    <p>9,984 of 34,604 links were removed at some point. About 4% are gone within a week of being added, which is churn inside a piece of work. After that the curve flattens: 74% are still present after one year and 67% after two. The estimated median lifetime is about 5 years.</p>
+    <p class="cap">A file moved with identical content is treated as the same file, which joined 1,589 intervals. A file moved and edited in the same commit still counts as a removal and an addition, so removals are overstated by an unknown amount. The right-hand end of the curve rests on the few links old enough to be measured there.</p>
+  </div>
+</section>
+
+<section id="design">
+  <h2>6. What the results change</h2>
+  <div class="keep">
+    <div>
+      <h3>Keep</h3>
+      <ul class="plain">
+        <li><b>Change-driven replay.</b> It is the source of the 330× and it reproduces the direct method exactly.</li>
+        <li><b>The reverse index.</b> 630× fewer resolutions, and replay cost that does not grow with the tree.</li>
+        <li><b>Facts cached by blob id.</b> Small gain on one chain, 2.6× when every commit is indexed, and free re-runs. It costs one map.</li>
+        <li><b>One merged timeline.</b> Cross-repository links came out dated with no special handling.</li>
+        <li><b>The from-scratch comparison as the main test.</b> It is cheap to run on samples and it found a real mistake during this work (see limits).</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Change</h3>
+      <ul class="plain">
+        <li><b>Drop anchors from the first version.</b> Store intervals only and scan. Revisit past a few million intervals.</li>
+        <li><b>Stop saying the speed comes from content addressing.</b> On a single chain it comes from only processing what changed. The earlier figure of 719× counted parses of source files only; the measured end-to-end gain is about 330×.</li>
+        <li><b>Make no claim about parallel extraction yet.</b> Measure it on a quiet machine, with a real parser, before choosing a pool size.</li>
+        <li><b>Treat renames as lineage before reporting lifetimes.</b> Exact-content matching is a start; edited moves need a similarity pass.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="prior">
+  <h2>7. Prior work</h2>
+  <p>Every ingredient of the method already exists. The sources below were opened and read for this note, and each row says what the source does and what it leaves out. No published description of the whole combination was found. That search covered the open web only, not the full text of the ACM or IEEE libraries, and not patents.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Work</th><th>What it does</th><th>What is different here</th></tr></thead>
+    <tbody>
+      <tr><td><a href="https://arxiv.org/abs/2211.01224" rel="noopener">Stack graphs</a><br><span class="muted">Creager and van Antwerpen, 2023</span></td><td>Analyses each file alone into a subgraph, keyed by git blob id, stored once and reused wherever that file version appears. Names are resolved by a path search at query time. The <a href="https://github.com/github/stack-graphs" rel="noopener">repository</a> was archived in September 2025.</td><td>This is the idea behind the extract step, stated earlier and better. It resolves one snapshot per query and never records when a link began or ended.</td></tr>
+      <tr><td><a href="https://sourcegraph.com/docs/code-search/code-navigation/rockskip" rel="noopener">Rockskip</a><br><span class="muted">Sourcegraph</span></td><td>Walks first-parent history oldest first, parses only added or modified files, and stores each symbol with the commits that added and deleted it. Its documentation gives about 4 hours of initial indexing per GB of <code>.git</code> and under a second for a new commit.</td><td>The closest shipped system to the walk and replay steps. It tracks symbol definitions per path. There are no references, no resolution and no links.</td></tr>
+      <tr><td><a href="https://files.ifi.uzh.ch/seal/people/alexandru/saner17-multirev.pdf" rel="noopener">LISA</a><br><span class="muted">Alexandru, Panichella, Gall, SANER 2017</span></td><td>Loads all revisions into one graph, parsing a file only in revisions where it changed. Each vertex carries the range of revisions in which it exists. On AspectJ it reports 34 ms per revision against 650 ms for its per-revision prototype.</td><td>Ranges sit on syntax-tree vertices inside a file, and the analyses are single-file metrics. There is no cross-file resolution, and a rename is a new file.</td></tr>
+      <tr><td><a href="https://chenguang-zhu.github.io/assets/pdf/Wu2021Diffbase.pdf" rel="noopener">DiffBase</a><br><span class="muted">Wu, Zhu, Li, ESEC/FSE 2021</span></td><td>Stores program facts such as call and reference together with the versions in which they hold, and queries them in Datalog.</td><td>The closest academic statement of version-annotated program facts. It was evaluated on short fragments of history and has no content-keyed cache or incremental resolution.</td></tr>
+      <tr><td><a href="https://github.com/src-d/hercules" rel="noopener">Hercules</a><br><span class="muted">source{d}</span></td><td>Replays full history through a graph of analysis tasks, with syntax trees held per blob hash, to compute line survival, ownership and files that change together.</td><td>The same pipeline shape. Its outputs are about lines and co-change, not resolved dependency links.</td></tr>
+      <tr><td>Watch-mode module resolution<br><span class="muted"><a href="https://webpack.js.org/api/loaders/" rel="noopener">webpack</a>, TypeScript</span></td><td>webpack lets a loader register a file that does not exist yet as a dependency, so the build reruns when it appears. TypeScript keeps the failed lookup locations of each resolution and invalidates on them.</td><td>This is the reverse index. Both apply it to a working tree changing in real time. Here it is applied to commits.</td></tr>
+      <tr><td>Incremental view maintenance<br><span class="muted"><a href="https://www.vldb.org/pvldb/vol16/p1601-budiu.pdf" rel="noopener">DBSP</a>, Budiu et al., VLDB 2023</span></td><td>Maintains query results under inserts and deletes, with rows carrying positive or negative weights.</td><td>Replay is a join of references with keys, maintained incrementally over a totally ordered stream. A link's reference count is the weight, and an interval opens or closes when it crosses zero. The fit is loose in one place: picking the first candidate that exists is not monotonic, since a better candidate appearing retracts a link.</td></tr>
+      <tr><td>Temporal graph storage<br><span class="muted"><a href="https://arxiv.org/abs/1207.5777" rel="noopener">DeltaGraph</a>, ICDE 2013; <a href="https://arxiv.org/abs/2304.12212" rel="noopener">AeonG</a>, VLDB 2024</span></td><td>Snapshots plus logs of changes between them. Both papers state the trade-off: wider spacing saves space and slows queries.</td><td>The anchor scheme tested in 5.8 is this, with a fixed spacing. At this size it was not needed.</td></tr>
+      <tr><td><a href="https://nesbitt.io/2026/01/01/git-pkgs-explore-your-dependency-history.html" rel="noopener">git-pkgs</a><br><span class="muted">2026</span></td><td>Indexes changes to manifests and lockfiles over full history into SQLite and answers when a package was added or removed.</td><td>The same question at the level of declared packages, not links found in source.</td></tr>
+      <tr><td><a href="https://github.com/swalla02/codegraph/pull/72" rel="noopener">codegraph, pull request 72</a><br><span class="muted">September 2026</span></td><td>An open-source tool whose stated goal is to report when a link appeared or disappeared, walking first-parent history and parsing only the blobs a range introduces.</td><td>The same goal and the same first two steps, built independently. It reports gains and losses per commit. Only the pull request text was read.</td></tr>
+      <tr><td>Glean, Kythe, SCIP</td><td>Code indexes used at scale. <a href="https://glean.software/docs/implementation/incrementality/" rel="noopener">Glean</a> keeps the latest revision fresh by stacking databases. The <a href="https://kythe.io/docs/schema/" rel="noopener">Kythe</a> and <a href="https://github.com/sourcegraph/scip" rel="noopener">SCIP</a> schemas have no revision or time dimension.</td><td>They describe one state of the code. Any of them could supply the facts for a file.</td></tr>
+    </tbody>
+  </table></div>
+  <p><b>What this note adds.</b> Resolved cross-file links with reference-counted lifetimes over a whole history, the reverse index applied to commit time, one timeline across repositories, and measurements of each part against the direct method. The contribution is the combination and the numbers. No single ingredient is new.</p>
+</section>
+
+<section id="limits">
+  <h2>8. Limits</h2>
+  <ul class="plain">
+    <li><b>Extraction is a regular expression.</b> It finds import specifiers and nothing else. It will miss computed imports and can match text inside strings or comments. A parser will be slower per byte. Every timing here is a lower bound on the real indexer's extraction time.</li>
+    <li><b>Resolution is simplified.</b> Relative paths with the usual extensions and index files, and package names from <code>package.json</code>. No <code>tsconfig</code> paths, no <code>exports</code> maps, no workspace protocol. Links that depend on those are missing.</li>
+    <li><b>One language family.</b> JavaScript and TypeScript only. Go, Python and PHP are not tested.</li>
+    <li><b>The correctness check shares code with what it checks.</b> The from-scratch index uses the same extraction pattern and candidate rule. It proves the replay equals the direct method. It cannot catch a mistake both share.</li>
+    <li><b>An earlier version of the check was weaker than it looked.</b> The first experiment compared the replayed links with links rebuilt from the replayed tree, so a wrong tree would have passed. The check now reads the tree from git independently.</li>
+    <li><b>Order across repositories rests on commit dates.</b> Dates are made strictly increasing inside each repository, but a clock that was wrong on one machine can still place a commit early or late relative to another repository. A cross-repository link could then be dated by the wrong commit.</li>
+    <li><b>It depends on how git diffs merges.</b> The walk asks for each merge to be diffed against its first parent. That option needs git 2.31 or later. On an older git the tree would drift without an error, which is the failure the file comparison in 5.4 exists to catch.</li>
+    <li><b>First-parent only.</b> Work on a side branch appears at its merge, attributed to the merge commit. The author and date of the original change are not recovered.</li>
+    <li><b>Noisy timings.</b> The machine was under load. Between-run spread on <code>remotion</code> was 3.1 s to 5.6 s. Ratios built from times carry that noise. Counts do not.</li>
+    <li><b>One large repository.</b> Only <code>remotion</code> has a long history here. Nothing is known yet about histories ten or a hundred times longer.</li>
+    <li><b>The baseline total is extrapolated</b> from 24 sampled commits.</li>
+    <li><b>Nothing is written to disk.</b> No index format, no load time and no on-disk size were measured.</li>
+  </ul>
+</section>
+
+<section id="reproduce">
+  <h2>9. Reproduce</h2>
+  <pre tabindex="0"><code>git clone https://github.com/ax3cubed/cartograph
+git clone https://github.com/remotion-dev/remotion
+cd remotion &amp;&amp; git checkout 2b1b0c9 &amp;&amp; cd ..
+
+node cartograph/docs/research/bench.mjs remotion --runs 9   # one repository
+node cartograph/docs/research/bench.mjs .                   # every repository in a folder</code></pre>
+  <p>The script needs Node 22 and git. It prints its results as JSON and stops with an error if any comparison fails. Run with no argument, it checks itself on a five-line hand-made history.</p>
+  <h3>Next experiments</h3>
+  <ul class="plain">
+    <li>Replace the pattern with a real parser and repeat 5.2 and 5.6.</li>
+    <li>Run pinned public repositories at three sizes with a quiet machine and at least ten runs, and publish the hardware with every number.</li>
+    <li>Add route, topic and table descriptors so that 5.9 covers HTTP, event and database links, and measure how many are found against a hand-labelled set.</li>
+    <li>Write the intervals to SQLite and measure load time, size and query time from disk.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>Cartograph is open source under the MIT licence. Repository: <a href="https://github.com/ax3cubed/cartograph" rel="noopener">github.com/ax3cubed/cartograph</a>. All figures on this page were produced by <code>docs/research/bench.mjs</code> on 10 November 2026.</p>
+</footer>
+
+</main>
+
+<script>
+const DATA = {"curve":[{"commits":238,"unique":986,"naive":27827},{"commits":476,"unique":2283,"naive":88865},{"commits":714,"unique":3096,"naive":206129},{"commits":952,"unique":4370,"naive":358850},{"commits":1190,"unique":6052,"naive":582864},{"commits":1428,"unique":8027,"naive":860684},{"commits":1666,"unique":9280,"naive":1171433},{"commits":1904,"unique":10798,"naive":1507794},{"commits":2142,"unique":12207,"naive":1866030},{"commits":2380,"unique":14081,"naive":2253585},{"commits":2618,"unique":15545,"naive":2656080},{"commits":2856,"unique":17700,"naive":3084327},{"commits":3094,"unique":20683,"naive":3563712},{"commits":3332,"unique":23274,"naive":4071124},{"commits":3570,"unique":25857,"naive":4598716},{"commits":3808,"unique":28754,"naive":5141212},{"commits":4046,"unique":32917,"naive":5760036},{"commits":4284,"unique":35741,"naive":6718045},{"commits":4522,"unique":40916,"naive":7697440},{"commits":4760,"unique":43928,"naive":8771732},{"commits":4998,"unique":47624,"naive":9930119},{"commits":5236,"unique":51333,"naive":11151996},{"commits":5474,"unique":57573,"naive":12419129},{"commits":5712,"unique":62412,"naive":13765926},{"commits":5950,"unique":64559,"naive":15192144},{"commits":6188,"unique":69317,"naive":16638644},{"commits":6426,"unique":72023,"naive":18115432},{"commits":6664,"unique":74738,"naive":19638969},{"commits":6902,"unique":77854,"naive":21218118},{"commits":7140,"unique":80997,"naive":22838366},{"commits":7378,"unique":83968,"naive":24513035},{"commits":7616,"unique":86564,"naive":26238073},{"commits":7854,"unique":88687,"naive":28026276},{"commits":8092,"unique":90599,"naive":29862209},{"commits":8330,"unique":93168,"naive":31744156},{"commits":8568,"unique":94963,"naive":33682201},{"commits":8806,"unique":97464,"naive":35666234},{"commits":9044,"unique":99343,"naive":37706059},{"commits":9282,"unique":101691,"naive":39785055},{"commits":9498,"unique":103347,"naive":41714790}],"naive":[{"step":396,"files":336,"edges":613,"ms":22},{"step":792,"files":610,"edges":1227,"ms":28},{"step":1187,"files":1103,"edges":2539,"ms":37},{"step":1583,"files":1329,"edges":3188,"ms":44},{"step":1979,"files":1486,"edges":3618,"ms":50},{"step":2375,"files":1667,"edges":3975,"ms":53},{"step":2770,"files":1920,"edges":4889,"ms":66},{"step":3166,"files":2108,"edges":5457,"ms":68},{"step":3562,"files":2266,"edges":5996,"ms":65},{"step":3958,"files":2363,"edges":6372,"ms":72},{"step":4353,"files":4069,"edges":9928,"ms":107},{"step":4749,"files":4653,"edges":11191,"ms":167},{"step":5145,"files":5157,"edges":12627,"ms":214},{"step":5541,"files":5618,"edges":13957,"ms":189},{"step":5936,"files":6020,"edges":15131,"ms":192},{"step":6332,"files":6235,"edges":15514,"ms":255},{"step":6728,"files":6607,"edges":16434,"ms":231},{"step":7124,"files":6857,"edges":16986,"ms":280},{"step":7519,"files":7236,"edges":17869,"ms":246},{"step":7915,"files":7659,"edges":19449,"ms":321},{"step":8311,"files":8020,"edges":20947,"ms":360},{"step":8707,"files":8354,"edges":22152,"ms":285},{"step":9102,"files":8699,"edges":23225,"ms":249},{"step":9498,"files":9075,"edges":24620,"ms":260}],"naiveTicks":[0,100,200,300,400],"life":[[0,1],[47,0.8975],[94,0.859],[141,0.8377],[188,0.7956],[235,0.7653],[282,0.7546],[329,0.7468],[376,0.7361],[423,0.7261],[470,0.7182],[516,0.7089],[563,0.6994],[610,0.6914],[657,0.686],[704,0.6758],[751,0.6716],[798,0.6627],[845,0.6439],[892,0.6308],[939,0.6217],[986,0.612],[1033,0.571],[1080,0.564],[1127,0.56],[1174,0.5564],[1221,0.5535],[1268,0.5502],[1315,0.5407],[1362,0.5365],[1409,0.5341],[1456,0.5313],[1503,0.5273],[1549,0.5247],[1596,0.5217],[1643,0.5201],[1690,0.5151],[1737,0.5132],[1784,0.5028],[1831,0.497],[1878,0.4855],[1925,0.4719],[1972,0.4551],[2019,0.4495],[2066,0.4412],[2113,0.3939],[2160,0.3939],[2207,0.3939],[2254,0.3939]]};
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 1 : 2).replace(/\.?0+$/, "") + "M" : n >= 1e4 ? Math.round(n / 1e3) + "K" : Math.round(n).toLocaleString("en-US");
+const full = (n) => (Number.isInteger(n) ? n : +n.toFixed(2)).toLocaleString("en-US");
+const el = (tag, attrs = {}, parent) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+
+function table(id, head, rows) {
+  document.getElementById(id).innerHTML = "<table><thead><tr>" + head.map((h, i) => `<th${i ? ' class="n"' : ""}>${h}</th>`).join("") + "</tr></thead><tbody>" +
+    rows.map((r) => "<tr>" + r.map((c, i) => `<td${i ? ' class="n"' : ""}>${typeof c === "number" ? full(c) : c}</td>`).join("") + "</tr>").join("") + "</tbody></table>";
+}
+
+// One line chart: shared x, one or two series, linear or log y, optional steps. Redrawn at the container's real width so text stays 12px.
+function lineChart(id, o) {
+  const host = document.getElementById(id);
+  const draw = () => {
+    const W = Math.max(280, host.clientWidth), H = Math.round(Math.min(320, Math.max(220, W * 0.5)));
+    const m = { l: 46, r: W < 480 ? 16 : 112, t: 12, b: 38 };
+    host.innerHTML = "";
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": o.label }, host);
+    const xs = o.series.flatMap((s) => s.points.map((p) => p[0])), ys = o.series.flatMap((s) => s.points.map((p) => p[1]));
+    const x0 = 0, x1 = Math.max(...xs), ty = o.log ? Math.log10 : (v) => v;
+    const y0 = o.log ? Math.floor(Math.log10(Math.max(1, Math.min(...ys)))) : 0, y1 = o.log ? Math.ceil(Math.log10(Math.max(...ys))) : o.yMax ?? Math.max(...ys) * 1.08;
+    const X = (v) => m.l + ((v - x0) / (x1 - x0)) * (W - m.l - m.r), Y = (v) => H - m.b - ((ty(v) - y0) / (y1 - y0)) * (H - m.t - m.b);
+    const yt = o.log ? Array.from({ length: y1 - y0 + 1 }, (_, i) => 10 ** (y0 + i)) : o.yTicks;
+    for (const t of yt) { el("line", { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), stroke: css("--grid"), "stroke-width": 1 }, svg); el("text", { x: m.l - 8, y: Y(t) + 4, "text-anchor": "end" }, svg).textContent = o.yFmt ? o.yFmt(t) : fmt(t); }
+    for (const t of o.xTicks.filter((t) => t <= x1)) el("text", { x: X(t), y: H - m.b + 18, "text-anchor": "middle" }, svg).textContent = o.xFmt ? o.xFmt(t) : fmt(t);
+    el("text", { x: (m.l + W - m.r) / 2, y: H - 4, "text-anchor": "middle" }, svg).textContent = o.xLabel;
+    o.series.forEach((s) => {
+      const d = s.points.map((p, i) => (i ? (o.step ? `H${X(p[0])}V${Y(p[1])}` : `L${X(p[0])} ${Y(p[1])}`) : `M${X(p[0])} ${Y(p[1])}`)).join("");
+      if (o.area) el("path", { d: d + `V${Y(o.log ? 10 ** y0 : 0)}H${X(s.points[0][0])}Z`, fill: css(s.color), opacity: 0.1 }, svg);
+      el("path", { d, fill: "none", stroke: css(s.color), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+      const last = s.points.at(-1);
+      el("circle", { cx: X(last[0]), cy: Y(last[1]), r: 4.5, fill: css(s.color), stroke: css("--panel"), "stroke-width": 2 }, svg);
+      if (W >= 480) { const t = el("text", { x: X(last[0]) + 10, y: Y(last[1]) + 4, class: "lab" }, svg); t.textContent = (o.endFmt ?? fmt)(last[1]); }
+    });
+    const hair = el("line", { y1: m.t, y2: H - m.b, stroke: css("--line-2"), "stroke-width": 1, visibility: "hidden" }, svg);
+    const dots = o.series.map((s) => el("circle", { r: 4.5, fill: css(s.color), stroke: css("--panel"), "stroke-width": 2, visibility: "hidden" }, svg));
+    const tip = Object.assign(document.createElement("div"), { className: "tip", hidden: true }); host.appendChild(tip);
+    const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+    const base = o.series[0].points;
+    const move = (ev) => {
+      const px = ev.clientX - svg.getBoundingClientRect().left;
+      let i = 0; for (let j = 1; j < base.length; j++) if (Math.abs(X(base[j][0]) - px) < Math.abs(X(base[i][0]) - px)) i = j;
+      const x = base[i][0];
+      hair.setAttribute("x1", X(x)); hair.setAttribute("x2", X(x)); hair.setAttribute("visibility", "visible");
+      tip.innerHTML = `<b>${o.tipX(x)}</b>` + o.series.map((s, k) => { const p = s.points[Math.min(i, s.points.length - 1)]; dots[k].setAttribute("cx", X(p[0])); dots[k].setAttribute("cy", Y(p[1])); dots[k].setAttribute("visibility", "visible"); return `<br><i style="background:${css(s.color)}"></i>${s.name}: ${(o.tipY ?? full)(p[1])}`; }).join("");
+      tip.hidden = false;
+      const left = X(x) + 12 + tip.offsetWidth > W ? X(x) - 12 - tip.offsetWidth : X(x) + 12;
+      tip.style.left = Math.max(0, left) + "px"; tip.style.top = m.t + "px";
+    };
+    hit.addEventListener("pointermove", move); hit.addEventListener("pointerdown", move);
+    hit.addEventListener("pointerleave", () => { tip.hidden = true; hair.setAttribute("visibility", "hidden"); dots.forEach((d) => d.setAttribute("visibility", "hidden")); });
+  };
+  draw(); new ResizeObserver(draw).observe(host);
+}
+
+lineChart("chart-work", {
+  label: "Cumulative parses over the history of remotion, on a logarithmic scale, for indexing every commit and for fact replay",
+  log: true, xLabel: "First-parent commits processed", xTicks: [0, 2000, 4000, 6000, 8000], xFmt: (v) => v.toLocaleString("en-US"),
+  tipX: (x) => "After " + x.toLocaleString("en-US") + " commits",
+  series: [{ name: "Index every commit", color: "--c2", points: DATA.curve.map((c) => [c.commits, c.naive]) }, { name: "Fact replay", color: "--c1", points: DATA.curve.map((c) => [c.commits, c.unique]) }],
+});
+table("table-work", ["Commits", "Index every commit", "Fact replay"], DATA.curve.map((c) => [c.commits, c.naive, c.unique]));
+
+lineChart("chart-naive", {
+  label: "Milliseconds to index one commit of remotion from scratch, at sampled points in the history",
+  xLabel: "Position in history (first-parent commit number)", xTicks: [0, 2000, 4000, 6000, 8000], xFmt: (v) => v.toLocaleString("en-US"), yTicks: DATA.naiveTicks, yFmt: (v) => v + " ms", area: true,
+  endFmt: (v) => Math.round(v) + " ms", tipX: (x) => "Commit " + x.toLocaleString("en-US"), tipY: (v) => full(v) + " ms",
+  series: [{ name: "From scratch", color: "--c2", points: DATA.naive.map((s) => [s.step, s.ms]) }],
+});
+table("table-naive", ["Commit number", "Files in tree", "Links", "ms"], DATA.naive.map((s) => [s.step, s.files, s.edges, s.ms]));
+
+lineChart("chart-life", {
+  label: "Share of links still present by age in days, remotion", step: true, yMax: 1, yTicks: [0, 0.25, 0.5, 0.75, 1], yFmt: (v) => Math.round(v * 100) + "%",
+  xLabel: "Days since the link was added", xTicks: [0, 365, 730, 1095, 1460, 1825, 2190], xFmt: (v) => v.toLocaleString("en-US"),
+  endFmt: (v) => Math.round(v * 100) + "%", tipX: (x) => x.toLocaleString("en-US") + " days", tipY: (v) => (v * 100).toFixed(1) + "% still present",
+  series: [{ name: "Links", color: "--c1", points: DATA.life }],
+});
+table("table-life", ["Age in days", "Still present"], DATA.life.filter((_, i) => i % 4 === 0).map((p) => [p[0], (p[1] * 100).toFixed(1) + "%"]));
+</script>
+</body>
+</html>

@@ -508,16 +508,16 @@ cartograph index acme.code-workspace</code></pre>
   <div class="wrap">
     <div class="head">
       <h2 id="research-title">The research behind the indexer</h2>
-      <p>The usual way to learn when each link appeared is to check out every commit and index the code again. On a real history that is tens of millions of parses. Cartograph's indexer uses a method the project calls content-addressed fact replay, and parses each version of a file once.</p>
+      <p>The usual way to learn when each link appeared is to check out every commit and index the code again. On a real history that is tens of millions of parses. Cartograph's indexer processes only what each commit changed, parses each version of a file once, and gets exactly the same answer.</p>
     </div>
 
     <dl class="stats">
-      <div><dt>4.4 s</dt><dd>for the whole first-parent history of a repository with 35,439 commits</dd></div>
-      <div><dt>57,060</dt><dd>file versions parsed, once each</dd></div>
-      <div><dt>41 million</dt><dd>parses for an indexer that works commit by commit</dd></div>
-      <div><dt>719×</dt><dd>less parsing</dd></div>
+      <div><dt>4.6 s</dt><dd>to date every import and package link across the 9,498 first-parent commits of a repository with 35,439 commits</dd></div>
+      <div><dt>330×</dt><dd>faster than indexing every commit from scratch, which takes about 25 minutes</dd></div>
+      <div><dt>24 of 24</dt><dd>sampled commits where the result is identical to a from-scratch index</dd></div>
+      <div><dt>105 ms</dt><dd>to take in 100 new commits</dd></div>
     </dl>
-    <p class="stats-note">Measured on a TypeScript monorepo with the research script: imports only, one thread, one run, Apple M4. The script is <a href="https://github.com/ax3cubed/cartograph/tree/main/docs/research" rel="noopener">in the repository</a>, so you can run it on your own history.</p>
+    <p class="stats-note">Measured on the public remotion repository with the research script, which finds imports by pattern matching, on a laptop under load. Median of nine runs; the speed-up ranged from 266× to 364× across three runs. The method, every number and its limits are in the <a href="research.html">research note</a>, and the script is <a href="https://github.com/ax3cubed/cartograph/tree/main/docs/research" rel="noopener">in the repository</a>.</p>
 
     <div class="stage">
       <div class="stage-head">
@@ -562,12 +562,12 @@ cartograph index acme.code-workspace</code></pre>
         <ul class="items">
           <li>A later run parses only the blobs it has not seen and replays only the new commits.</li>
           <li>Rebased or force-pushed history is handled by rewinding to the last commit both histories share.</li>
-          <li>The replayed map at any commit must equal a from-scratch index of that commit. That comparison is the indexer's main test.</li>
+          <li>The replayed map at any commit must equal a from-scratch index of that commit. That comparison is the indexer's main test, and it passed at every commit sampled.</li>
         </ul>
         <aside class="note" aria-labelledby="prior-title">
           <h4 id="prior-title">Where it comes from</h4>
-          <p>The parts are established work: content-addressed archives (Software Heritage), per-file analysis with deferred resolution (GitHub's stack graphs), oldest-first replay of added and removed hops (Sourcegraph's Rockskip), and anchors with deltas for graphs that change over time (DeltaGraph, AeonG). The combination is Cartograph's own. It is an engineering synthesis, not a peer-reviewed result.</p>
-          <p class="more"><a href="https://github.com/ax3cubed/cartograph/blob/main/docs/research/README.md" rel="noopener">Read the research note</a></p>
+          <p>The parts are established work: per-file analysis keyed by git blob id (GitHub's stack graphs), oldest-first replay that records the commits adding and deleting each symbol (Sourcegraph's Rockskip), revision ranges over whole histories (LISA), and the missing-file watch lists that webpack and TypeScript use in watch mode. The combination and the measurements are Cartograph's own. It is an engineering synthesis, not a peer-reviewed result.</p>
+          <p class="more"><a href="research.html">Read the research note</a></p>
         </aside>
       </div>
     </div>

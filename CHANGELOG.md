@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Added
+
+- `docs/research/bench.mjs`: experiments on the indexing method for one repository or a folder of repositories. It measures the full-history replay, times the baselines, and checks the result against a from-scratch index of sampled commits.
+- `site/research.html`: the research note as a page, with the model, ten measured results, prior work and limits.
+
+### Changed
+
+- `docs/research/README.md` rewritten around the new measurements. The earlier claim that the speed comes from content addressing is corrected: it comes from processing only what each commit changed.
+- The landing page's research figures now come from the new experiments.
+
+### Removed
+
+- `docs/research/spike.mjs`, replaced by `bench.mjs`.
+
 ## [0.2.0] - 2026-11-10
 
 ### Added

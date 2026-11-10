@@ -1,146 +1,105 @@
-# Content-addressed fact replay
+# Dating every dependency without re-indexing history
 
-A research note on how Cartograph's indexer finds, for every link in a codebase, the commit that added it and the commit that removed it, without re-indexing the code at every commit.
+A research note on how Cartograph's indexer finds, for every link between two files, the commit that added it and the commit that removed it, without indexing the code again at every commit.
 
-**Status.** This is a design plus one measured experiment. The experiment script is [`spike.mjs`](spike.mjs) in this folder and runs on any git repository. The production indexer is stage 1 of the [roadmap](../ROADMAP.md) and is not built yet. Nothing here has been peer reviewed.
+**Status.** A method plus measured experiments. [`bench.mjs`](bench.mjs) in this folder runs all of them on any git repository or folder of repositories. The production indexer is stage 1 of the [roadmap](../ROADMAP.md) and is not built yet. Nothing here has been peer reviewed. The full write-up, with charts, the model and the prior-work table, is [`site/research.html`](../../site/research.html).
 
-## The problem
+## Results in short
 
-Cartograph draws a link between two files (an import, a call, an HTTP request, an event, a database read) and says when that link appeared and when it went away. That needs the dependency graph at every point in history, across one repository or several.
+Measured on the public [remotion](https://github.com/remotion-dev/remotion) repository at commit `2b1b0c9` (35,439 commits, 9,498 on the first-parent chain, 9,075 tracked files at head), for import links and package links.
 
-The direct way is to check out each commit and index the tree. That costs one parse per file per commit:
+| Question | Result |
+| --- | --- |
+| Time to date every link over the whole first-parent history | 4.6 s median of 9 runs (best 3.1 s, worst 5.6 s) |
+| Time to index every commit from scratch instead | about 25 minutes, extrapolated from 24 commits indexed that way |
+| Speed-up | about 330× at the median. Three runs of the suite gave 266× to 364× |
+| Same answer as the direct method? | Yes. Files and links identical at 24 of 24 sampled commits |
+| Parses | 41,714,790 for every commit from scratch; 105,293 for changed paths only; 103,347 with a blob-id cache |
+| What the reverse index saves | 60,039 resolutions instead of 37,817,975 (630× fewer), identical intervals, replay about 8× faster |
+| 100 new commits on an indexed history | 105 ms |
+| Jump to an arbitrary commit | 0.06 ms by scanning all 36,193 intervals. Snapshot anchors were slower at every spacing tried |
+| A folder of 43 repositories on one timeline | 14,730 commits in 8.0 s median; 153 cross-repository links dated |
+| How long links live | 74% still present after one year, 67% after two; median about 5 years |
 
-```
-naive work = Σ over commits of (source files in the tree at that commit)
-```
+Three results changed the design:
 
-On the repository measured below that sum is 41,016,305 parses. Almost all of them re-read a file that did not change.
+1. **The speed comes from processing only what each commit changed, not from content addressing.** On one first-parent chain the blob-id cache saves 1.8% of parses on top of that. It saves 2.6× when every commit is indexed, and it makes re-runs free.
+2. **Snapshot anchors are not needed at this size.** A scan of the interval list is faster. They are dropped from the first version.
+3. **Extraction is mostly git reading objects** (64% to 78% of one-worker time), not parsing. How well it spreads across cores could not be settled: the best worker count was 4, 2, 8 and 2 in four sweeps on a busy laptop.
 
-## The idea
+## The method
 
 Split what the indexer knows into two kinds.
 
-- **Facts** are what a file says: it imports `"./db"`, calls `charge()`, serves `POST /invoices`. A fact depends only on the file's bytes.
-- **Edges** are what those facts mean: which file `"./db"` is. An edge depends on the rest of the tree at that commit.
+- **Facts** are what a file says: it imports `"./db"`, or its `package.json` declares the name `@remotion/renderer`. A fact depends only on the file's bytes, so it is extracted once per git blob id.
+- **Links** are what those facts mean: which file `"./db"` is. A link depends on the rest of the tree at that commit.
 
-Git already names a file's bytes with a blob id. So facts are extracted once per blob id and cached for good, and only resolution is redone as history moves, and only for the references a commit can affect.
+Then:
 
-## The algorithm
+1. **Walk.** One streaming `git log --first-parent --diff-merges=first-parent --reverse --raw --no-abbrev --no-renames` per repository. Each commit yields the paths it changed and their new blob ids. Dates are made strictly increasing along the chain.
+2. **Extract.** Facts for each blob id not seen before, in parallel. The only step that reads file contents.
+3. **Merge.** Commits of all repositories on one timeline, ordered by corrected date.
+4. **Replay.** Apply the steps in order, holding the tree, the references and a reverse index from key to the references waiting on it. A reference has an ordered list of candidate keys (`src/db.ts`, `src/db.tsx`, …, `src/db/index.ts`, or a package name) and resolves to the first one that exists. When a key appears or disappears, only the references waiting on it are re-resolved. Each link counts its supporting references, and an interval `[added, removed)` is written when the count leaves or returns to zero. A link that closes and reopens inside one commit never left.
 
-1. **Walk.** One streaming process per repository:
-   `git log --first-parent --reverse --raw --no-abbrev --no-renames`.
-   Each commit yields `(path, old blob id, new blob id)` for what it changed. Each commit gets an ordinal on its first-parent chain and a corrected date, `max(own date, parent's corrected date + 1)`, because committer dates are not monotonic.
+Why step 4 is exact: a reference's resolution can only change when one of its candidate keys enters or leaves the tree, and the reverse index lists exactly the references registered under each key. By induction, the replayed links at any step equal the links computed from that step's tree alone. The experiments check this against an index that shares no state with the replay.
 
-2. **Extract.** Parse each blob id that is not in the fact cache, once, in parallel. Store `facts(blob id, extractor version, language)`: definitions and exports, unresolved references, and link descriptors (route served, URL called, topic published or consumed, table read or written). This is the only step that reads file contents.
-
-3. **Merge timelines.** K-way merge the repositories' commit lists on `(corrected date, repository, ordinal)` into one workspace ordinal `t`. Intervals are keyed by `t`. The commit SHA is an attribute.
-
-4. **Replay.** Walk `t` in order holding three structures: the tree (path → blob id), a definition index (candidate key → entity), and a reverse index (candidate key → references waiting on it).
-   - For each changed path, diff its old and new fact sets.
-   - A new reference computes its candidate keys. For `"./db"` from `src/a.ts` those are `src/db.ts`, `src/db.tsx`, `src/db/index.ts` and so on. It registers under each key and resolves against the tree.
-   - A path that appears or disappears looks up only the references waiting on that key and re-resolves those.
-   - An edge opens when its first supporting reference resolves and closes when its last one goes, writing the interval `[added_t, removed_t)`.
-
-5. **Resolver inputs are versioned too.** `tsconfig.json` paths, `package.json` name and exports, `go.mod`, `composer.json` autoload and `pyproject.toml` are files in the tree. When one changes, the references in its directory scope are re-resolved from cached facts. Nothing is parsed again.
-
-6. **Lineage.** The walk uses `--no-renames` so facts never depend on git's rename heuristic, which is quadratic and gives up silently past `diff.renameLimit`. Inside one commit, deleted and added paths are paired by identical blob id first, then by bounded content similarity within the same service. A pair keeps its entity id.
-
-7. **Cross-service pass.** Provider descriptors (routes, topics, tables) feed per-service indexes. Consumer descriptors wait on them through the same reverse index. A cross-service edge is attributed to whichever commit, in either repository, completed the match or broke it.
-
-8. **Roll up and anchor.** Each edge is lifted to every ancestor pair below the lowest common ancestor (file → module → service) as count deltas, so a service-level view never reads file rows. Every K timeline steps an anchor records the set of active edges, so a jump to any date costs one anchor read plus at most K deltas.
-
-### Cost
-
-| Step | Work | Parallel |
-| --- | --- | --- |
-| Walk | O(commits + change events) | Per repository |
-| Extract | O(bytes of unique blobs), once per extractor version | Per blob |
-| Replay | O(fact deltas + references re-resolved), independent of tree size | Sequential |
-| Naive baseline | O(Σ tree size at each commit) parses | |
-
-### Later runs
-
-- **New commits.** Store the indexed tip per repository. Walk `tip..HEAD`, extract new blobs, replay. If a new commit's corrected date falls before the workspace's indexed tip, rewind to the anchor at or before it and replay forward from cached facts.
-- **Rewritten history.** If the stored tip is no longer on the first-parent chain, find the last commit common to the old and new chains, truncate intervals after it and replay.
-- **Extractor upgrade.** A new extractor version invalidates the facts for that language only.
-
-### Correctness check
-
-The replayed state at any commit must equal a from-scratch index of that commit's tree. This differential test is the indexer's main oracle, and the experiment below already asserts it at `HEAD`.
-
-## Measurement
-
-`spike.mjs` implements steps 1, 2 and 4 for import references, without resolution. It was run read-only on a private TypeScript monorepo.
-
-| | |
+| Step | Work |
 | --- | --- |
-| Commits in the repository | 35,439 |
-| Commits on the first-parent chain | 9,498 |
-| Source files at `HEAD` | 8,944 |
-| Source change events | 61,434 |
-| Distinct blobs parsed | 57,060 |
-| Parses for a commit-by-commit indexer | 41,016,305 |
-| Reduction | 719× |
+| Walk | Commits plus changed paths |
+| Extract | Bytes of distinct blobs, once per extractor version |
+| Replay | Fact changes plus references re-resolved. Independent of tree size |
+| Index every commit (baseline) | The sum of the tree size over all commits |
 
-| Phase | Time | Rate |
-| --- | --- | --- |
-| Walk | 1,304 ms | 7,281 commits/s |
-| Extract (632 MB of source) | 2,978 ms | 19,162 blobs/s, 212 MB/s |
-| Replay (46,566 reference intervals) | 122 ms | about 503,000 events/s |
-| **Total** | **4.4 s** | |
-| Peak memory | 587 MB | |
-
-Machine: Apple M4, 10 cores, git 2.52, Node 22, single thread, warm disk cache, one run.
-
-### What this shows and what it does not
-
-It shows that the walk and the blob-keyed cache hold up on a real history, and that replay is a small part of the total.
-
-It does not show the final indexer's speed:
-
-- Extraction was a regular expression, not a syntax tree. A real parser is slower per byte.
-- There was no resolution, no lineage, no cross-service pass and no index written to disk.
-- It is one repository, one run and one machine. No variance is reported.
-- The naive baseline is counted, not timed.
-
-### Reproduce it
+## Run it
 
 ```sh
-node docs/research/spike.mjs /path/to/a/git/repository
+node docs/research/bench.mjs                                # self-check on a hand-made history
+node docs/research/bench.mjs /path/to/repo --runs 9          # one repository
+node docs/research/bench.mjs /path/to/folder                 # every repository under a folder, one timeline
+node docs/research/bench.mjs /path/to/repo --quick           # timings and checks only, no baselines
 ```
 
-It needs Node 22 and git, uses only git plumbing commands and writes nothing. It prints the counts and timings as JSON and fails if the replayed end state differs from a from-scratch extraction of `HEAD`. If you run it, an issue with your numbers and hardware is welcome.
+It needs Node 22 and git 2.31 or later, has no dependencies, uses only git plumbing commands and writes nothing to the repository. It prints JSON (or writes it with `--json file`) and stops with an error if any comparison fails. If you run it, an issue with your numbers and hardware is welcome.
 
-## Prior work and what is new
+What it checks on every run:
 
-Each ingredient exists already:
+- the replayed tree equals `git ls-tree` at each sampled commit and at head;
+- the replayed links equal a from-scratch index of each sampled commit, read straight from git;
+- the written intervals reproduce the link set at each sampled step;
+- the replay without a reverse index writes identical intervals;
+- an incremental update of the last 100 commits ends in the same state as the full run;
+- anchor queries agree with a scan.
 
-- Content-addressed archives and deduplication by blob: [Software Heritage](https://arxiv.org/pdf/2011.07824).
-- Per-file analysis with cross-file resolution deferred: GitHub's [stack graphs](https://github.blog/open-source/introducing-stack-graphs/) (the project is now [archived](https://github.com/github/stack-graphs)).
-- Added and removed commit hops replayed oldest first: Sourcegraph's [Rockskip](https://sourcegraph.com/docs/code-navigation/rockskip). Rockskip re-parses changed paths and tracks symbols only.
-- Anchors plus deltas for graphs that change over time: [DeltaGraph](https://arxiv.org/abs/1207.5777) and [AeonG](https://arxiv.org/abs/2304.12212).
-- Corrected commit dates: git's [commit-graph](https://git-scm.com/docs/commit-graph) format.
+## Limits
 
-What is specific to Cartograph is the combination: facts keyed by blob id, a reverse index that re-resolves only the references a commit can affect, and one merged timeline across repositories so that cross-service links get a first and last commit too. It is an engineering synthesis, not a published result.
+- Extraction is a regular expression that finds import specifiers. It misses computed imports and can match text in strings or comments. A real parser will be slower per byte.
+- Resolution is simplified: relative paths with the usual extensions and index files, and package names from `package.json`. No `tsconfig` paths, no `exports` maps.
+- JavaScript and TypeScript only.
+- The from-scratch index shares the extraction pattern and the candidate rule with the replay. It shows the replay loses nothing. It cannot catch a mistake both share.
+- First-parent only. Work on a side branch appears at its merge.
+- Order across repositories rests on commit dates, which can be wrong.
+- Timings were taken on a laptop under load (load average 11 to 14). Counts are exact; times are noisy.
+- One repository with a long history. The baseline total is extrapolated from 24 samples. Nothing is written to disk.
 
-## Open questions
+## Prior work
 
-- Parser throughput on real corpora. Published figures are sparse: [oxc](https://github.com/oxc-project/bench-javascript-parser-written-in-rust) reports its own benchmark, and no official tree-sitter benchmark was found.
-- Whether `git log --raw` or `git diff-tree --stdin` is the faster walk. No published comparison was found.
-- Precision and recall of static cross-service detection. No numbers were found for TypeScript, Go, Python or PHP.
-- How deep constant propagation has to go to recover URLs and topic names in practice.
-- Index size on very large histories.
+Every ingredient exists already. No published description of the whole combination was found in a web search (ACM and IEEE full text and patents were not searched).
 
-## Planned evaluation
+- **[Stack graphs](https://arxiv.org/abs/2211.01224)** (Creager and van Antwerpen, 2023): per-file analysis keyed by git blob id, stored once and reused. Resolves one snapshot per query; no lifetimes.
+- **[Rockskip](https://sourcegraph.com/docs/code-search/code-navigation/rockskip)** (Sourcegraph): first-parent replay, parses only changed files, stores symbols with the commits that added and deleted them. Symbols per path only; no references or links.
+- **[LISA](https://files.ifi.uzh.ch/seal/people/alexandru/saner17-multirev.pdf)** (Alexandru, Panichella, Gall, SANER 2017): all revisions in one graph with revision ranges on syntax-tree vertices. Single-file analyses; no cross-file resolution.
+- **[DiffBase](https://chenguang-zhu.github.io/assets/pdf/Wu2021Diffbase.pdf)** (Wu, Zhu, Li, ESEC/FSE 2021): program facts annotated with the versions in which they hold. Evaluated on short history fragments.
+- **[Hercules](https://github.com/src-d/hercules)**: the same pipeline shape, for line survival and co-change.
+- **Watch-mode module resolution** ([webpack](https://webpack.js.org/api/loaders/) missing dependencies, TypeScript failed lookup locations): the reverse index, applied to a working tree instead of commits.
+- **Incremental view maintenance** ([DBSP](https://www.vldb.org/pvldb/vol16/p1601-budiu.pdf)): replay is a join maintained under inserts and deletes, with the reference count as the weight. First-match resolution is not monotonic, so the fit is loose there.
+- **Temporal graph storage** ([DeltaGraph](https://arxiv.org/abs/1207.5777), [AeonG](https://arxiv.org/abs/2304.12212)): snapshots plus deltas, which is the anchor scheme tested and dropped here.
+- **[git-pkgs](https://nesbitt.io/2026/01/01/git-pkgs-explore-your-dependency-history.html)** and **[codegraph PR 72](https://github.com/swalla02/codegraph/pull/72)**: the same question, at manifest level and as per-commit gains and losses.
 
-Cold and incremental runs on public repositories pinned to commit SHAs in three size tiers (django and laravel/framework, kubernetes and vscode, linux and chromium), timed with [hyperfine](https://github.com/sharkdp/hyperfine) over at least ten runs, with hardware, OS and git version reported alongside every number. Starting targets, to be replaced by measured baselines:
+The contribution is the combination and the measurements: resolved cross-file links with reference-counted lifetimes over a whole history, the reverse index applied to commit time, one timeline across repositories, and each part checked against the direct method.
 
-| Measure | Target |
-| --- | --- |
-| History walk | ≥ 5,000 commits/s |
-| Replay with resolution | ≥ 200,000 events/s |
-| Cold index, up to 50,000 commits | ≤ 2 min |
-| Update with up to 100 new commits | ≤ 1 s |
-| Peak memory, small and medium tiers | ≤ 1.5 GB |
+## Next
 
-These are targets, not results.
+- Replace the pattern with a real parser and repeat the timing and parallelism experiments.
+- Run pinned public repositories at three sizes on a quiet machine, with at least ten runs.
+- Add route, topic and table descriptors so cross-repository links cover HTTP, events and databases, and measure how many are found against a hand-labelled set.
+- Write the intervals to SQLite and measure load time, size and query time from disk.
