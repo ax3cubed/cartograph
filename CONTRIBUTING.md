@@ -32,7 +32,7 @@ pnpm build
 | Command | What it checks |
 | --- | --- |
 | `pnpm exec tsc --noEmit` | Types across the project |
-| `pnpm check` | Runs `lib/workspace.check.ts`: assertions over the demo data and the Ask engine |
+| `pnpm check` | Runs `lib/workspace.check.ts`: assertions over the demo data, the Ask engine and the AI helpers |
 | `pnpm build` | The production build succeeds |
 
 If you change behaviour in `lib/`, add or update an assertion in `lib/workspace.check.ts`.

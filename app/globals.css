@@ -477,6 +477,45 @@ h3 em { font-style: normal; color: var(--accent); }
 .ask-bar input { flex: 1; min-width: 0; background: none; border: 0; outline: none; padding: 8px 0; }
 .ask-bar input::placeholder { color: var(--faint); }
 .send { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; flex: none; }
+/* model picker in the composer: retint the component's neutral greys to the navy slabs */
+.ask-bar model-picker {
+  flex: none; font-family: var(--font-ui), system-ui, sans-serif; font-size: 13px;
+  --panel: #1f2533; --sunken: var(--slab); --well: var(--slab-hi); --dot: #58617a;
+  --txt-dim: var(--muted); --txt-hdr: var(--muted); --txt-label: #cdd2de;
+  --mp-panel-right: -50px; /* line the panel up with the bar's right edge, past the send button */
+}
+.model-setup {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; height: 36px; padding: 0 12px;
+  border-radius: 999px; font-size: 12.5px; color: var(--muted); background: var(--slab);
+}
+.model-setup:hover { color: var(--text); background: var(--slab-hi); }
+.answer-by { margin: -6px 0 10px; font-size: 11.5px; color: var(--faint); }
+
+.settings {
+  width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 0; border-radius: 16px;
+  background: var(--panel); color: var(--text); box-shadow: 0 30px 70px rgb(0 0 0 / 0.6), inset 0 0 0 1px var(--line);
+}
+.settings::backdrop { background: rgb(8 10 16 / 0.6); }
+.settings form { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px 20px; }
+.settings header { display: flex; justify-content: space-between; align-items: center; }
+.settings h2 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+.settings label { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.settings input, .settings select {
+  width: 100%; min-width: 0; padding: 9px 12px; border-radius: 10px; border: 0; outline: none;
+  background: var(--slab); box-shadow: inset 0 0 0 1px var(--line);
+}
+.settings input:focus-visible, .settings select:focus-visible { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.settings-note { margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--faint); max-width: 62ch; }
+.settings-status { margin: 4px 0 0; min-height: 18px; font-size: 12px; color: var(--muted); }
+.settings-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.settings-row input { flex: 1 1 200px; }
+.settings-models { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-models li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border-radius: 999px; background: var(--slab); box-shadow: inset 0 0 0 1px var(--line); }
+.settings footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.btn { padding: 8px 14px; border-radius: 10px; font-size: 13px; background: var(--slab); box-shadow: inset 0 0 0 1px var(--line); }
+.btn:hover:not(:disabled) { background: var(--slab-hi); }
+.btn.primary { background: var(--accent); color: #fff; box-shadow: none; }
+
 .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .chips button {
   padding: 6px 12px; border-radius: 999px; font-size: 12px; color: #cdd2de;

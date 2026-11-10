@@ -24,3 +24,12 @@ for (const q of ["What breaks if I change schema.ts?", "How does checkout reach 
 }
 assert.ok(ask("What breaks if I change schema.ts?", now).nodes.length > 3);
 
+// ai layer
+import { buildMessages, linkify, sseDeltas } from "./ai.ts";
+const sse = sseDeltas('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\ndata: {"choices":[{"delta":{"content":"lo"}}]}\n: keep-alive\ndata: [DONE]\ndata: {"choi');
+assert.deepEqual(sse, { text: "Hello", rest: 'data: {"choi' }, "sse deltas joined, partial frame kept for the next chunk");
+assert.deepEqual(linkify("checkout.ts was linked in a1f3c09."), [{ node: "gateway/routes/checkout.ts" }, " was linked in a1f3c09."].map((p) => p), "known names become evidence");
+const msgs = buildMessages(ask("What breaks if I change schema.ts?", now), now, false);
+assert.ok(msgs[1].content.includes("schema.ts") && msgs[1].content.includes("<map>"), "prompt carries the evidence");
+assert.ok(buildMessages(ask("hello", now), now, true)[1].content.length > msgs[1].content.length, "ultra sends the whole map");
+console.log("ai ok");

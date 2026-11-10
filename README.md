@@ -33,9 +33,25 @@ v0.1.0 includes:
 - **Navigation.** Workspace tree, search, pins, a link-type filter and a minimum "used by" filter.
 - **Ask the map.** A deterministic graph engine answers four kinds of question: the impact of a change, the path between two things, what changed since a date, and what something does. Each answer cites the files and commits it used as clickable evidence. No language model is involved.
 
-Bring-your-own-model answers are in review for v0.2.0.
+## Bring your own model
 
-<!-- v0.2: AI section goes here -->
+"Ask the map" can hand its evidence to a language model of your choice to word the answer. The graph engine still does the finding, so the model only sees what the map found.
+
+![The model picker open in the composer](site/assets/screens/model-picker.png)
+
+- **Any provider.** Anything with an OpenAI-compatible endpoint works, hosted or on your machine: Ollama, LM Studio, OpenRouter, OpenAI, Google Gemini, Anthropic's compatibility endpoint.
+- **Set it up in the UI.** Click "Choose a model" in the composer, pick a provider or paste a base URL, add a key if the provider needs one, and add up to six models.
+- **Pick per question.** The picker in the composer chooses the model (rows) and the reasoning effort (columns). Models without a reasoning setting ignore it. ULTRA sends the whole map as context instead of only the evidence for the question.
+- **Off by default.** With no model set up, answers come from the map and nothing leaves your browser.
+
+Server settings:
+
+| Variable | Effect |
+| --- | --- |
+| `CARTOGRAPH_AI_BASE_URL`, `CARTOGRAPH_AI_API_KEY` | Use this provider for everyone. It always wins over the browser's settings. |
+| `CARTOGRAPH_ALLOW_CLIENT_PROVIDER=1` | Accept a provider base URL from the browser outside `next dev`. For single-user local installs only, because it lets the server call a URL the user supplies. |
+
+Limits today: one provider at a time, the API key is kept in the browser's local storage, and the model words answers but does not call graph tools itself. See [SECURITY.md](SECURITY.md) before hosting it for other people.
 
 ## Screenshots
 
