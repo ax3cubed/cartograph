@@ -81,7 +81,7 @@ export default function Atlas() {
     <div className="app">
       <header className="top">
         <div className="brand">
-          <svg viewBox="0 0 32 32" aria-hidden><circle cx="16" cy="16" r="14" /><circle cx="16" cy="16" r="4.5" /><circle cx="25" cy="10" r="2.6" /><circle cx="8" cy="22" r="2.6" /><path d="M16 16 25 10M16 16 8 22" /></svg>
+          <svg viewBox="0 0 48 48" aria-hidden><path className="ring" d="M35.31 12.69A16 16 0 1 0 35.31 35.31" /><path className="spoke" d="M24 24 35.31 12.69" /><circle cx="24" cy="24" r="5.2" /><circle cx="35.31" cy="12.69" r="4.4" /></svg>
           <span>cartograph</span>
         </div>
         <div className="nav-field">
