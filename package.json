@@ -1,6 +1,6 @@
 {
   "name": "cartograph",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A codebase map: what each part does, how the parts link, and how those links changed over git history.",
   "license": "MIT",
   "private": true,

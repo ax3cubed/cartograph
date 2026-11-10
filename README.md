@@ -11,7 +11,7 @@
 </p>
 
 > [!NOTE]
-> **Status: early prototype.** v0.1.0 is the interactive map running on a bundled demo workspace called `northwind`. There is no indexer yet, so Cartograph cannot load your own repositories. The [roadmap](docs/ROADMAP.md) describes how that gets built.
+> **Status: early prototype.** The current release, v0.2.0, is the interactive map running on a bundled demo workspace called `northwind`. There is no indexer yet, so Cartograph cannot load your own repositories. The [roadmap](docs/ROADMAP.md) describes how that gets built.
 
 ![The Network layout showing six services and the links between them](site/assets/screens/network.png)
 
@@ -24,7 +24,7 @@ It is built for two readers:
 - A developer new to a codebase, asking what a thing is, what it touches and why it changed.
 - A lead or architect reviewing coupling across services and how dependencies drift over time.
 
-v0.1.0 includes:
+The current release includes:
 
 - **Three layouts.** Network, Adaptive and Ontology, with a morph between them. In Adaptive, links act like springs and you can drag nodes to rearrange the map.
 - **Focus view.** Open a node to see "Depends on" on one side and "Used by" on the other.
