@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Added
+
+- Research note on the indexing method, content-addressed fact replay, with the experiment script that produced its numbers (`docs/research`).
+
+### Changed
+
+- The landing page (`site/`) now describes the finished product and has a research section in place of the roadmap. The README and `docs/ROADMAP.md` remain the record of what is built.
+
 ## [0.1.0] - 2026-11-10
 
 First release. An interactive map running on a bundled demo workspace called `northwind`, hand-authored in `lib/workspace.ts`. There is no indexer yet, so real repositories cannot be loaded.
