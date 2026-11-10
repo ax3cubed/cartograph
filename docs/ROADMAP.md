@@ -34,7 +34,7 @@ TypeScript and JavaScript imports come first.
 
 **Done when:** one run of the CLI over a real TypeScript or JavaScript workspace produces a single SQLite index file in which every import link carries the commit that opened it and, where it was later removed, the commit that closed it.
 
-An early throwaway experiment tried this design on a real TypeScript repository with 35,000 commits. It processed the first-parent history (9,498 commits, 57,060 distinct file versions) in 4.4 seconds, with 719× fewer parses than re-indexing every commit. The experiment used a simplified regex extractor, so it shows that the approach scales. It says nothing about the final speed.
+An early throwaway experiment tried this design on a real TypeScript repository with 35,000 commits. It processed the first-parent history (9,498 commits, 57,060 distinct file versions) in 4.4 seconds, with 719× fewer parses than re-indexing every commit. The experiment used a simplified regex extractor, so it shows that the approach scales. It says nothing about the final speed. The method, the numbers and the script are in [docs/research](research/README.md).
 
 ## Stage 2: Breadth
 
