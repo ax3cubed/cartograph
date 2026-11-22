@@ -183,6 +183,9 @@ jobs:
       # One production build is enough; macOS and Windows already type-check and run the checks above.
       - if: runner.os == 'Linux'
         run: pnpm build
+      # FE-01: no app/api, one HTML file per route, out/ within 6 MB raw and 1.8 MB brotli.
+      - if: runner.os == 'Linux'
+        run: pnpm check:export
 
   supply-chain:
     name: Licences, advisories, SBOM (HD-12)

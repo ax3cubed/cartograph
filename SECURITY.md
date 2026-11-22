@@ -28,16 +28,10 @@ Cartograph is a small open-source project, so there is no guaranteed response ti
 
 ## Security-relevant configuration
 
-From v0.2, Cartograph has one setting with a security consequence: `CARTOGRAPH_ALLOW_CLIENT_PROVIDER`.
+The app is a static export (`out/`). It has no server routes, makes no model calls and fetches nothing outside its own origin. The Cartograph binary serves it on `127.0.0.1` only.
 
-That release lets the app send a question to a language model through a server route. The provider for that route is chosen as follows:
+`pnpm build` writes `out/csp.json`: a Content-Security-Policy template and, for each page, the SHA-256 hashes of its inline scripts. The server fills the template per page, so scripts run without `'unsafe-inline'` and `connect-src 'self'` keeps the browser from calling any other host.
 
-- If `CARTOGRAPH_AI_BASE_URL` is set on the server (with `CARTOGRAPH_AI_API_KEY` if the provider needs a key), the server always uses it. A provider supplied from the browser is ignored.
-- If it is not set, a production server refuses any provider base URL supplied from the browser.
-- Setting `CARTOGRAPH_ALLOW_CLIENT_PROVIDER=1` lifts that refusal. The server will then fetch whatever base URL the browser supplies.
+v0.2.0 had a server route, `POST /api/ai`, and a setting `CARTOGRAPH_ALLOW_CLIENT_PROVIDER` that let it fetch a base URL supplied by the browser (a server-side request forgery risk). Both are removed. Model calls return in the binary, which will hold the provider configuration itself.
 
-That last option is intended for single-user local installs only. A server that fetches a user-supplied URL can be pointed at addresses on its own network, which is a server-side request forgery risk. The switch is an opt-in and does not filter addresses. Leave it unset on any deployment that other people can reach, and configure the provider with `CARTOGRAPH_AI_BASE_URL` there.
-
-`next dev` accepts a provider from the browser without the switch. Do not expose a development server to a network you do not trust.
-
-v0.1.0 has no such setting. It makes no model calls and has no server route that fetches external URLs.
+Do not expose `pnpm dev` to a network you do not trust.

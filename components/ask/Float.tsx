@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { usePath } from "../shell/usePath";
 import { Minus, X } from "lucide-react";
 import { AiMark } from "@/components/brand/AiMark";
 import Ask, { type AskProps } from "../Ask";
@@ -127,7 +128,7 @@ export default function AskFloat(props: AskProps & { onMap?: boolean }) {
 
 /** The floating chat on every route but the map (which mounts its own, wired to the map) and the chat's page. */
 export function AskFloatHost() {
-  const raw = usePathname();
+  const raw = usePath();
   const path = raw.length > 1 ? raw.replace(/\/$/, "") : raw;
   const router = useRouter();
   if (path === "/" || path === "/ask" || path.startsWith("/welcome")) return null;

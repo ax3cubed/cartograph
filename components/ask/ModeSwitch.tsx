@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { usePath } from "../shell/usePath";
 import { Check, ChevronDown, Maximize2, PanelRight, PictureInPicture2 } from "lucide-react";
 import { ASK_EVENT } from "../shell/AppShell";
 import { askStore, focusComposer } from "./store";
@@ -20,7 +21,7 @@ export const SIDEBAR_CLOSE_EVENT = "cartograph:sidebar-close";
 /** Moves the chat. The thread stays the same; only where it shows changes. */
 export function useMoveAsk() {
   const router = useRouter();
-  const raw = usePathname();
+  const raw = usePath();
   const path = raw.length > 1 ? raw.replace(/\/$/, "") : raw;
   return (to: AskPlace) => {
     const fromSidebar = path === "/" && askStore.get().mode === "docked";

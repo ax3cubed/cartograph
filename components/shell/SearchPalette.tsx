@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { usePath } from "./usePath";
 import { ArrowRight, Clock, Search } from "lucide-react";
 import { search } from "@/lib/source";
 import type { SearchResult } from "@/lib/model";
@@ -29,7 +30,7 @@ const Hit = ({ text, q }: { text: string; q: string }) => {
 export default function SearchPalette({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick?: (id: string, kind: string) => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const router = useRouter();
-  const path = usePathname();
+  const path = usePath();
   const [q, setQ] = useState("");
   const [scope, setScope] = useState<"all" | Kind>("all");
   const [cur, setCur] = useState(0);

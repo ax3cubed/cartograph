@@ -44,12 +44,7 @@ The current release includes:
 - **Pick per question.** The picker in the composer chooses the model (rows) and the reasoning effort (columns). Models without a reasoning setting ignore it. ULTRA sends the whole map as context instead of only the evidence for the question.
 - **Off by default.** With no model set up, answers come from the map and nothing leaves your browser.
 
-Server settings:
-
-| Variable | Effect |
-| --- | --- |
-| `CARTOGRAPH_AI_BASE_URL`, `CARTOGRAPH_AI_API_KEY` | Use this provider for everyone. It always wins over the browser's settings. |
-| `CARTOGRAPH_ALLOW_CLIENT_PROVIDER=1` | Accept a provider base URL from the browser outside `next dev`. For single-user local installs only, because it lets the server call a URL the user supplies. |
+The app is now a static export with no server route, so model calls are switched off until the Cartograph binary serves them (plan item FE-20). Until then answers come from the map alone.
 
 Limits today: one provider at a time, the API key is kept in the browser's local storage, and the model words answers but does not call graph tools itself. See [SECURITY.md](SECURITY.md) before hosting it for other people.
 
@@ -88,8 +83,8 @@ Other commands:
 
 | Command | What it does |
 | --- | --- |
-| `pnpm build` | Production build |
-| `pnpm start` | Serve the production build |
+| `pnpm build` | Static export to `out/`, plus `out/csp.json` (the inline script hashes for the CSP) |
+| `pnpm check:export` | After a build: one HTML file per route, no `app/api`, and `out/` within 6 MB raw and 1.8 MB brotli |
 | `pnpm check` | Run the assertions in `lib/workspace.check.ts` over the demo data and the Ask engine |
 | `pnpm exec tsc --noEmit` | Type-check |
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePath } from "./usePath";
 import { ChevronLeft } from "lucide-react";
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS } from "@/lib/settings";
 import { getCurrentWorkspace } from "@/lib/source";
@@ -19,7 +19,7 @@ const NAV: NavItem[] = (() => {
 })();
 
 export default function SettingsNav() {
-  const path = usePathname().replace(/\/$/, "");
+  const path = usePath().replace(/\/$/, "");
   const ws = getCurrentWorkspace();
   return (
     <nav className="sh-snav" aria-label="Settings">
