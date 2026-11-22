@@ -4,6 +4,9 @@
 
 use crate::{BlobFacts, Extractor, Fact};
 
+/// Values keep the file's key order (serde_json's `preserve_order`, enabled for this crate): the
+/// order of conditions in `exports` and `imports` decides which one matches, so it is part of what
+/// a resolution reads.
 pub struct ManifestJs;
 
 const PACKAGE: &str = "manifest-js/package";
@@ -75,7 +78,7 @@ impl Extractor for ManifestJs {
             .filter_map(|f| {
                 Some(Fact::Manifest {
                     field: (*f).to_owned(),
-                    value: canonical(obj.get(*f)?),
+                    value: obj.get(*f)?.to_string(),
                 })
             })
             .collect();
@@ -128,7 +131,7 @@ pub fn resolution_json(facts: &[Fact], package: bool) -> String {
                     continue;
                 };
                 o.retain(|k, _| RESOLUTION_COMPILER_OPTIONS.contains(&k.as_str()));
-                narrowed = canonical(&serde_json::Value::Object(o));
+                narrowed = serde_json::Value::Object(o).to_string();
                 &narrowed
             } else {
                 value
@@ -143,25 +146,6 @@ pub fn resolution_json(facts: &[Fact], package: bool) -> String {
     }
     out.push('}');
     out
-}
-
-/// JSON with every object's keys sorted. serde_json keeps insertion order when any crate in the
-/// build enables `preserve_order` (oxc_resolver does), so facts must not rely on the map type.
-fn canonical(v: &serde_json::Value) -> String {
-    fn sort(v: &serde_json::Value) -> serde_json::Value {
-        match v {
-            serde_json::Value::Object(m) => {
-                let mut keys: Vec<&String> = m.keys().collect();
-                keys.sort();
-                serde_json::Value::Object(
-                    keys.into_iter().map(|k| (k.clone(), sort(&m[k]))).collect(),
-                )
-            }
-            serde_json::Value::Array(a) => serde_json::Value::Array(a.iter().map(sort).collect()),
-            other => other.clone(),
-        }
-    }
-    sort(v).to_string()
 }
 
 /// True for a path whose base name makes it a package.json.

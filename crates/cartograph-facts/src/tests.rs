@@ -129,6 +129,30 @@ fn workspace_packages_exports_and_package_links() {
 }
 
 #[test]
+fn exports_conditions_match_in_file_order() {
+    let with = |exports: &str| {
+        let c = [
+            put(
+                "p/package.json",
+                &format!(r#"{{"name":"p","exports":{{".":{exports}}}}}"#),
+            ),
+            put("p/a.ts", ""),
+            put("p/b.ts", ""),
+            put("x.ts", "import 'p';"),
+        ];
+        one_link(&c, "x.ts").map(|l| l.2)
+    };
+    assert_eq!(
+        with(r#"{"import":"./a.ts","default":"./b.ts"}"#),
+        Some("p/a.ts".into())
+    );
+    assert_eq!(
+        with(r#"{"default":"./b.ts","import":"./a.ts"}"#),
+        Some("p/b.ts".into())
+    );
+}
+
+#[test]
 fn config_cannot_reach_outside_the_tree() {
     let c = [
         put(
