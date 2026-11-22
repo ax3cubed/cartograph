@@ -7,7 +7,9 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, labeled, edited]
+    # closed: a merged or closed PR starts a run in its own concurrency group, which cancels any run
+    # still in progress for it; every job below skips on that event, so the run itself does nothing.
+    types: [opened, synchronize, reopened, labeled, edited, closed]
   schedule:
     - cron: "17 6 * * 1" # Mondays: the full matrix, and fresh advisories against unchanged lockfiles
   workflow_dispatch:
@@ -28,6 +30,7 @@ env:
 jobs:
   changes:
     name: What changed
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -69,7 +72,7 @@ jobs:
     name: Conventions
     # Commit messages, the PR title (it becomes the squash commit on main) and the branch name.
     # Runs on every PR, whatever changed. See CONTRIBUTING.md.
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -223,7 +226,7 @@ jobs:
   # under an unexpanded name and never resolve, which is why main doesn't require them directly.)
   ci-passed:
     name: CI passed
-    if: always()
+    if: always() && github.event.action != 'closed'
     needs: [changes, conventions, lockfiles, rust, web, supply-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 2
