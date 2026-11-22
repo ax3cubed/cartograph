@@ -1,0 +1,17 @@
+---
+source: crates/cartograph-git/src/tests.rs
+expression: golden
+---
+0 add a by Ada
+  src/a.ts - -> 992ac89
+1 add b and lib by Ada
+  lib/package.json - -> 16f1b53
+  src/b/index.ts - -> b85663f
+2 a better candidate by Ada
+  src/b.ts - -> b85663f
+3 merge side; rename package by Ada
+  lib/package.json 16f1b53 -> f68924e
+  side.ts - -> cb0ff5c
+  src/a.ts 992ac89 -> 6d7f5c6
+4 symlink and delete by Ada
+  src/b/index.ts b85663f -> -

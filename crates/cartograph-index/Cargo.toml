@@ -14,6 +14,17 @@ cartograph-discovery.workspace = true
 cartograph-git.workspace = true
 cartograph-facts.workspace = true
 cartograph-store.workspace = true
+cartograph-parse.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+regex.workspace = true
+tempfile.workspace = true
+tree-sitter.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-typescript.workspace = true
 
 [lints]
 workspace = true
