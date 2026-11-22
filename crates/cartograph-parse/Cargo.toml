@@ -10,6 +10,17 @@ publish.workspace = true
 
 [dependencies]
 cartograph-core.workspace = true
+json-strip-comments.workspace = true
+postcard.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tree-sitter.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-typescript.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true

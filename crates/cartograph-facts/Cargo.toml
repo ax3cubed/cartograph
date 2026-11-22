@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 cartograph-core.workspace = true
 cartograph-parse.workspace = true
+rusqlite.workspace = true
 
 [lints]
 workspace = true

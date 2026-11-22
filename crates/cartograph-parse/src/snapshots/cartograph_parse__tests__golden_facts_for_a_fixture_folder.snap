@@ -1,0 +1,22 @@
+---
+source: crates/cartograph-parse/src/tests.rs
+expression: out
+---
+src/index.ts (ts-imports/ts)
+  Import { spec: "./a", style: Esm, span: Span { start_line: 1, start_col: 0, end_line: 1, end_col: 24 } }
+  Import { spec: "./b", style: Reexport, span: Span { start_line: 2, start_col: 0, end_line: 2, end_col: 20 } }
+  Import { spec: "./lazy", style: Dynamic, span: Span { start_line: 4, start_col: 16, end_line: 4, end_col: 32 } }
+  Import { spec: "@scope/types", style: TypeOnly, span: Span { start_line: 3, start_col: 0, end_line: 3, end_col: 38 } }
+src/a.tsx (ts-imports/tsx)
+  Import { spec: "react", style: Esm, span: Span { start_line: 1, start_col: 0, end_line: 1, end_col: 26 } }
+  DynamicUnresolved { span: Span { start_line: 2, start_col: 29, end_line: 2, end_col: 45 } }
+lib/old.cjs (ts-imports/js)
+  Import { spec: "./impl", style: Cjs, span: Span { start_line: 2, start_col: 17, end_line: 2, end_col: 34 } }
+  Import { spec: "node:fs", style: Cjs, span: Span { start_line: 1, start_col: 11, end_line: 1, end_col: 29 } }
+package.json (manifest-js/package)
+  Manifest { field: "main", value: "\"src/index.ts\"" }
+  Manifest { field: "name", value: "\"fixture\"" }
+  Manifest { field: "workspaces", value: "[\"packages/*\"]" }
+tsconfig.json (manifest-js/tsconfig)
+  Manifest { field: "compilerOptions", value: "{\"paths\":{\"@/*\":[\"src/*\"]}}" }
+  Manifest { field: "extends", value: "\"./tsconfig.base.json\"" }

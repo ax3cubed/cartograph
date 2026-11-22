@@ -13,6 +13,7 @@ pub struct Fixture {
 impl Fixture {
     /// `git init` in `dir`, with a fixed identity and no user or system config.
     pub fn init(dir: &Path) -> Self {
+        std::fs::create_dir_all(dir).expect("mkdir");
         let f = Self {
             dir: dir.to_owned(),
             clock: 1_600_000_000,
