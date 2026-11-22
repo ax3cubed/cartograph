@@ -32,7 +32,8 @@ tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 
-# Indexer (phase 1).
+# Indexer (phase 1). gix without network features (B7).
+gix = { version = "=0.90.0", default-features = false, features = ["max-performance", "blob-diff", "revision", "sha1", "sha256"] }
 rusqlite = { version = "=0.43.0", features = ["bundled"] }
 
 insta = "1.49.0"
