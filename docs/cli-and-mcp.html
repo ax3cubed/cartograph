@@ -1,0 +1,451 @@
+<title>Cartograph CLI and MCP</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one 900px reading column, the same system as design-gaps.html. Commands and tools are ruled tables; files are shown as a tree; examples are terminal blocks. Dark-first like the product, with a light theme. */
+:root {
+  --bg: #171b26; --panel: #1e2331; --term: #11141c; --line: #2b3243; --fg: #e6e9f0; --body: #c3c8d4; --muted: #9199ad;
+  --accent: #1aa3ff; --ok: #8fd14f; --warn: #ffb26b; --bad: #ff6a64;
+  --sans: "Sora", ui-sans-serif, system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f4f6fa; --panel: #ffffff; --term: #eef1f7; --line: #d8deea; --fg: #141821; --body: #363e52; --muted: #556074;
+  --accent: #0a72bf; --ok: #3b7a10; --warn: #94500b; --bad: #bf322c; color-scheme: light; } }
+:root[data-theme="light"] {
+  --bg: #f4f6fa; --panel: #ffffff; --term: #eef1f7; --line: #d8deea; --fg: #141821; --body: #363e52; --muted: #556074;
+  --accent: #0a72bf; --ok: #3b7a10; --warn: #94500b; --bad: #bf322c; color-scheme: light; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--sans); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 56px 88px; }
+.wrap { max-width: 900px; margin: 0 auto; display: grid; gap: 56px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.15; font-weight: 700; }
+h2 { font-size: 21px; font-weight: 600; }
+h3 { font-size: 15.5px; font-weight: 600; }
+p, li { color: var(--body); max-width: 68ch; }
+p { margin: 0; }
+ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--panel); border: 1px solid var(--line); padding: 2px 6px; border-radius: 4px; color: var(--fg); overflow-wrap: anywhere; }
+a { color: var(--accent); }
+.k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+header { display: grid; gap: 14px; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.brand svg { width: 26px; height: 26px; }
+.brand .s { fill: none; stroke: var(--fg); stroke-width: 4; stroke-linecap: round; }
+.brand .f { fill: var(--fg); } .brand .a { fill: var(--accent); }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.rules div { padding: 14px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 4px; margin: 0 -1px -1px 0; }
+.rules b { font-size: 14px; font-weight: 600; }
+.rules span { color: var(--muted); font-size: 13px; line-height: 1.5; }
+section { display: grid; gap: 16px; }
+.head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 18px; }
+.head span { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+.list { display: grid; }
+.row { display: grid; grid-template-columns: minmax(170px, 230px) minmax(0, 1fr); gap: 4px 18px; padding: 13px 0; border-top: 1px solid var(--line); align-items: start; }
+.row:first-child { border-top: 0; }
+.row > .cmd { font-family: var(--mono); font-size: 13.5px; color: var(--fg); padding-top: 1px; overflow-wrap: anywhere; }
+.row > .cmd small { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
+.row p { font-size: 14px; }
+.row p + p { margin-top: 6px; }
+.note { font-size: 13px !important; color: var(--muted) !important; }
+.tag { display: inline-block; font-family: var(--sans); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; border: 1px solid; margin-left: 6px; vertical-align: 1px; }
+.tag.w { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.tag.r { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.tag.n { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+pre { margin: 0; background: var(--term); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font: 13px/1.6 var(--mono); color: var(--fg); }
+pre .c { color: var(--muted); } pre .o { color: var(--ok); } pre .x { color: var(--bad); } pre .w { color: var(--warn); } pre .a { color: var(--accent); }
+figure { margin: 0; display: grid; gap: 8px; min-width: 0; }
+figcaption { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 620px; }
+th, td { text-align: left; padding: 10px 14px; border-top: 1px solid var(--line); vertical-align: top; color: var(--body); }
+th { border-top: 0; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--panel); }
+td:first-child { color: var(--fg); }
+.st { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.st.ok { color: var(--ok); } .st.w { color: var(--warn); } .st.x { color: var(--bad); } .st.n { color: var(--accent); }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.flow span { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 10px; font-family: var(--mono); }
+.flow i { font-style: normal; color: var(--muted); }
+.q { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid var(--line); }
+.q:first-child { border-top: 0; }
+.q b { font-weight: 600; }
+.q p { font-size: 14px; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 6px; }
+@media (max-width: 680px) {
+  .row { grid-template-columns: minmax(0, 1fr); }
+  .two { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path class="s" d="M6 24 L14 10 L26 16"/><circle class="f" cx="6" cy="24" r="3.4"/><circle class="f" cx="14" cy="10" r="3.4"/><circle class="a" cx="26" cy="16" r="3.4"/></svg>
+    Cartograph · spec, revised 21 Nov 2026
+  </div>
+  <h1>Command line, MCP server and agent setup</h1>
+  <p>How a workspace gets its first index, how the index stays current, and how coding agents such as Claude Code and Cursor read it. Cartograph runs only on this machine, so every operation here is a local command or a local MCP tool. Nothing here needs a server.</p>
+  <p class="note">The reasons for each choice, with open-source precedents, are in the <a href="https://claude.ai/artifact/TZ9HmKEPSCpobb22MKWJJd">decision record</a>. Ids like <code>B1</code> point to it.</p>
+</header>
+
+<section aria-labelledby="s-rules">
+  <div class="head"><h2 id="s-rules">Ground rules</h2><span>apply to every command and tool</span></div>
+  <div class="rules">
+    <div><b>Local only</b><span>No network calls of its own. <code>git fetch</code> runs only with <code>--fetch</code>. Ask calls only the model provider you configure.</span></div>
+    <div><b>Git repos only</b><span>A folder that isn't inside a git work tree is listed as skipped, with the reason. It's never indexed.</span></div>
+    <div><b>The workspace file is the input</b><span>Cartograph reads the folders listed in a <code>.code-workspace</code> file, the same file VS Code and Cursor open.</span></div>
+    <div><b>One binary, one index</b><span>The app, the CLI, MCP and Ask all read the index through one query layer in the <code>cartograph</code> binary. Only one process writes to it at a time.</span></div>
+    <div><b>Answer now, catch up after</b><span>Every read answers straight away and says how far behind each repo is. If one is behind, it starts a sync in the background (D1).</span></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-ws">
+  <div class="head"><h2 id="s-ws">1 · Reading a <code>.code-workspace</code> file</h2><span>C1 – C6</span></div>
+  <p>A <code>.code-workspace</code> file is JSON that allows comments and trailing commas (JSONC). Cartograph parses it exactly the way VS Code does, with the <code>jsonc-parser</code> crate. Only <code>folders</code> decides what gets indexed, and one key in <code>settings</code> is also read. Everything else in the file is ignored.</p>
+
+  <div class="two">
+    <figure>
+      <figcaption>~/code/acme/acme.code-workspace</figcaption>
+<pre><span class="c">// Acme platform</span>
+{
+  "folders": [
+    { "path": "billing-api" },
+    { "path": "web", "name": "Storefront" },
+    { "path": "platform/packages/auth" },
+    { "path": "platform/packages/events" },
+    { "path": "/Users/me/src/shared-protos" },
+    { "uri": "vscode-remote://ssh-remote+box/srv/legacy" },
+    { "path": "notes" },
+  ],
+  "settings": {
+    "files.exclude": { "**/dist": true }
+  }
+}</pre>
+    </figure>
+    <figure>
+      <figcaption>what Cartograph resolves</figcaption>
+      <div class="scroll"><table style="min-width:0">
+        <thead><tr><th>Folder</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td><code>billing-api</code></td><td><span class="st ok">repo</span></td></tr>
+          <tr><td><code>web</code></td><td><span class="st ok">repo</span>, shown as Storefront</td></tr>
+          <tr><td><code>platform/…/auth</code><br><code>platform/…/events</code></td><td><span class="st ok">one repo</span> <code>platform</code>, two scopes</td></tr>
+          <tr><td><code>shared-protos</code></td><td><span class="st ok">repo</span>, absolute path</td></tr>
+          <tr><td><code>vscode-remote://…</code></td><td><span class="st w">skipped</span>: not on this machine</td></tr>
+          <tr><td><code>notes</code></td><td><span class="st x">skipped</span>: not a git repository</td></tr>
+        </tbody>
+      </table></div>
+    </figure>
+  </div>
+
+  <div class="list">
+    <div class="row"><div class="cmd">Where it looks</div><div><p>Cartograph looks for <code>*.code-workspace</code> files in the folder you give it and up to two levels below. It skips <code>node_modules</code>, <code>.git</code> and hidden folders. If it finds more than one, it asks which to use, or you can name one with <code>--workspace</code>.</p></div></div>
+    <div class="row"><div class="cmd">folders[].path</div><div><p>A relative path is resolved from the folder that holds the workspace file, not from where you ran the command. An absolute path is used as it is. <code>~</code> and <code>${env:…}</code> are not expanded, because VS Code doesn't expand them either. <code>doctor</code> warns about them.</p></div></div>
+    <div class="row"><div class="cmd">folders[].uri</div><div><p>Only <code>file:</code> URIs are accepted. Any other scheme points to a folder on another machine, so it's skipped with that reason. If the file sets <code>remoteAuthority</code>, the whole workspace is remote and the file is skipped.</p></div></div>
+    <div class="row"><div class="cmd">folders[].name</div><div><p>Becomes the display name for that repo or scope. Without it, the folder's own name is used. Duplicate folders are removed.</p></div></div>
+    <div class="row"><div class="cmd">Git check</div><div><p>Each folder must be inside a git work tree (<code>git rev-parse --show-toplevel</code>). A folder inside a repo becomes a scope of that repo. Several folders in one repo make one repo with several scopes, and its history is walked once. Worktrees of the same repo are grouped by <code>--git-common-dir</code>. Shallow clones are marked as shallow, and bare repos are skipped.</p></div></div>
+    <div class="row"><div class="cmd">settings["files.exclude"]</div><div><p>Paths that match are left out of the index. <code>search.exclude</code> is ignored, because it hides files from search and doesn't mean they aren't code.</p></div></div>
+    <div class="row"><div class="cmd">No workspace file</div><div><p>Cartograph walks up to three levels down, respecting <code>.gitignore</code>, and stops at each repo it finds. It never follows symlinks. <code>init</code> then offers to save the result as <code>acme.code-workspace</code>, so VS Code and Cursor open the same set of repos.</p></div></div>
+    <div class="row"><div class="cmd">Default branch</div><div><p>Checked in this order: <code>default_branch</code> in <code>cartograph.yaml</code>, then <code>origin/HEAD</code>, then <code>init.defaultBranch</code>, then <code>main</code> or <code>master</code>, then the current branch with a warning. None of these touches the network.</p></div></div>
+    <div class="row"><div class="cmd">Services</div><div><p>To split a monorepo into services, the first match wins: <code>cartograph.yaml</code>, then Backstage <code>catalog-info.yaml</code>, then workspace manifests (pnpm, npm, go.work, Nx, Cargo, Composer). A package with a Dockerfile, a k8s Deployment or a Procfile counts as a service rather than a library. If nothing matches, each repo is one service.</p></div></div>
+    <div class="row"><div class="cmd">cartograph.yaml</div><div><p><code>init</code> writes this file, and it's meant to be committed. It records the resolved repos with their remotes, their branches, any services, the rules and the options. It has <code>version: 1</code> and a JSON Schema, so editors can validate it. A teammate who runs <code>cartograph init</code> on it builds an index with the same fact hash (<code>cartograph verify</code>). If the workspace folder isn't a repo, <code>init</code> suggests keeping the workspace file and this manifest in one of the repos, using <code>../</code> paths to the others.</p></div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-files">
+  <div class="head"><h2 id="s-files">2 · Files Cartograph writes</h2><span>B1 · C4 · F5 · F6</span></div>
+<pre><span class="a">In the workspace folder</span>
+~/code/acme/
+├── acme.code-workspace          <span class="c">yours; read, never changed</span>
+├── cartograph.yaml              <span class="o">commit</span>   <span class="c">manifest: repos, branches, services, rules</span>
+├── cartograph.overrides.yaml    <span class="o">commit</span>   <span class="c">corrections, each with a reason</span>
+├── cartograph.baseline.json     <span class="o">commit</span>   <span class="c">known rule violations (only if you use rules)</span>
+└── CARTOGRAPH.md                <span class="w">ignore</span>   <span class="c">this machine's index state, for people and agents</span>
+
+<span class="a">In ~/.cartograph, never in a repo</span>   <span class="c">CARTOGRAPH_HOME moves it</span>
+~/.cartograph/
+├── registry.toml                    <span class="c">which repo belongs to which workspace</span>
+├── config.toml                      <span class="c">providers and preferences; keys stay in the keychain</span>
+├── cache/facts.db                   <span class="c">parsed facts by blob id, shared by all workspaces</span>
+└── workspaces/&lt;id&gt;/
+    ├── index.cartograph             <span class="c">the index (SQLite, WAL)</span>
+    ├── ask.db                       <span class="c">Ask history and activity; survives a rebuild</span>
+    ├── reports/  logs/  index.lock
+    └── mcp.token                    <span class="c">only with --http; readable by you alone</span>
+<span class="c">The whole folder is excluded from Time Machine: indexes are large and can be rebuilt.</span>
+
+<span class="a">Agent setup, per user by default</span>
+claude mcp add --scope user · ~/.cursor/mcp.json · ~/.codex/config.toml · VS Code user mcp.json</pre>
+  <p>Everything Cartograph keeps is in one folder, <code>~/.cartograph</code>, on every platform, so it's easy to inspect, back up or delete. The index is kept out of the workspace folder because that folder often sits inside iCloud Drive, Dropbox or OneDrive, and a sync client can corrupt a SQLite file that's open in WAL mode. You can set <code>index_path</code> to put it somewhere else, but a path inside a synced folder is refused, with the reason. <code>init</code> adds <code>CARTOGRAPH.md</code> to <code>.gitignore</code>, after asking.</p>
+</section>
+
+<section aria-labelledby="s-md">
+  <div class="head"><h2 id="s-md">3 · <code>CARTOGRAPH.md</code></h2><span>F7 · rewritten after every sync</span></div>
+  <p>The MCP <code>status</code> tool and the <code>cartograph://status</code> resource are where the index state is defined. <code>CARTOGRAPH.md</code> is the same data, written as a file for people and for agents that don't use MCP. It holds no text from the repos (F8). The front matter is for tools and the body is for people.</p>
+<pre><span class="c">&lt;!-- Written by cartograph 0.4.0. Don't edit: `cartograph sync` rewrites this file. --&gt;</span>
+---
+schema_version: 1
+cartograph: 0.4.0
+generated_at: 2026-11-21T09:12:04Z
+workspace: acme.code-workspace
+index: ~/.cartograph/workspaces/7f3a91c2/index.cartograph
+fact_hash: sha256:4be1…9d07
+state: behind               <span class="c"># current | behind | syncing | rewritten | needs-migrate | failed</span>
+repos:
+  - name: billing-api
+    branch: main
+    indexed_commit: 4f2a9c1
+    head: 4f2a9c1
+    behind: 0
+  - name: platform
+    scopes: [packages/auth, packages/events]
+    branch: main
+    indexed_commit: 91be07d
+    head: c3d1a88
+    behind: 3
+  - name: web
+    branch: main
+    indexed_commit: 77c0e2b
+    head: 77c0e2b
+    behind: 0
+    dirty: true              <span class="c"># uncommitted changes aren't in the index</span>
+skipped:
+  - { folder: notes, reason: not a git repository }
+  - { folder: "vscode-remote://ssh-remote+box/srv/legacy", reason: not on this machine }
+---
+
+# Cartograph index for acme
+
+**2 of 3 repos are current.** `platform` is 3 commits behind, and a sync is running.
+
+| Repo | Branch | Indexed at | Commits | Languages | Links |
+| --- | --- | --- | ---: | --- | ---: |
+| billing-api | main | 4f2a9c1 · 20 Nov 2026 | 2,318 | TypeScript | 4,102 |
+| platform | main | 91be07d · 18 Nov 2026 | 9,450 | TypeScript, Go | 11,876 |
+| web (Storefront) | main | 77c0e2b · 21 Nov 2026 | 5,027 | TypeScript | 6,340 |
+
+Not indexed: `notes` (not a git repository), `legacy` (remote folder).
+Left out by files.exclude: `**/dist`.</pre>
+</section>
+
+<section aria-labelledby="s-cli">
+  <div class="head"><h2 id="s-cli">4 · Commands</h2><span>every command takes [dir], defaulting to the current folder</span></div>
+  <p>A command run inside any repo of a workspace finds that workspace through the registry. That's why agent config can say just <code>cartograph mcp</code>, with no path.</p>
+
+  <h3>First index and keeping it current</h3>
+  <div class="list">
+    <div class="row"><div class="cmd">cartograph init<small>--workspace &lt;file&gt; · --no-index · --hooks · --agents · --yes</small></div><div>
+      <p>Finds the workspace file, resolves and checks each folder, and shows what it will index and what it will skip. Then it writes <code>cartograph.yaml</code>, builds the first index, writes <code>CARTOGRAPH.md</code> and records the workspace in the registry. Before touching <code>.gitignore</code>, hooks or agent setup, it shows the change and asks (E3). Without a terminal and without flags, it writes only the manifest and prints the next commands.</p>
+      <p class="note">Running it again on a workspace that's already set up is safe. It updates what changed instead of starting over, and tells you so.</p></div></div>
+    <div class="row"><div class="cmd">cartograph sync<small>--fetch · --wait · --quiet · --background</small></div><div>
+      <p>Indexes only the commits added since the last run, on each repo's indexed branch. It also picks up folders added to or removed from the workspace file. If history was rewritten, it replays from the merge base. If another sync is already running, this one sets a flag and exits 0, and the running sync does one more round (D2). You rarely need to run it yourself, because reads start it in the background.</p></div></div>
+    <div class="row"><div class="cmd">cartograph status<small>--json · --check</small></div><div>
+      <p>Shows each repo's indexed commit, its HEAD, how many commits it's behind, whether it has uncommitted changes, and whether a sync is running. With <code>--check</code> it exits 3 when anything is behind.</p></div></div>
+    <div class="row"><div class="cmd">cartograph index --rebuild</div><div>
+      <p>Builds the index again from nothing. It asks first and says how long it will take, about 40 minutes on acme. It writes a new file and renames it into place, so the old index stays readable until the new one is complete.</p></div></div>
+    <div class="row"><div class="cmd">cartograph verify<small>[other index | --manifest]</small></div><div>
+      <p>Compares fact hashes, to show whether two indexes, or an index and a manifest, describe the same facts (B4).</p></div></div>
+  </div>
+
+  <h3>Optional ways to stay current</h3>
+  <div class="list">
+    <div class="row"><div class="cmd">cartograph hooks install<small>remove · status</small></div><div>
+      <p>Adds hooks for post-commit, post-merge, post-checkout and post-rewrite, each running <code>cartograph sync --quiet --background</code>. On Git 2.54 and later these go in git config (<code>hook.cartograph.*</code>) and run alongside your other hooks. On older Git, Cartograph adds a marked block to an existing shell hook, and otherwise refuses and prints the line to add. If husky or lefthook manages your hooks, it prints a snippet for their config and writes nothing (D3).</p></div></div>
+    <div class="row"><div class="cmd">cartograph schedule hourly<small>off · status</small></div><div>
+      <p>Runs <code>sync --fetch</code> every hour, to pick up what teammates have pushed. This is one user-level job that loops over every workspace in the registry, at a random minute past the hour: launchd on macOS, a systemd user timer on Linux, schtasks on Windows (D4).</p></div></div>
+  </div>
+
+  <h3>Reading the map</h3>
+  <div class="list">
+    <div class="row"><div class="cmd">cartograph open<small>[cartograph:// link]</small></div><div><p>Serves the app, which is built into the binary, on 127.0.0.1 at a random port with a session token, then opens it. Given a share link, it opens that view (I7).</p></div></div>
+    <div class="row"><div class="cmd">cartograph mcp<small>--http · --list</small></div><div><p>Runs the MCP server over stdio. <code>--http</code> listens only on loopback, checks Host and Origin, and needs the token (F4).</p></div></div>
+    <div class="row"><div class="cmd">cartograph tool &lt;name&gt; [json]</div><div><p>Runs any MCP tool from the shell and prints its JSON result, so you can see exactly what an agent sees.</p></div></div>
+    <div class="row"><div class="cmd">cartograph impact &lt;ref&gt;<small>--working-tree · --wait · --format md|json</small></div><div><p>Prints what a branch, a commit range or your uncommitted changes would affect. A branch is read as an overlay on its base (B5). Your own CI can post the Markdown output. Cartograph never posts anything itself.</p></div></div>
+    <div class="row"><div class="cmd">cartograph check</div><div><p>Fails if a correction no longer matches anything, or if an architecture rule is broken by a link at <code>min_confidence</code> or above (H3, H6).</p></div></div>
+    <div class="row"><div class="cmd">cartograph ask "…"<small>--at &lt;date&gt; · --history · --forget</small></div><div><p>Asks the map a question through the same agent loop the app uses (G3). <code>--forget</code> wipes your Ask history.</p></div></div>
+  </div>
+
+  <h3>Agents, health and cleanup</h3>
+  <div class="list">
+    <div class="row"><div class="cmd">cartograph agents install<small>remove · status · --project · --per-repo · --shared</small></div><div><p>Writes MCP config for every agent it finds, at user level by default. For Claude Code it suggests the plugin instead (section 6). It writes the short instruction block only where that agent needs one.</p></div></div>
+    <div class="row"><div class="cmd">cartograph doctor<small>--fix</small></div><div><p>Checks:</p>
+      <ul>
+        <li>the git version</li>
+        <li>the workspace file, including <code>~</code> in paths</li>
+        <li>that each repo can be reached, and whether any are shallow</li>
+        <li>the index format, and whether the index path is inside a synced folder</li>
+        <li>hooks, the schedule's binary path, and agent setup</li>
+        <li>clones of the same repo in more than one folder</li>
+      </ul>
+      <p>Each failure prints the exact command that fixes it. <code>--fix</code> runs only fixes that can be undone.</p></div></div>
+    <div class="row"><div class="cmd">cartograph report</div><div><p>Writes a report of the last failure to <code>reports/</code>, with paths and code removed. Nothing is sent anywhere.</p></div></div>
+    <div class="row"><div class="cmd">cartograph clean<small>--cache · --all</small></div><div><p>Deletes the cache, or with <code>--all</code> the index too. It asks first, and never touches committed files or Ask history.</p></div></div>
+  </div>
+
+  <figure>
+    <figcaption>first run</figcaption>
+<pre>$ cartograph init ~/code/acme
+Found acme.code-workspace with 7 folders.
+
+  <span class="o">✓</span> billing-api      main   2,318 commits
+  <span class="o">✓</span> Storefront (web) main   5,027 commits
+  <span class="o">✓</span> platform         main   9,450 commits   2 scopes: packages/auth, packages/events
+  <span class="o">✓</span> shared-protos    main     412 commits
+  <span class="w">–</span> legacy           skipped: remote folder, not on this machine
+  <span class="x">✗</span> notes            skipped: not a git repository. Run `git init` in it to include it.
+
+Index 4 repos, 17,207 commits? This takes about 40 min. [Y/n] y
+<span class="c">  walking history  ████████████████████  17,207 / 17,207
+  parsing files    ████████████████████  28,940 blobs, 61% from cache</span>
+<span class="o">✓</span> wrote the index (412 MB) in 38 min
+  ~/.cartograph/workspaces/7f3a91c2/index.cartograph
+<span class="o">✓</span> wrote cartograph.yaml and CARTOGRAPH.md
+
+Add CARTOGRAPH.md to .gitignore? [Y/n] y
+Set up coding agents? Found Claude Code, Cursor. [Y/n] y
+  Claude Code: install the plugin with
+    /plugin marketplace add ax3cubed/cartograph
+    /plugin install cartograph
+<span class="o">✓</span> Cursor: ~/.cursor/mcp.json
+
+The index catches up whenever you use it. To also sync after each commit or pull,
+run `cartograph hooks install`.</pre>
+  </figure>
+
+  <div class="scroll"><table>
+    <thead><tr><th>Exit code</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>0</code></td><td>Done, the index is current, or a sync was already running and will cover this request.</td></tr>
+      <tr><td><code>1</code></td><td>Failed, including when the index format is newer than this CLI. The message names the fix, and <code>cartograph report</code> writes the details.</td></tr>
+      <tr><td><code>2</code></td><td>Bad arguments, or no workspace found here.</td></tr>
+      <tr><td><code>3</code></td><td><code>status --check</code> only: one or more repos are behind.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Output follows <a href="https://clig.dev">clig.dev</a>. Progress goes to stderr and only on a terminal. <code>--json</code> prints a versioned object, <code>{"schema":1,…}</code>. The CLI respects <code>NO_COLOR</code>. Errors say what went wrong, why, and what to try.</p>
+</section>
+
+<section aria-labelledby="s-mcp">
+  <div class="head"><h2 id="s-mcp">5 · MCP tools</h2><span>F1 – F4 · eight tools</span></div>
+  <p>Every result includes <code>freshness</code>: for each repo, the indexed commit, its HEAD, how many commits behind it is, and whether a sync is running. <code>content</code> holds compact Markdown for the model. <code>structuredContent</code> holds the full JSON, with an <code>outputSchema</code>. Lists default to 50 items with a cursor, and each response aims for under 10k tokens. <code>response_format: concise | detailed</code> chooses between them.</p>
+
+  <h3>Reading <span class="tag r">readOnlyHint</span></h3>
+  <div class="list">
+    <div class="row"><div class="cmd">status</div><div><p>The same data as <code>CARTOGRAPH.md</code>, plus any running jobs, when given a <code>job_id</code>. Agents are told to call it first.</p></div></div>
+    <div class="row"><div class="cmd">find</div><div><p>Services, modules, files, symbols or entrypoints (<code>kind</code>), by name or path. Results are ranked by fan-in.</p></div></div>
+    <div class="row"><div class="cmd">describe</div><div><p>A node's description, kind, owner and links. For a contract, its operations and who serves and calls each one. Text that comes from the repo is returned only on request, in <code>untrusted_text</code> fields (F8).</p></div></div>
+    <div class="row"><div class="cmd">neighbors</div><div><p>Links into or out of a node: <code>direction</code> is <code>callers</code>, <code>callees</code>, <code>deps</code> or <code>dependents</code>, with optional <code>depth</code>, <code>kinds</code> and <code>cross_service</code>.</p></div></div>
+    <div class="row"><div class="cmd">path</div><div><p>How two nodes connect, with each link's confidence.</p></div></div>
+    <div class="row"><div class="cmd">impact</div><div><p>Takes <code>paths</code>, a <code>ref</code>, <code>working_tree: true</code>, or <code>since</code> a commit or date. Returns what's affected across services, grouped as exact, likely and guessed. Uncommitted files are parsed in memory and never written to the index.</p></div></div>
+  </div>
+
+  <h3>Operating</h3>
+  <div class="list">
+    <div class="row"><div class="cmd">sync<span class="tag w">idempotent</span></div><div><p>Returns the result if it finishes within <code>wait_ms</code> (15 s by default). Otherwise it returns a <code>job_id</code> to pass to <code>status</code>. It sends progress notifications when the client provides a progress token. When there's no index yet, <code>sync</code> runs init, and in that case it defaults to <code>dry_run: true</code>, returning the folder resolution table from section 1 without writing anything.</p></div></div>
+    <div class="row"><div class="cmd">correct<span class="tag w">writes file</span></div><div><p>Adds an entry to <code>cartograph.overrides.yaml</code> and returns the diff. It needs a <code>reason</code>, and stores data, never instructions.</p></div></div>
+  </div>
+  <p class="note">The MCP server never runs <code>index --rebuild</code>, <code>clean</code>, <code>hooks</code> or <code>schedule</code>. No tool runs code or uses the network, and <code>sync</code> only acts on repos in the registry. Server <code>instructions</code> are kept under 4,096 characters and never include text from the repos.</p>
+</section>
+
+<section aria-labelledby="s-agents">
+  <div class="head"><h2 id="s-agents">6 · Setting up coding agents</h2><span>F5 · F6 · G1</span></div>
+  <p>Agent setup is per user by default, so you don't have to commit anything in N repos and teammates without Cartograph don't get a server that won't start. <code>--project</code> writes config to the workspace folder. <code>--per-repo</code> writes it into every repo.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Agent</th><th>MCP server</th><th>Instructions</th></tr></thead>
+    <tbody>
+      <tr><td>Claude Code</td><td>The <b>Cartograph plugin</b>: MCP server, skill, and a SessionStart hook that prints one line about how current the index is</td><td>The plugin's skill. Without the plugin, a block in <code>CLAUDE.local.md</code>, or in <code>CLAUDE.md</code> with <code>--shared</code></td></tr>
+      <tr><td>Cursor</td><td><code>~/.cursor/mcp.json</code></td><td><code>.cursor/rules/cartograph.mdc</code></td></tr>
+      <tr><td>VS Code (Copilot)</td><td>user <code>mcp.json</code>, <code>"type": "stdio"</code></td><td><code>.github/copilot-instructions.md</code> block</td></tr>
+      <tr><td>Codex and others</td><td><code>~/.codex/config.toml</code> → <code>[mcp_servers.cartograph]</code></td><td><code>AGENTS.md</code> block</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="two">
+    <figure>
+      <figcaption>the plugin, published from the Cartograph repo</figcaption>
+<pre>.claude-plugin/marketplace.json
+plugins/cartograph/
+├── .claude-plugin/plugin.json
+├── .mcp.json        <span class="c">{ "cartograph": { "command": "cartograph", "args": ["mcp"] } }</span>
+├── skills/cartograph/SKILL.md
+└── hooks/hooks.json <span class="c">SessionStart: cartograph status --line</span></pre>
+    </figure>
+    <figure>
+      <figcaption>why a plugin for Claude Code</figcaption>
+      <p style="font-size:14px">One versioned install that edits no shared files. The skill holds the procedure, so the instruction block can stay tiny or be left out. <code>agents install</code> detects the plugin, so hooks never run twice.</p>
+    </figure>
+  </div>
+
+  <figure>
+    <figcaption>the instruction block (for agents without the plugin)</figcaption>
+<pre><span class="c">&lt;!-- cartograph:start · managed by `cartograph agents install` --&gt;</span>
+## Codebase map (Cartograph)
+This repo is part of a Cartograph workspace. Use the `cartograph` MCP tools.
+- Call `status` first. Each answer says how current the index is.
+- Before changing code another service may depend on, call `impact` with the paths.
+  Read "likely" and "guessed" results as leads to check, not facts.
+- For uncommitted work, pass `working_tree: true`.
+- If a link is wrong, call `correct` with a reason instead of working around it.
+<span class="c">&lt;!-- cartograph:end --&gt;</span></pre>
+  </figure>
+  <p class="note">The block holds pointers only, never state, and doesn't <code>@</code>-import <code>CARTOGRAPH.md</code>. An import would load the whole file into every session, and the state would be out of date before the session ended.</p>
+  <p class="note">Using Claude Code itself as the model for Ask: Cartograph doesn't build in the Claude Agent SDK and never offers a claude.ai sign-in, because Anthropic's terms don't allow third-party apps to do that. Your own Claude Code uses Cartograph through the plugin instead. An "External agent" option over ACP may come later (G1, G2).</p>
+</section>
+
+<section aria-labelledby="s-state">
+  <div class="head"><h2 id="s-state">7 · Index states</h2><span>the state field in CARTOGRAPH.md, status and the app</span></div>
+  <div class="flow" aria-label="State flow">
+    <span>none</span><i>init →</i><span>syncing</span><i>→</i><span>current</span><i>new commits →</i><span>behind</span><i>next read →</i><span>syncing</span><i>→</i><span>current</span>
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>State</th><th>What it means</th><th>What reads do</th><th>Way out</th></tr></thead>
+    <tbody>
+      <tr><td><span class="st n">none</span></td><td>No index for this workspace.</td><td>Tools return an error that names <code>cartograph init</code>. MCP <code>sync</code> offers a dry run.</td><td><code>init</code></td></tr>
+      <tr><td><span class="st ok">current</span></td><td>Every repo's indexed commit is its HEAD.</td><td>Answer normally.</td><td>n/a</td></tr>
+      <tr><td><span class="st w">behind</span></td><td>One or more repos have newer commits.</td><td>Answer at once, report how far behind, and start a sync in the background.</td><td>Happens on its own</td></tr>
+      <tr><td><span class="st n">syncing</span></td><td>The writer holds the lock.</td><td>Answer from the snapshot the read started on (WAL).</td><td>Wait</td></tr>
+      <tr><td><span class="st w">rewritten</span></td><td>An indexed commit is gone from the branch, after a force-push or rebase.</td><td>Answer, with a warning on that repo.</td><td><code>sync</code> replays from the merge base</td></tr>
+      <tr><td><span class="st x">needs-migrate</span></td><td>The index format is older than this CLI.</td><td>Read-only if the format can still be read, otherwise an error.</td><td><code>sync</code> migrates it, or <code>index --rebuild</code></td></tr>
+      <tr><td><span class="st x">failed</span></td><td>The last run stopped part way through.</td><td>Answer from the last complete index.</td><td><code>doctor</code>, then <code>sync</code></td></tr>
+    </tbody>
+  </table></div>
+  <p>The index uses SQLite's WAL mode, so readers keep the snapshot they started with. Only one process writes at a time, under an OS lock on <code>index.lock</code>. The kernel releases that lock if the process dies, so it can never go stale. Only a full rebuild or a migration writes a new file and renames it into place (B2).</p>
+</section>
+
+<section aria-labelledby="s-edges">
+  <div class="head"><h2 id="s-edges">8 · Cases to handle</h2><span>each one gets a clear message, not a crash</span></div>
+  <div class="list">
+    <div class="row"><div class="cmd">Branches and PRs</div><div><p>The timeline covers one branch per repo. <code>impact &lt;ref&gt;</code> and the checked-out branch get an overlay on their base, which costs about as much as the diff and is dropped once the branch merges (B5). <code>status</code> says when HEAD is on a branch other than the indexed one.</p></div></div>
+    <div class="row"><div class="cmd">Shallow clones</div><div><p>Cartograph indexes the history that's present and marks the repo <code>shallow</code>. The message names <code>git fetch --unshallow</code>.</p></div></div>
+    <div class="row"><div class="cmd">Detached HEAD</div><div><p>The configured branch is indexed. <code>impact --working-tree</code> still covers whatever is checked out.</p></div></div>
+    <div class="row"><div class="cmd">Submodules, nested repos</div><div><p>They're indexed only if the workspace file lists them as folders.</p></div></div>
+    <div class="row"><div class="cmd">Same repo cloned twice</div><div><p>The registry matches repos by remote URL and root commit, and <code>doctor</code> warns.</p></div></div>
+    <div class="row"><div class="cmd">Repo moved on disk</div><div><p><code>doctor --fix</code> finds it again by remote URL and root commit, then updates the registry.</p></div></div>
+    <div class="row"><div class="cmd">Renames</div><div><p>Exact blob matches are tried first, then <code>gix-diff</code> similarity matching (50%, at most 1,000 candidates). The commit is noted when that limit is hit (B7).</p></div></div>
+    <div class="row"><div class="cmd">LFS, binaries, generated files</div><div><p>LFS pointers, binaries and files over 1 MB are listed but not parsed. Generated API clients are recognised by their headers and matched to their spec (H5).</p></div></div>
+    <div class="row"><div class="cmd">Two workspaces share a repo</div><div><p>Each workspace has its own index, and they share the parse cache by blob id.</p></div></div>
+    <div class="row"><div class="cmd">Windows and case</div><div><p>Backslashes in <code>path</code> are accepted. On a file system that ignores case, paths are compared without case before merging.</p></div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-follow">
+  <div class="head"><h2 id="s-follow">9 · What this changes elsewhere</h2><span>not done yet</span></div>
+  <ul>
+    <li>Board 17 (Get started): replace <code>index --update</code> with <code>init</code>, then the plugin, then "it catches up as you use it". Remove the index path from the workspace folder.</li>
+    <li>Board 15: list the eight tools, plus the plugin as the way to set up Claude Code.</li>
+    <li>Board S1: the folder resolution table from section 1, including the remote and non-git rows.</li>
+    <li>Board S3: "Keep it current as you work" as the default, with hooks and the hourly fetch as additions.</li>
+    <li>Board 02: Cancel keeps the last complete index, and the next run picks up where this one stopped.</li>
+    <li>Board S4: Split writes a <code>services:</code> entry. Board A5: Previous and Next step along first-parent commits.</li>
+  </ul>
+</section>
+
+<footer>
+  <span>Follows DECISIONS.md item 12 (local only), the <a href="https://claude.ai/artifact/TZ9HmKEPSCpobb22MKWJJd">decision record</a> and the gap list. The example data (acme, the commit counts and the timings) is made up.</span>
+</footer>
+
+</div>

@@ -36,4 +36,4 @@ Both equally:
 ## Open decisions
 
 - Product name: "Cartograph" is a placeholder.
-- How real indexing runs (CLI that emits JSON vs Next route handler reading local repos).
+- ~~How real indexing runs~~ Decided 21 Nov 2026: one Rust binary indexes into SQLite and serves the app (static export), the CLI, MCP and Ask through one query layer. See docs/decisions.html (A1).

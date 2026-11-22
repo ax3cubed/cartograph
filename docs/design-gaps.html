@@ -1,0 +1,211 @@
+<title>Cartograph Design Gaps</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one 900px reading column; each group is a table of gaps with a status pill and a link to its board; the build order closes the page as a ruler. Dark-first like the product, with a light theme. */
+:root {
+  --bg: #171b26; --panel: #1e2331; --line: #2b3243; --fg: #e6e9f0; --body: #c3c8d4; --muted: #9199ad;
+  --accent: #1aa3ff; --ok: #8fd14f; --warn: #ffb26b; --bad: #ff6a64;
+  --sans: "Sora", ui-sans-serif, system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f4f6fa; --panel: #ffffff; --line: #d8deea; --fg: #141821; --body: #363e52; --muted: #556074;
+  --accent: #0a72bf; --ok: #3b7a10; --warn: #94500b; --bad: #bf322c; color-scheme: light; } }
+:root[data-theme="light"] {
+  --bg: #f4f6fa; --panel: #ffffff; --line: #d8deea; --fg: #141821; --body: #363e52; --muted: #556074;
+  --accent: #0a72bf; --ok: #3b7a10; --warn: #94500b; --bad: #bf322c; color-scheme: light; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--sans); margin: 0; font-feature-settings: "tnum";
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 56px 88px; }
+.wrap { max-width: 900px; margin: 0 auto; display: grid; gap: 52px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.15; font-weight: 700; }
+h2 { font-size: 20px; font-weight: 600; }
+p { margin: 0; color: var(--body); max-width: 66ch; }
+code { font-family: var(--mono); font-size: .86em; background: var(--panel); border: 1px solid var(--line); padding: 2px 6px; border-radius: 4px; color: var(--fg); }
+a { color: var(--accent); }
+.k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+header { display: grid; gap: 14px; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.brand svg { width: 26px; height: 26px; }
+.brand .s { fill: none; stroke: var(--fg); stroke-width: 4; stroke-linecap: round; }
+.brand .f { fill: var(--fg); } .brand .a { fill: var(--accent); }
+.stats { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.stats div { flex: 1 1 150px; padding: 14px 16px; border-right: 1px solid var(--line); }
+.stats div:last-child { border-right: 0; }
+.stats b { display: block; font-size: 24px; font-weight: 600; }
+.stats span { color: var(--muted); font-size: 12px; }
+section { display: grid; gap: 14px; }
+.head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 18px; }
+.head span { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+.list { display: grid; }
+.row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 4px 14px; padding: 14px 0; border-top: 1px solid var(--line); align-items: start; }
+.row:first-child { border-top: 0; }
+.id { font-family: var(--mono); color: var(--muted); font-size: 13px; padding-top: 2px; }
+.row h3 { font-size: 15.5px; font-weight: 600; }
+.row p { font-size: 14px; margin-top: 4px; }
+.row a.board { font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.row a.board:hover { text-decoration: underline; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; padding: 4px 10px; border-radius: 99px; border: 1px solid; white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.part { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.open { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.sev { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.sev.hi { color: var(--bad); } .sev.md { color: var(--warn); } .sev.lo { color: var(--muted); }
+.why { font-size: 13px !important; color: var(--muted) !important; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12px; align-items: center; }
+.ruler { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; position: relative; padding-top: 4px; }
+.ruler::before { content: ""; position: absolute; left: 0; right: 0; top: 11px; height: 2px; background: linear-gradient(90deg, var(--accent), var(--line)); }
+.step { position: relative; padding-top: 28px; display: grid; gap: 4px; }
+.step::before { content: ""; position: absolute; top: 4px; left: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); border: 2px solid var(--accent); }
+.step:first-child::before { background: var(--accent); }
+.step b { font-size: 14px; font-weight: 600; }
+.step .ids { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.step span { color: var(--muted); font-size: 13px; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+@media (max-width: 640px) {
+  .row { grid-template-columns: 40px minmax(0, 1fr); }
+  .side { grid-column: 2; align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
+  .ruler { grid-template-columns: 1fr; }
+  .ruler::before { left: 7px; right: auto; top: 0; bottom: 0; width: 2px; height: auto; }
+  .step { padding-top: 0; padding-left: 30px; }
+  .step::before { top: 2px; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand"><svg viewBox="0 0 48 48" aria-hidden="true"><path class="s" d="M35.31 12.69A16 16 0 1 0 35.31 35.31"/><path class="s" d="M24 24 35.31 12.69"/><circle class="f" cx="24" cy="24" r="5.2"/><circle class="a" cx="35.31" cy="12.69" r="4.4"/></svg>cartograph · design review · updated 20 Nov 2026</div>
+    <h1>What Cartograph needs designed to map a real workspace</h1>
+    <p>The first review found 17 missing designs. Designing them, and then reviewing the architecture, turned up 15 more: the settings that decide how workspaces are discovered and connected, and the views the ontology makes possible. A last sweep across the canvas and the architecture found 28 more, listed under Sweep. Every designed item links to its board on the <a href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq">design canvas</a>.</p>
+    <div class="stats">
+      <div><b>65</b><span>gaps found so far</span></div>
+      <div><b style="color:var(--ok)">35</b><span>designed or settled</span></div>
+      <div><b style="color:var(--warn)">0</b><span>partly done</span></div>
+      <div><b style="color:var(--bad)">30</b><span>still open, 6 of them high</span></div>
+    </div>
+    <div class="legend"><span class="pill done">Designed</span><span class="pill part">Partly</span><span class="pill open">Open</span><span>Boards are mockups with example data from a made-up workspace, <code>acme</code>.</span></div>
+  </header>
+
+  <section aria-labelledby="g1">
+    <div class="head"><h2 id="g1">First review: opening real data and scale</h2><span>stage 3</span></div>
+    <div class="list">
+      <div class="row"><span class="id">01</span><div><h3>First run and opening an index</h3><p>An empty state with the CLI steps and a file drop zone, a workspace switcher, and a banner while the demo is running.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G01-first-run">Boards 01</a></div></div>
+      <div class="row"><span class="id">02</span><div><h3>Loading and failure states</h3><p>A map skeleton with step-by-step progress, errors for a newer schema or a damaged file, and a stale-index banner.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G02-loading">Boards 02</a></div></div>
+      <div class="row"><span class="id">03</span><div><h3>Level of detail at scale</h3><p>62 services drawn as domain bundles, aggregate nodes, a tree you can filter, and the colour rule past six services. That rule changes DESIGN.md and still needs your sign-off.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G03-scale-map">Board 03</a></div></div>
+      <div class="row"><span class="id">04</span><div><h3>Timeline for real history</h3><p>A 10-year overview with a range window, weekly bars stacked by repo, repo filters, and a marker for rewritten history.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G04-timeline">Board 04</a></div></div>
+      <div class="row"><span class="id">05</span><div><h3>Search results</h3><p>A palette grouped by kind, with keyboard hints and a no-match state that suggests a near name or asking the map.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G05-search">Board 05</a></div></div>
+      <div class="row"><span class="id">06</span><div><h3>A map emptied by filters</h3><p>A "0 of 412" state where each suggested fix shows how many nodes it brings back, plus a reset button.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G06-empty-filter">Board 06</a></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="g2">
+    <div class="head"><h2 id="g2">First review: links, history and AI</h2><span>stages 2, 4, 5, 6 and the site</span></div>
+    <div class="list">
+      <div class="row"><span class="id">07–08</span><div><h3>Link inspector and confidence on the map</h3><p>Evidence from the contract, caller and handler, the link's history, and line styles for confirmed, inferred and overridden links.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G07-link-inspector">Board 07</a></div></div>
+      <div class="row"><span class="id">09</span><div><h3>Corrections</h3><p>Remove or add a link, with a preview of what gets written to the override file.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G09-corrections">Board 09</a></div></div>
+      <div class="row"><span class="id">10, 12</span><div><h3>Renames and rewritten history</h3><p>A file history that follows moves, and a notice when history was force-pushed.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G10-history">Board 10</a></div></div>
+      <div class="row"><span class="id">11</span><div><h3>Symbols</h3><p>A focus view where callers and callees are grouped by file and the rest collapsed.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G11-symbols">Board 11</a></div></div>
+      <div class="row"><span class="id">13, 14, 16</span><div><h3>Ask agent, citation checks, text written by a model</h3><p>A trace of the agent's steps, a stop button, citations marked kept or dropped, and model-written summaries labelled as such.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G13-ask-agent">Board 13</a></div></div>
+      <div class="row"><span class="id">15</span><div><h3>Settings beyond one model</h3><p>A provider list, the summaries switch and the MCP server panel.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G15-settings">Board 15</a></div></div>
+      <div class="row"><span class="id">17</span><div><h3>Get started page</h3><p>Install, index and open, then keeping it current, the override file, MCP and troubleshooting. Works at phone width.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-G17-get-started">Board 17</a></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="g3">
+    <div class="head"><h2 id="g3">Found in review: discovery, connections and settings</h2><span>new · S boards</span></div>
+    <p>The first set assumed someone runs the CLI by hand. It had nowhere to say where code comes from, how the app reaches it, or how a call site gets matched to a service.</p>
+    <div class="list">
+      <div class="row"><span class="id">S0, S7</span><div><h3>Light, dark and system themes, and accessibility</h3><p>Tokens with both theme values checked against AA, System as the default, more contrast, reduced motion, colour-blind-safe service colours, text size and density. Board S7 is clickable.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-S07-appearance">Boards S0, S7</a></div></div>
+      <div class="row"><span class="id">S1</span><div><h3>Workspace discovery</h3><p>A wizard that finds repos across local folders and Git organisations, splits monorepos, spots services and specs, leaves out forks and archived repos, and can save a <code>cartograph.yaml</code> manifest.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-S01-add-workspace">Board S1</a></div></div>
+      <div class="row"><span class="id">S2</span><div><h3>Sources and connections</h3><p>The path from sources through the indexer to the app, seven kinds of connection with healthy, expiring and failed states, and read-only permissions.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-S02-connections">Board S2</a></div></div>
+      <div class="row"><span class="id">S3</span><div><h3>Indexing</h3><p>A run in progress, extractors per language or spec type, when the index updates, paths to leave out, and recent runs.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-S03-indexing">Board S3</a></div></div>
+      <div class="row"><span class="id">S4</span><div><h3>Services and domains</h3><p>How each service was detected, merge and split, assigning domains, and a preview of the override file.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-S04-services">Board S4</a></div></div>
+      <div class="row"><span class="id">S5</span><div><h3>Contracts and environments</h3><p>Specs and whether they match the code, entrypoint adapters, and per-environment config keys that turn call sites into services.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-S05-contracts-envs">Board S5</a></div></div>
+      <div class="row"><span class="id">S6</span><div><h3>Retrieval and privacy</h3><p>The embedding model, what gets indexed, a secrets scan before anything is embedded, and who can read the index.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-S06-retrieval">Board S6</a></div></div>
+      <div class="row"><span class="id">S8</span><div><h3>Keyboard</h3><p>Shortcuts for find, map, time and Ask, with conflicts flagged and a <code>?</code> overlay.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-S08-keyboard">Board S8</a></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="g4">
+    <div class="head"><h2 id="g4">Found in review: views the ontology makes possible</h2><span>new · A boards</span></div>
+    <p>Once entrypoints, contracts and concepts are part of the index, the map stops being the only view. These views sit as tabs beside it.</p>
+    <div class="list">
+      <div class="row"><span class="id">A1</span><div><h3>Coverage report</h3><p>Six coverage figures with targets, the biggest gaps ranked with a fix for each, and the unresolved records behind each figure.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-A01-coverage">Board A1</a></div></div>
+      <div class="row"><span class="id">A2</span><div><h3>Entrypoints and consumers</h3><p>431 entrypoints filtered by kind, the consumers of the selected one including declared external callers, and what it reaches across services.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-A02-entrypoints">Board A2</a></div></div>
+      <div class="row"><span class="id">A3</span><div><h3>Contract view</h3><p>Spec beside handlers and callers, drift both ways, a schema mismatch, and a version history that lists the callers each breaking change affects.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-A03-contract">Board A3</a></div></div>
+      <div class="row"><span class="id">A4</span><div><h3>Concept view</h3><p>One business entity followed through contracts, data, events, code and docs, showing how each member was linked and a decision for a doubtful match.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-A04-concept">Board A4</a></div></div>
+      <div class="row"><span class="id">A5</span><div><h3>Commit impact</h3><p>What a commit changed in the graph: links, the entrypoints that now reach different code, and the symbols each file's hunks touched. Pull requests get the same view.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-A05-commit-impact">Board A5</a></div></div>
+      <div class="row"><span class="id">A6</span><div><h3>Retrieval inspector</h3><p>The plan, seeds, how far it walked, the token budget, and every unit it used, cited, dropped or cut.</p></div><div class="side"><span class="pill done">Designed</span><a class="board" href="https://claude.ai/artifact/9mSfLmSiuVAFABPY1aUskq#artboard-A06-retrieval-inspector">Board A6</a></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="g5">
+    <div class="head"><h2 id="g5">Still open</h2><span>next</span></div>
+    <div class="list">
+      <div class="row"><span class="id">T1</span><div><h3>Light mode on the first 16 boards</h3><p>Board 00 and the G boards now use the S0 tokens and have the System, Light and Dark tweak. Domain hues stay the same in both themes, and text set in a domain hue is darkened in light mode.</p></div><div class="side"><span class="pill done">Designed</span></div></div>
+      <div class="row"><span class="id">O1</span><div><h3>Empty and loading states for the new views</h3><p>Entrypoints with no adapters, a workspace with no specs, concepts before the search index is built, and a first index still running under every A tab.</p></div><div class="side"><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">O2</span><div><h3>Narrow layouts for the app screens</h3><p>The app boards are drawn at 1440. Only the get-started page is shown working at phone width. The map, panel and settings need a tablet layout at the least.</p></div><div class="side"><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">O3</span><div><h3>Shared server setup</h3><p>Dropped. Cartograph is local only and has no server. S6 now says teammates share the map by committing <code>cartograph.yaml</code> and indexing on their own machines.</p></div><div class="side"><span class="pill done">Settled</span></div></div>
+      <div class="row"><span class="id">O4</span><div><h3>Your decision on the colour rule</h3><p>Board 00 has domains take the six pinned hues. That changes DESIGN.md, which follows a pinned reference, so it needs your approval before code.</p></div><div class="side"><span class="pill open">Open</span></div></div>
+    </div>
+    <p style="font-size:13px;color:var(--muted)">The work beyond screens, such as the ontology schema, config and deploy resolution, and the search store, is covered in <code>docs/architecture.html</code> in the repository.</p>
+  </section>
+
+  <section aria-labelledby="sx">
+    <div class="head"><h2 id="sx">Sweep: architecture</h2><span>13 · not on any roadmap stage</span></div>
+    <p>Gaps between the parts. The pipeline itself is covered in <code>docs/architecture.html</code>, so these are what's still missing around it: how parts connect, stay correct and stay safe.</p>
+    <div class="list">
+      <div class="row"><span class="id">X1</span><div><h3>How the app reads the index</h3><p>Nothing sits between the UI and SQLite. A browser can't load a 412 MB file, and the app, Ask and MCP each need time-sliced graph queries. Decide on one query service, either <code>cartograph open</code> serving an API and the app, or SQLite in WebAssembly, and route all three through it.</p><p class="why">Blocks stage 3. It is also the open decision in PRODUCT.md.</p></div><div class="side"><span class="sev hi">High</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X2</span><div><h3>Prompt injection from indexed code</h3><p>Comments, READMEs and commit messages flow into model prompts through retrieval, and any of them can carry instructions. Wrap every retrieved span as data, limit the agent to read-only graph tools, and never run anything an answer suggests. Checking citations doesn't cover this.</p></div><div class="side"><span class="sev hi">High</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X3</span><div><h3>Branches and pull requests</h3><p>The indexer walks first-parent history of the default branch only. Commit impact for a PR (A5) needs the branch indexed on top of its base, without changing the main timeline.</p></div><div class="side"><span class="sev hi">High</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X4</span><div><h3>Updating without push events</h3><p>Settled: with no server, there are no webhooks. S3 offers every hour, only when you run it, or after each commit or pull through a local git hook.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill done">Settled</span></div></div>
+      <div class="row"><span class="id">X5</span><div><h3>Reading while the indexer writes</h3><p>Use WAL mode and snapshot reads, write updates to a temp file and swap it in atomically, and have the app notice the new version. Otherwise the map can show half an update.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X6</span><div><h3>File formats are contracts too</h3><p>The index, <code>cartograph.yaml</code> and the override file each need a versioned schema, a validator, migrations and a compatibility table between CLI and app. Board 02 shows the error, but nothing plans the upgrade.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X7</span><div><h3>Overrides that survive renames</h3><p>Overrides refer to paths, so they break silently when a file moves. Key them by lineage id, flag ones that no longer match anything, and write down which source wins: parsed, then contract, config, runtime, override.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X8</span><div><h3>A plugin interface for extractors and adapters</h3><p>S5 says "request an adapter". Without a published fact schema and a plugin interface, run as a subprocess or in WebAssembly, every new framework needs a core release.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X9</span><div><h3>Generated API clients</h3><p>A2 and S1 count calls through a generated SDK. Matching them needs codegen detection that maps each generated method to its <code>operationId</code>. URL matching can't see through them.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X10</span><div><h3>Stale derived data</h3><p>Summaries, embeddings, concepts and reachability go stale when code, models or extractors change. Record each derived row's inputs (blob ids, model id, extractor version) and rebuild only what changed.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X11</span><div><h3>Architecture rules</h3><p>Leads want to declare constraints, such as layers, forbidden dependencies and no cycles, and have every commit and CI run check them. The graph can answer this, but nothing in the plan asks it to.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X12</span><div><h3>Reproducible indexes</h3><p>The same commits should give a byte-identical index, so a teammate or a CI job building from the same manifest gets the same file, and can check that it matches.</p></div><div class="side"><span class="sev lo">Low</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">X13</span><div><h3>Errors from the field</h3><p>There's no error reporting, and nothing may leave the machine. When an extractor fails on real code, the tool should write a local report, with the code left out, that a person can choose to attach to an issue.</p></div><div class="side"><span class="sev lo">Low</span><span class="pill open">Open</span></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="sd">
+    <div class="head"><h2 id="sd">Sweep: design</h2><span>15 · across the canvas</span></div>
+    <div class="list">
+      <div class="row"><span class="id">D1</span><div><h3>The rest of the add-workspace wizard</h3><p>Only step 2 of 4 is drawn. Steps 1 (pick sources), 3 (review services) and 4 (first index, then the map) are missing, along with what happens when discovery finds nothing.</p></div><div class="side"><span class="sev hi">High</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D2</span><div><h3>First run offers only the CLI</h3><p>Board 01 predates the in-app wizard. It should offer three ways in: add a workspace in the app, open an index file, or try the demo.</p></div><div class="side"><span class="sev hi">High</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D3</span><div><h3>A way to read the map without seeing it</h3><p>The map is SVG and WebGL, which screen readers can't use. It needs a table view of nodes and links with the same filters and date, and a keyboard walk through nodes that announces each node's name and link counts.</p></div><div class="side"><span class="sev hi">High</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D4</span><div><h3>One app shell</h3><p>The G boards lack the view tabs added in the A boards, and board 15's settings menu differs from the S boards'. Pick one header and one settings menu.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D5</span><div><h3>Notifications and activity</h3><p>An index that finished or failed, a token about to expire, a new breaking change: nothing says where these appear. They need toasts plus an activity list.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D6</span><div><h3>The map after "Trace on the map"</h3><p>A2 and A5 send you to the map, but the map state they land on isn't drawn: the reachable set highlighted, the rest dimmed, and a way to clear it.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D7</span><div><h3>Compare two points in time</h3><p>Leads review drift between two releases. Scrubbing shows one date at a time. They need a compare mode: two dates, what coupling was added or removed, and the map coloured by the difference.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D8</span><div><h3>Architecture rules view</h3><p>The UI for X11: a list of rules, current violations, and pass or fail for each commit.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D9</span><div><h3>Share and export</h3><p>A <code>cartograph://</code> link that reopens the same node, layout, date and filters in a teammate's local app, plus PNG and SVG export of the map for design reviews.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D10</span><div><h3>Recovery flows</h3><p>Renew an expiring token, fix a failed spec URL, undo a correction, and see who changed the override file and when. S2 and board 09 show the problems but not the way out.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D11</span><div><h3>Commit impact inside the pull request</h3><p>Paired with X3: <code>cartograph impact</code> prints a branch's impact as Markdown, so a CI step the team runs itself can post it as a comment. Cartograph never posts anything on its own.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D12</span><div><h3>The CLI's own output</h3><p>The CLI is most people's first contact. It needs designed progress output, errors that name the fix, a coverage summary after each run, and <code>--json</code> for CI.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D13</span><div><h3>DESIGN.md is behind the canvas</h3><p>The theme tokens, theme rules, chip states, view tabs, settings menu and pending colour rule exist only on boards. Write them back so the code has one source.</p></div><div class="side"><span class="sev md">Medium</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D14</span><div><h3>Owners and teams</h3><p>CODEOWNERS is indexed, but no view shows who owns what or which teams depend on each other.</p></div><div class="side"><span class="sev lo">Low</span><span class="pill open">Open</span></div></div>
+      <div class="row"><span class="id">D15</span><div><h3>Ask history</h3><p>Past questions, saved questions, and re-running a question as of another date.</p></div><div class="side"><span class="sev lo">Low</span><span class="pill open">Open</span></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="g6">
+    <div class="head"><h2 id="g6">Suggested build order</h2><span>design is ahead of code</span></div>
+    <div class="ruler">
+      <div class="step"><span class="ids">X1 X5 X6 · 01 02 D1 D2 · S1 S2</span><b>Open real data</b><span>Decide the query service first, then discover, connect and open an index, with honest loading and empty states.</span></div>
+      <div class="step"><span class="ids">03 04 D3 D4 · S3 S4 · A1</span><b>Scale and coverage</b><span>Level of detail, the timeline, a table view of the map, and the numbers that prove coverage.</span></div>
+      <div class="step"><span class="ids">X7 X9 · 07 09 · S5 · A2 A3</span><b>Cross-service</b><span>Links with evidence, entrypoints and contracts, plus overrides that survive renames.</span></div>
+      <div class="step"><span class="ids">X2 X3 X10 · S6 · A4–A6</span><b>Retrieval</b><span>The search index protected against prompt injection, branch indexing for PRs, then concepts and commit impact.</span></div>
+    </div>
+  </section>
+
+  <footer>Based on v0.2.0, <code>docs/ROADMAP.md</code>, <code>docs/architecture.html</code>, PRODUCT.md and DESIGN.md. Canvas: 31 boards, all private until shared from its Share menu.</footer>
+</div>
