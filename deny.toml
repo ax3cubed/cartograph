@@ -1,0 +1,55 @@
+# cargo deny (HD-12): licences, advisories, bans and sources for the shipped binary's workspace.
+# The bench/ workspace is separate and never ships; it may use git2 as a comparison baseline.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every RustSec advisory fails, including unmaintained and yanked crates.
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# An allow list: anything else fails, which denies GPL, LGPL, AGPL (I2: the forceatlas2 crate),
+# PolyForm (no GitNexus code through a dependency), SSPL, BUSL and every non-commercial licence.
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "BSL-1.0",
+  "CC0-1.0",
+  "Unicode-3.0",
+  "CDLA-Permissive-2.0",
+  "MPL-2.0",
+]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# Workspace path dependencies are not wildcards; every crate here is publish = false.
+allow-wildcard-paths = true
+deny = [
+  # B7: libgit2 is C under GPL-2.0 with a linking exception. gix only; git2 lives in bench/.
+  { crate = "git2", reason = "B7: read git with gix" },
+  { crate = "libgit2-sys", reason = "B7: read git with gix" },
+  # I2: AGPL.
+  { crate = "forceatlas2", reason = "I2: AGPL; use graphology's layout or our own Barnes-Hut" },
+  # No network client in the indexing crates (IDX-01). When cartograph-ai lands, add it as the
+  # only wrapper, e.g. { crate = "reqwest", wrappers = ["genai", "cartograph-ai"] }.
+  { crate = "reqwest", reason = "IDX-01: no network crates outside Ask" },
+  { crate = "ureq", reason = "IDX-01: no network crates outside Ask" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

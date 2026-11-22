@@ -1,0 +1,101 @@
+# Hand-labelled from source read with `git show`, nothing run. See labels.schema.md.
+# Languages: JavaScript (cart, catalogue, user), Python (payment), Go (dispatch), Java (shipping), PHP (ratings).
+version: 1
+repo: instana/robot-shop
+commit: 55292e2199f2fb00a165b1f7d3045fe7f8922038
+licence: Apache-2.0
+services:
+  - { id: web, paths: [web/] }
+  - { id: cart, paths: [cart/] }
+  - { id: catalogue, paths: [catalogue/] }
+  - { id: user, paths: [user/] }
+  - { id: payment, paths: [payment/] }
+  - { id: shipping, paths: [shipping/] }
+  - { id: ratings, paths: [ratings/] }
+  - { id: dispatch, paths: [dispatch/] }
+infra:
+  - { id: redis, kind: kv }
+  - { id: mongodb, kind: document }
+  - { id: mysql, kind: sql }
+  - { id: rabbitmq, kind: broker }
+
+links:
+  # ---- http, service to service ----
+  - from: cart
+    to: catalogue
+    kind: http
+    op: GET /product/:sku
+    expected: likely
+    why: host from CATALOGUE_HOST with literal default 'catalogue'; path is literal prefix + concatenated sku
+    evidence: [cart/server.js:30, cart/server.js:362, catalogue/server.js:82]
+  - from: payment
+    to: user
+    kind: http
+    op: GET /check/:id
+    expected: likely
+    why: host from USER_HOST env default; literal format string 'http://{user}:8080/check/{id}'
+    evidence: [payment/payment.py:25, payment/payment.py:64, user/server.js:85]
+  - from: payment
+    to: user
+    kind: http
+    op: POST /order/:id
+    expected: likely
+    why: host from env default; literal format string with method from requests.post
+    evidence: [payment/payment.py:106, user/server.js:183]
+  - from: payment
+    to: cart
+    kind: http
+    op: DELETE /cart/:id
+    expected: likely
+    why: host from CART_HOST env default; literal format string with requests.delete
+    evidence: [payment/payment.py:24, payment/payment.py:116, cart/server.js:101]
+  - from: shipping
+    to: cart
+    kind: http
+    op: POST /shipping/:id
+    expected: likely
+    why: base URL from CART_ENDPOINT env default in a field, id appended in a helper class (needs field-to-call data flow)
+    evidence: [shipping/src/main/java/com/instana/robotshop/shipping/Controller.java:24, shipping/src/main/java/com/instana/robotshop/shipping/CartHelper.java:40, cart/server.js:269]
+  - from: ratings
+    to: catalogue
+    kind: http
+    op: GET /product/:sku
+    expected: likely
+    why: base URL from CATALOGUE_URL env default injected by the DI container; sprintf '%s/product/%s'
+    evidence: [ratings/html/src/Kernel.php:76, ratings/html/src/Service/CatalogueService.php:27, catalogue/server.js:82]
+
+  # ---- http through the nginx gateway (config, not code) ----
+  - { from: web, to: catalogue, kind: http, op: "* /*", expected: likely, why: "nginx proxy_pass /api/catalogue/ to ${CATALOGUE_HOST}:8080", evidence: [web/default.conf.template:61], requires: nginx-adapter }
+  - { from: web, to: user, kind: http, op: "* /*", expected: likely, why: "nginx proxy_pass /api/user/", evidence: [web/default.conf.template:65], requires: nginx-adapter }
+  - { from: web, to: cart, kind: http, op: "* /*", expected: likely, why: "nginx proxy_pass /api/cart/", evidence: [web/default.conf.template:69], requires: nginx-adapter }
+  - { from: web, to: shipping, kind: http, op: "* /*", expected: likely, why: "nginx proxy_pass /api/shipping/", evidence: [web/default.conf.template:73], requires: nginx-adapter }
+  - { from: web, to: payment, kind: http, op: "* /*", expected: likely, why: "nginx proxy_pass /api/payment/", evidence: [web/default.conf.template:77], requires: nginx-adapter }
+  - { from: web, to: ratings, kind: http, op: "* /*", expected: likely, why: "nginx proxy_pass /api/ratings/", evidence: [web/default.conf.template:81], requires: nginx-adapter }
+
+  # ---- event (service level drawn consumer -> publisher, ruling N3 default) ----
+  - from: dispatch
+    to: payment
+    kind: event
+    op: "robot-shop:orders"
+    expected: exact
+    why: literal exchange 'robot-shop' and routing key 'orders' on both ends
+    evidence: [payment/rabbitmq.py:8, payment/rabbitmq.py:10, payment/rabbitmq.py:29, dispatch/main.go:72, dispatch/main.go:80, dispatch/main.go:219]
+
+  # ---- db ----
+  - { from: cart, to: redis, kind: db, op: null, expected: likely, why: "redis client, host from REDIS_HOST default", evidence: [cart/server.js:29, cart/server.js:390] }
+  - { from: user, to: redis, kind: db, op: null, expected: likely, why: "redis client, host from REDIS_HOST default", evidence: [user/server.js:258, user/server.js:259] }
+  - { from: user, to: mongodb, kind: db, op: users.users, expected: likely, why: "literal collection name; db from MONGO_URL default", evidence: [user/server.js:272, user/server.js:278] }
+  - { from: user, to: mongodb, kind: db, op: users.orders, expected: likely, why: "literal collection name; db from MONGO_URL default", evidence: [user/server.js:272, user/server.js:279] }
+  - { from: catalogue, to: mongodb, kind: db, op: catalogue.products, expected: likely, why: "literal collection name; db from MONGO_URL default", evidence: [catalogue/server.js:157, catalogue/server.js:163] }
+  - { from: ratings, to: mysql, kind: db, op: ratings, expected: likely, why: "dbname in a DSN env default; tables are in SQL strings", evidence: [ratings/html/src/Kernel.php:77] }
+  - { from: shipping, to: mysql, kind: db, op: cities.cities, expected: likely, why: "@Table literal; database from a JDBC URL with env default host", evidence: [shipping/src/main/java/com/instana/robotshop/shipping/JpaConfig.java:16, shipping/src/main/java/com/instana/robotshop/shipping/City.java:14] }
+  - { from: shipping, to: mysql, kind: db, op: cities.codes, expected: likely, why: "@Table literal; database from a JDBC URL with env default host", evidence: [shipping/src/main/java/com/instana/robotshop/shipping/JpaConfig.java:16, shipping/src/main/java/com/instana/robotshop/shipping/Code.java:13] }
+
+channels:
+  - { service: payment, role: publishes, channel: "robot-shop:orders", evidence: [payment/rabbitmq.py:29] }
+  - { service: dispatch, role: subscribes, channel: "robot-shop:orders", evidence: [dispatch/main.go:80, dispatch/main.go:219] }
+
+not_links:
+  - { from: "*", to: "*", why: "GET /health and /metrics on every service are probes" }
+  - { from: payment, to: external, why: "PAYMENT_GATEWAY is an external URL (payment.py:84), not a workspace service" }
+  - { from: load-gen, to: web, why: "load generator, out of scope" }

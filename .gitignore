@@ -11,3 +11,12 @@ next-env.d.ts
 # this project uses pnpm
 package-lock.json
 yarn.lock
+
+# Rust
+/target
+/bench/target
+*.snap.new
+/sbom
+
+# Claude Code agent worktrees
+.claude/worktrees/

@@ -1,0 +1,15 @@
+[package]
+name = "cartograph-git"
+description = "gitoxide wrapper: first-parent walk, tree diff, blob reads, renames, merge base, HEAD reads (B7)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cartograph-core.workspace = true
+
+[lints]
+workspace = true
