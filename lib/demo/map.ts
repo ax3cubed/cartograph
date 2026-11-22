@@ -1,6 +1,5 @@
 // Links the indexer scored below 0.30. They are hidden on the map until "Show weak links" is on.
-import { confidence } from "../model.ts";
-import type { Link } from "../workspace.ts";
+import { confidence, type Link } from "../model.ts";
 
 export const WEAK_LINKS: Link[] = [
   { from: "notify/channels/sms.ts", to: "auth/users/repo.go", type: "calls", added: "ab83e1d",

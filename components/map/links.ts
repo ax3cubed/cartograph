@@ -1,6 +1,6 @@
 // Link logic for the map: weak links, corrections, bundles, trace reach, filters and the YAML a correction would write.
-import { COMMITS, LINKS, NODES, byId, descendants, isActive, type Link, type LinkType } from "@/lib/workspace";
-import { HIDDEN_BELOW, confidence, type Correction, type CorrectionAction } from "@/lib/model";
+import { COMMITS, LINKS, NODES, byId, descendants, isActive } from "@/lib/workspace";
+import { HIDDEN_BELOW, confidence, type Correction, type CorrectionAction, type Link, type LinkType } from "@/lib/model";
 import { WEAK_LINKS } from "@/lib/demo/map";
 import { getConcepts, getContracts, getEntrypoints } from "@/lib/source";
 

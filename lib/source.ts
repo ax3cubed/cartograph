@@ -2,10 +2,10 @@
 // Decision A1: these become fetches to the local Rust API, so callers should treat them as async-shaped
 // (read once, keep in state) and never call them in render loops.
 import type {
-  ActivityItem, AskTurn, CommitImpact, Concept, Correction, CoverageRow, Entrypoint,
+  ActivityItem, AskTurn, Commit, CommitImpact, Concept, Correction, CoverageRow, Entrypoint,
   Freshness, McpTool, Owner, Provider, Repo, SearchResult, Spec, WorkspaceSummary,
 } from "./model.ts";
-import { COMMITS, NODES, WORKSPACE, type Commit } from "./workspace.ts";
+import { COMMITS, NODES, WORKSPACE } from "./workspace.ts";
 import { ACTIVITY, CORRECTIONS, FRESHNESS, NOW, OWNERS, REPOS, WORKSPACES } from "./demo/workspace.ts";
 import { SPECS } from "./demo/contracts.ts";
 import { CONCEPTS, COVERAGE, ENTRYPOINTS } from "./demo/views.ts";

@@ -1,9 +1,9 @@
 // Answers questions by walking the graph. Every claim carries the nodes/commits it came from,
 // so the UI can show the evidence. These same functions are the tools an LLM agent would call later.
 
-import type { McpToolName } from "./model.ts";
+import type { Link, LinkType, McpToolName } from "./model.ts";
 import {
-  COMMITS, LINKS, NODES, byId, commitBySha, dayMs, descendants, isActive, type Link, type LinkType,
+  COMMITS, LINKS, NODES, byId, commitBySha, dayMs, descendants, isActive,
 } from "./workspace.ts";
 
 export type Part = string | { node: string } | { commit: string };

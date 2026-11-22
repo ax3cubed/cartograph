@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { NODES, byId, type LinkType } from "@/lib/workspace";
+import { NODES, byId } from "@/lib/workspace";
 import { now } from "@/lib/source";
-import type { Correction, CorrectionAction } from "@/lib/model";
+import type { Correction, CorrectionAction, LinkType } from "@/lib/model";
 import { KINDS, toCorrection, yamlOf, type Draft, type EffLink } from "./links";
 import "./map.css";
 

@@ -1,15 +1,7 @@
 // Shell demo data: what the add-workspace wizard discovers in northwind, plus the stale and failed index states
 // that the G02 boards show. Move into lib/source.ts when the local API exists.
-import type { Freshness } from "../model.ts";
+import type { FolderRow, Freshness } from "../model.ts";
 import { SERVICES } from "../workspace.ts";
-
-export interface FolderRow {
-  folder: string; // as written in the workspace file
-  name?: string; // display name from folders[].name
-  result: "repo" | "scope" | "skipped";
-  repo?: string; // service id for repo and scope rows
-  detail: string;
-}
 
 export const NORTHWIND_FILE = "~/code/northwind/northwind.code-workspace";
 export const NORTHWIND_ID = "a41c7e90";

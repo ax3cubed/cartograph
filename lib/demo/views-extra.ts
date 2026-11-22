@@ -1,7 +1,7 @@
 // Extra northwind demo data for the view boards: drift, spec versions, concept detail and unresolved references.
 // Request: move into lib/source.ts getters when the index API exists.
+import type { SpecVersion } from "../model.ts";
 
-export interface SpecVersion { v: number; sha: string; summary: string; breaking?: { what: string; callers: string[] } }
 export const VERSIONS: Record<string, SpecVersion[]> = {
   gateway: [
     { v: 2, sha: "d03f62b", summary: "Added POST /checkout. No breaking changes." },
