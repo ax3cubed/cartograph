@@ -246,7 +246,10 @@ mod tests {
 
     fn repo_file(rel: &str) -> String {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        std::fs::read_to_string(root.join(rel)).unwrap_or_default()
+        // A Windows checkout may still carry CRLF; the generator writes LF.
+        std::fs::read_to_string(root.join(rel))
+            .unwrap_or_default()
+            .replace("\r\n", "\n")
     }
 
     #[test]
