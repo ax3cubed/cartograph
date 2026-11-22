@@ -128,7 +128,7 @@ fn manifests_keep_resolution_fields_and_read_jsonc() {
     let (e, k) = extractor_for("tsconfig.json").unwrap();
     let f = e.extract(
         k,
-        b"{\n // comment\n \"compilerOptions\": {\"baseUrl\": \".\",},\n}",
+        b"{\n // comment\n \"compilerOptions\": {\"baseUrl\": \".\", \"strict\": true,},\n}",
     );
     assert_eq!(
         manifest::resolution_json(f.facts(), false),

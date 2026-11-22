@@ -65,7 +65,6 @@ impl Extractor for ManifestJs {
         } else {
             &TSCONFIG_FIELDS
         };
-        // serde_json's map is ordered by key, so to_string is canonical.
         let mut facts: Vec<Fact> = fields
             .iter()
             .chain(if kind == PACKAGE {
@@ -76,7 +75,7 @@ impl Extractor for ManifestJs {
             .filter_map(|f| {
                 Some(Fact::Manifest {
                     field: (*f).to_owned(),
-                    value: obj.get(*f)?.to_string(),
+                    value: canonical(obj.get(*f)?),
                 })
             })
             .collect();
@@ -100,6 +99,17 @@ impl Extractor for ManifestJs {
     }
 }
 
+/// The compilerOptions oxc_resolver 11.24 reads when it resolves or picks a file's tsconfig; the rest
+/// (strict, jsx, target, ...) can't change a resolution.
+const RESOLUTION_COMPILER_OPTIONS: [&str; 6] = [
+    "allowJs",
+    "baseUrl",
+    "declarationDir",
+    "outDir",
+    "paths",
+    "rootDirs",
+];
+
 /// The manifest as the resolver sees it: a JSON object of its resolution fields only.
 pub fn resolution_json(facts: &[Fact], package: bool) -> String {
     let keep: &[&str] = if package {
@@ -112,6 +122,17 @@ pub fn resolution_json(facts: &[Fact], package: bool) -> String {
         if let Fact::Manifest { field, value } = f
             && keep.contains(&field.as_str())
         {
+            let narrowed;
+            let value = if !package && field == "compilerOptions" {
+                let Ok(serde_json::Value::Object(mut o)) = serde_json::from_str(value) else {
+                    continue;
+                };
+                o.retain(|k, _| RESOLUTION_COMPILER_OPTIONS.contains(&k.as_str()));
+                narrowed = canonical(&serde_json::Value::Object(o));
+                &narrowed
+            } else {
+                value
+            };
             if out.len() > 1 {
                 out.push(',');
             }
@@ -122,6 +143,25 @@ pub fn resolution_json(facts: &[Fact], package: bool) -> String {
     }
     out.push('}');
     out
+}
+
+/// JSON with every object's keys sorted. serde_json keeps insertion order when any crate in the
+/// build enables `preserve_order` (oxc_resolver does), so facts must not rely on the map type.
+fn canonical(v: &serde_json::Value) -> String {
+    fn sort(v: &serde_json::Value) -> serde_json::Value {
+        match v {
+            serde_json::Value::Object(m) => {
+                let mut keys: Vec<&String> = m.keys().collect();
+                keys.sort();
+                serde_json::Value::Object(
+                    keys.into_iter().map(|k| (k.clone(), sort(&m[k]))).collect(),
+                )
+            }
+            serde_json::Value::Array(a) => serde_json::Value::Array(a.iter().map(sort).collect()),
+            other => other.clone(),
+        }
+    }
+    sort(v).to_string()
 }
 
 /// True for a path whose base name makes it a package.json.
