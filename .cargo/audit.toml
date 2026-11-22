@@ -1,0 +1,10 @@
+# Advisory exceptions for `cargo audit`. Keep in step with [advisories] ignore in deny.toml, which
+# records the reason. Remove them as soon as `cargo tree -i heapless` comes back empty.
+[advisories]
+ignore = [
+  # heapless 0.8.0, nine "unsound" advisories published together on 18 Nov 2026. It arrives only
+  # through gix 0.90 → gix-hash → faster-hex 0.10.1; no gix release has moved to faster-hex 2 yet.
+  "RUSTSEC-2026-0574", "RUSTSEC-2026-0575", "RUSTSEC-2026-0576",
+  "RUSTSEC-2026-0577", "RUSTSEC-2026-0578", "RUSTSEC-2026-0579",
+  "RUSTSEC-2026-0580", "RUSTSEC-2026-0581", "RUSTSEC-2026-0582",
+]
