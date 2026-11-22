@@ -1,0 +1,25 @@
+/* Cartograph AI mark (components/brand/AiMark.tsx). */
+.aimark { flex: none; overflow: visible; }
+.aimark-node { fill: var(--aimark-accent, var(--accent)); transform-box: fill-box; transform-origin: center; }
+
+/* Streaming: the spoke draws out from the centre node, then the accent node lands. */
+.aimark[data-active] .aimark-spoke { stroke-dasharray: 1; animation: aimark-draw 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+.aimark[data-active] .aimark-node { animation: aimark-land 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+
+@keyframes aimark-draw {
+  0% { stroke-dashoffset: 1; }
+  55%, 100% { stroke-dashoffset: 0; }
+}
+@keyframes aimark-land {
+  0%, 30% { opacity: 0.35; transform: scale(0.6); }
+  60%, 100% { opacity: 1; transform: scale(1); }
+}
+
+/* Reduced motion: the mark stays still and whole. `animation: none`, not the global 0.01ms
+   duration, because an infinite 0.01ms loop would flicker. */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .aimark .aimark-spoke,
+  :root:not([data-motion="full"]) .aimark .aimark-node { animation: none; stroke-dashoffset: 0; opacity: 1; transform: none; }
+}
+:root[data-motion="reduce"] .aimark .aimark-spoke,
+:root[data-motion="reduce"] .aimark .aimark-node { animation: none; stroke-dashoffset: 0; opacity: 1; transform: none; }

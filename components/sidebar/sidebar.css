@@ -1,0 +1,71 @@
+/* sb-: the map's right sidebar (Details | Ask). Tokens come from globals.css. */
+
+.sb {
+  grid-area: sb; position: relative; min-height: 0; min-width: 0;
+  width: var(--sb-cur, var(--sb-w)); display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--line);
+}
+.sb.is-collapsed { width: 44px; }
+.sb.is-dragging { user-select: none; }
+.sb [hidden] { display: none !important; }
+
+/* resize handle: a 9px hit area on the left edge with a 1px line that lights up */
+.sb-handle {
+  position: absolute; z-index: 3; left: -5px; top: 0; bottom: 0; width: 9px; cursor: col-resize; touch-action: none;
+}
+.sb-handle::after { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px; background: transparent; transition: background 0.15s; }
+.sb-handle:hover::after, .sb.is-dragging .sb-handle::after { background: var(--accent); }
+.sb-handle:focus-visible { outline: none; }
+.sb-handle:focus-visible::after { background: var(--accent); width: 2px; left: 3.5px; }
+
+.sb-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  height: 48px; padding: 0 var(--space-2) 0 var(--space-3); border-bottom: 1px solid var(--line);
+}
+.sb-tabs { display: flex; gap: var(--space-1); height: 100%; }
+.sb-tab {
+  position: relative; display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 100%; padding: 0 var(--space-3); color: var(--muted); font-size: var(--fs-md); font-weight: 500;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.sb-tab:hover { color: var(--text); }
+.sb-tab[aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.sb-tab:focus-visible { outline-offset: -4px; }
+.sb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.sb-tab .sb-dot { margin-left: -2px; }
+
+.sb-icon {
+  position: relative; width: 32px; height: 32px; border-radius: var(--radius-md); flex: none;
+  display: grid; place-items: center; color: var(--muted);
+}
+.sb-icon:hover { background: var(--slab); color: var(--text); }
+.sb-icon.is-on { color: var(--text); background: var(--slab); }
+.sb-icon .sb-dot { position: absolute; top: 5px; right: 5px; box-shadow: 0 0 0 2px var(--panel); }
+
+.sb-strip { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; }
+.sb-strip .sb-icon:first-child { margin-bottom: var(--space-2); }
+
+.sb-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sb-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* Panel and Ask fill the pane and scroll inside it */
+.sb-pane > * { flex: 1; min-height: 0; }
+
+/* ---- drawer: below 1180px the open sidebar floats over the map at the same width, with no scrim ---- */
+.sb.is-drawer.is-open {
+  position: absolute; z-index: 20; right: 0; top: 60px; bottom: 0;
+  width: min(var(--sb-cur, var(--sb-w)), calc(100vw - 44px)); box-shadow: var(--shadow-4);
+}
+
+/* ---- bottom sheet: below 640px ---- */
+.sb.is-sheet {
+  position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; width: auto;
+  border-left: 0; border-top: 1px solid var(--line2); border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-4); transition: height 0.28s var(--ease);
+}
+.sb.is-sheet.is-peek { height: var(--sb-peek, 168px); }
+.sb.is-sheet.is-half { height: 55dvh; }
+.sb.is-sheet.is-full { height: calc(100dvh - 60px); }
+.sb.is-sheet.is-peek .sb-body { overflow: hidden; }
+.sb-grip { flex: none; height: 24px; display: grid; place-items: center; width: 100%; touch-action: none; }
+.sb-grip span { width: 40px; height: 4px; border-radius: 99px; background: var(--line3); }
+.sb.is-sheet .sb-head { height: 44px; }

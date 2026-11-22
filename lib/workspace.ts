@@ -1,6 +1,8 @@
 // Mock multi-service workspace. Real indexing (file scan + `git log`) should emit this same shape.
 // ponytail: hand-authored data, swap for a generated JSON when the indexer exists.
 
+import { confidence, type Confidence } from "./model.ts";
+
 export type Kind = "workspace" | "service" | "module" | "file";
 export type LinkType = "imports" | "calls" | "http" | "event" | "db";
 
@@ -21,6 +23,7 @@ export interface Link {
   type: LinkType;
   added: string; // commit sha
   removed?: string;
+  confidence?: Confidence; // absent = exact
 }
 
 export interface Commit {
@@ -220,6 +223,16 @@ export const LINKS: Link[] = [
   L(`${a}/users/repo.go`, `${s}/events/bus.ts`, "event", "ab83e1d"),
   L(`${b}/invoices/createInvoice.ts`, `${c}/api/products.py`, "http", "3e0d7a2"),
 ];
+
+// Links the indexer was less sure of. Everything not listed here is exact.
+const UNSURE: Record<string, Confidence> = {
+  [`${b}/invoices/createInvoice.ts>${c}/api/products.py`]: confidence(0.66, { kind: "env", note: "URL is built from CATALOG_URL, matched to catalog-service by name", file: "billing-service/src/invoices/createInvoice.ts", line: 31 }),
+  [`${g}/clients/billingClient.ts>${b}/invoices/createInvoice.ts`]: confidence(0.78, { kind: "name-match", note: "POST /invoices matches the route template", file: "api-gateway/src/clients/billingClient.ts", line: 18 }),
+  [`${n}/consumers/paymentEvents.ts>${s}/events/bus.ts`]: confidence(0.82, { kind: "parsed", note: "Subscribes to payment.succeeded", file: "notifications/src/consumers/paymentEvents.ts", line: 9 }),
+  [`${n}/consumers/userEvents.ts>${s}/events/bus.ts`]: confidence(0.71, { kind: "parsed", note: "Subscribes to user.created by string name", file: "notifications/src/consumers/userEvents.ts", line: 7 }),
+  [`${a}/users/repo.go>${s}/events/bus.ts`]: confidence(0.58, { kind: "name-match", note: "Publishes the string user.created; no schema import", file: "auth-service/src/users/repo.go", line: 64 }),
+};
+for (const l of LINKS) { const u = UNSURE[`${l.from}>${l.to}`]; if (u) l.confidence = u; }
 
 // ---------- time ----------
 

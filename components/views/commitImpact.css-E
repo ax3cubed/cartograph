@@ -1,0 +1,16 @@
+/* ci-: commit impact board */
+.ci-head { align-items: flex-start; }
+.ci-sha { color: var(--accent); letter-spacing: 0; }
+.ci-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.ci-summary { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; }
+.ci-summary b { font-size: 0.875rem; font-weight: 600; margin-right: 6px; }
+.ci-msg { flex-basis: 100%; }
+.ci-md { width: 100%; background: var(--slab); color: var(--text); border: 1px solid var(--line2); border-radius: 10px; padding: 12px; font-size: 0.78rem; }
+.ci-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.ci-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 10px; align-items: center; border-top: 1px solid var(--line); padding: 8px 0; font-size: 0.78rem; }
+.ci-row:first-of-type { border-top: 0; }
+.ci-ep { grid-template-columns: 52px minmax(0, 1fr); }
+.ci-file { grid-template-columns: minmax(0, 1fr); }
+.ci-lk { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; font-size: 0.78rem; }
+.ci-add { color: var(--up); font-weight: 600; }
+.ci-rem { color: var(--down); font-weight: 600; }

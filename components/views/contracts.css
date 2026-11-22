@@ -1,0 +1,19 @@
+/* ct-: contracts board */
+.ct-cols { grid-template-columns: 70px minmax(0, 1.5fr) minmax(0, 1fr) 70px 130px; }
+.ct-path.view-cell { display: flex; flex-direction: column; min-width: 0; font-size: 0.75rem; }
+.ct-path > :first-child { font-size: 0.8rem; color: var(--text); }
+.ct-sel { margin: 0; font-size: 0.875rem; font-weight: 600; overflow-wrap: anywhere; }
+.ct-slab .ct-p, .ct-p { margin: 0; font-size: 0.8rem; color: var(--body); line-height: 1.5; }
+.ct-diff { font-size: 0.78rem; line-height: 1.6; }
+.ct-caller { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.75rem; }
+.ct-open { align-self: flex-start; height: 32px; padding: 0 14px; }
+.ct-vh { margin: 0; font-size: calc(1.0625rem * var(--ts)); font-weight: 600; }
+.ct-vers { list-style: none; margin: 0; padding: 0; position: relative; display: flex; flex-direction: column; gap: 18px; }
+.ct-vers::before { content: ""; position: absolute; left: 5px; top: 8px; bottom: 20px; width: 2px; background: var(--line2); }
+.ct-vers li { position: relative; padding-left: 26px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.ct-vers li::before { content: ""; position: absolute; left: 0; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--line3); }
+.ct-vers li:first-child::before { background: var(--accent); }
+.ct-vers b { font-size: 0.875rem; font-weight: 600; }
+.ct-sha { font-size: 0.75rem; font-weight: 500; }
+.ct-callers { display: flex; flex-direction: column; gap: 2px; font-size: 0.75rem; line-height: 1.7; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .ct-cols { grid-template-columns: 60px minmax(0, 1fr) 120px; } .ct-cols > :nth-child(3), .ct-cols > :nth-child(4) { display: none; } }

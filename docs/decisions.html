@@ -1,0 +1,558 @@
+<title>Cartograph Decision Record</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one 900px reading column, same system as design-gaps.html and cli-and-mcp.html. Each decision is a ruled row: id, the call in bold, then why, precedent and what was rejected. Dark-first with a light theme. */
+:root {
+  --bg: #171b26; --panel: #1e2331; --term: #11141c; --line: #2b3243; --fg: #e6e9f0; --body: #c3c8d4; --muted: #9199ad;
+  --accent: #1aa3ff; --ok: #8fd14f; --warn: #ffb26b; --bad: #ff6a64;
+  --sans: "Sora", ui-sans-serif, system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f4f6fa; --panel: #ffffff; --term: #eef1f7; --line: #d8deea; --fg: #141821; --body: #363e52; --muted: #556074;
+  --accent: #0a72bf; --ok: #3b7a10; --warn: #94500b; --bad: #bf322c; color-scheme: light; } }
+:root[data-theme="light"] {
+  --bg: #f4f6fa; --panel: #ffffff; --term: #eef1f7; --line: #d8deea; --fg: #141821; --body: #363e52; --muted: #556074;
+  --accent: #0a72bf; --ok: #3b7a10; --warn: #94500b; --bad: #bf322c; color-scheme: light; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--sans); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 56px 88px; }
+.wrap { max-width: 900px; margin: 0 auto; display: grid; gap: 56px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.15; font-weight: 700; }
+h2 { font-size: 21px; font-weight: 600; }
+h3 { font-size: 15.5px; font-weight: 600; }
+p, li { color: var(--body); max-width: 68ch; }
+p { margin: 0; }
+ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--panel); border: 1px solid var(--line); padding: 2px 6px; border-radius: 4px; color: var(--fg); overflow-wrap: anywhere; }
+a { color: var(--accent); overflow-wrap: anywhere; }
+header { display: grid; gap: 14px; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.brand svg { width: 26px; height: 26px; }
+.brand .s { fill: none; stroke: var(--fg); stroke-width: 4; stroke-linecap: round; }
+.brand .f { fill: var(--fg); } .brand .a { fill: var(--accent); }
+.stats { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.stats div { flex: 1 1 150px; padding: 14px 16px; border-right: 1px solid var(--line); }
+.stats div:last-child { border-right: 0; }
+.stats b { display: block; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats span { color: var(--muted); font-size: 12px; }
+.shape { display: grid; gap: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 18px; }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.flow span { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 10px; font-family: var(--mono); }
+.flow span.core { border-color: var(--accent); color: var(--accent); }
+.flow i { font-style: normal; color: var(--muted); }
+section { display: grid; gap: 14px; }
+.head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 18px; }
+.head span { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+.list { display: grid; }
+.row { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 4px 14px; padding: 15px 0; border-top: 1px solid var(--line); align-items: start; }
+.row:first-child { border-top: 0; }
+.id { font-family: var(--mono); color: var(--muted); font-size: 12.5px; padding-top: 2px; }
+.row > div { display: grid; gap: 6px; min-width: 0; }
+.row p { font-size: 14px; }
+.why, .meta { font-size: 13px !important; color: var(--muted) !important; }
+.why b, .meta b { color: var(--body); font-weight: 600; }
+.chg { color: var(--warn); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin-left: 8px; white-space: nowrap; }
+.ver { color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin-left: 8px; white-space: nowrap; }
+pre { margin: 0; background: var(--term); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-x: auto; font: 12.5px/1.6 var(--mono); color: var(--fg); }
+pre .c { color: var(--muted); }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 600px; }
+th, td { text-align: left; padding: 10px 14px; border-top: 1px solid var(--line); vertical-align: top; color: var(--body); }
+th { border-top: 0; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--panel); }
+td:first-child { color: var(--fg); white-space: nowrap; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 6px; }
+@media (max-width: 640px) { .row { grid-template-columns: 40px minmax(0, 1fr); } }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path class="s" d="M6 24 L14 10 L26 16"/><circle class="f" cx="6" cy="24" r="3.4"/><circle class="f" cx="14" cy="10" r="3.4"/><circle class="a" cx="26" cy="16" r="3.4"/></svg>
+    Cartograph · decision record, 21 Nov 2026
+  </div>
+  <h1>Every open call, made</h1>
+  <p>This page settles the open gaps, the questions on the CLI and MCP spec, the board decisions and the Claude Code idea. Each call is backed by research into how open-source projects solve the same problem. Every row names the decision, why it was made, a precedent you can read, and what was turned down. Rows marked <span class="chg" style="margin:0">changes spec</span> overturn something in <a href="https://claude.ai/artifact/UWcMb86bpiMAax2r9eqsbN">the CLI and MCP spec</a>, which has been updated to match.</p>
+  <div class="stats">
+    <div><b>59</b><span>decisions</span></div>
+    <div><b>9</b><span>areas</span></div>
+    <div><b>7</b><span>change the earlier spec</span></div>
+    <div><b>5</b><span>need a benchmark before code</span></div>
+  </div>
+</header>
+
+<section aria-labelledby="s-shape">
+  <div class="head"><h2 id="s-shape">The shape in one picture</h2><span>everything below hangs off this</span></div>
+  <div class="shape">
+    <div class="flow" aria-label="Architecture">
+      <span>.code-workspace</span><i>→</i><span class="core">cartograph (one Rust binary)</span><i>→</i><span>index · SQLite</span>
+    </div>
+    <div class="flow" aria-label="Readers">
+      <span class="core">query layer</span><i>serves</i><span>app on 127.0.0.1</span><span>CLI</span><span>MCP over stdio</span><span>Ask agent</span>
+    </div>
+    <p>One binary indexes, stores, answers, serves the app and speaks MCP. Every reader goes through one query layer, so the app, the CLI, MCP and Ask can't drift apart. Nothing listens beyond 127.0.0.1, and nothing leaves the machine except a call to the model provider you configure.</p>
+  </div>
+</section>
+
+<section aria-labelledby="s-a">
+  <div class="head"><h2 id="s-a">A · Shape and runtime</h2><span>X1 · PRODUCT.md open decision</span></div>
+  <div class="list">
+    <div class="row"><span class="id">A1</span><div>
+      <h3>One Rust binary does everything, and the app reads the index through it</h3>
+      <p><code>cartograph open</code> starts a Rust server on 127.0.0.1 with a random port. It serves the Next.js app as a static export built into the binary, plus a read-only JSON API. The CLI and MCP call the same query code in-process. This closes X1 and the open decision in PRODUCT.md.</p>
+      <p class="why"><b>Why:</b> the SQL lives in one place. A 412 MB index can't go into the browser: SQLite in WebAssembly would copy it into browser storage and couldn't see live updates. Release is a single file with no Node runtime.</p>
+      <p class="meta"><b>Precedent:</b> Datasette, Jaeger all-in-one (a UI built into a Go binary), <a href="https://github.com/sourcegraph/zoekt/blob/main/doc/design.md">zoekt-webserver</a>. <b>Rejected:</b> SQLite in WebAssembly; Electron or Tauri as the default, which add signing and packaging per OS; keeping <code>next start</code>, which needs a second runtime and a second SQLite driver.</p>
+    </div></div>
+    <div class="row"><span class="id">A2</span><div>
+      <h3>The app's server routes move into Rust</h3>
+      <p>A static export can't keep Route Handlers that read the request, rewrites, cookies or dynamic routes without <code>generateStaticParams</code>. So <code>app/api</code> moves into the Rust API, pages fetch on the client, and view state lives in the URL hash (<code>#t=2019-04&amp;lod=module&amp;focus=…</code>). This is the real cost of A1, so plan it as part of stage 3.</p>
+      <p class="meta"><b>Source:</b> <code>node_modules/next/dist/docs/01-app/02-guides/static-exports.md</code>, Unsupported Features.</p>
+    </div></div>
+    <div class="row"><span class="id">A3</span><div>
+      <h3>The local server is locked to this machine and this session</h3>
+      <p>It binds only to loopback and refuses any other address. It checks the <code>Host</code> header against DNS rebinding, and refuses any <code>Origin</code> that isn't its own. The browser URL carries a random token for the session. CORS is never opened to a hosted site.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://modelcontextprotocol.io/specification/latest/basic/security_best_practices">MCP security best practices</a>. <b>Rejected:</b> GitNexus's pattern of letting a hosted front end call localhost, which breaks local only.</p>
+    </div></div>
+    <div class="row"><span class="id">A4</span><div>
+      <h3>The CLI and app versions can't drift apart</h3>
+      <p>They ship in the same binary, so "which CLI goes with app 0.4.0" stops being a question: they're the same version. <code>/api/version</code> exists only for diagnostics.</p>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-b">
+  <div class="head"><h2 id="s-b">B · The index</h2><span>X3 · X5 · X6 · X10 · X12</span></div>
+  <div class="list">
+    <div class="row"><span class="id">B1</span><div>
+      <h3>Everything Cartograph keeps lives in <code>~/.cartograph</code>, not the workspace folder<span class="chg">changes spec</span></h3>
+      <p>One folder on every platform: <code>~/.cartograph/registry.toml</code>, <code>config.toml</code> (providers and preferences; keys stay in the OS keychain), <code>cache/facts.db</code> (the shared parse cache) and <code>workspaces/&lt;id&gt;/</code> (<code>index.cartograph</code>, <code>ask.db</code>, <code>logs/</code>, <code>reports/</code>, the lock). <code>CARTOGRAPH_HOME</code> moves the whole folder. On Linux an explicitly set <code>XDG_DATA_HOME</code> is honoured instead. On Windows it's <code>%USERPROFILE%\.cartograph</code>. The folder is marked as excluded from Time Machine, because indexes are large and can be rebuilt. Revised 22 Nov 2026 from per-platform data folders: one place to inspect, back up or delete beats following each OS's convention. <code>index_path</code> in config overrides it. A path inside iCloud Drive, Dropbox, OneDrive or Google Drive is refused, with the reason.</p>
+      <p class="why"><b>Why:</b> SQLite's WAL mode needs its <code>-wal</code> and <code>-shm</code> files on one host. Sync clients upload them separately and can restore copies that don't match, which corrupts the file. I chose the data folder over the cache folder the research suggested, because macOS can empty caches when the disk is low, and a first index can take 40 minutes to rebuild.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://www.sqlite.org/wal.html">sqlite.org/wal</a>, <a href="https://sqlite.org/howtocorrupt.html">How to corrupt an SQLite file</a>. <b>Rejected:</b> an index in the workspace folder, which is often inside a synced Documents folder.</p>
+    </div></div>
+    <div class="row"><span class="id">B2</span><div>
+      <h3>WAL with snapshot reads, one writer, and a real OS lock</h3>
+      <p>Readers keep reading the version they started on while a sync writes. The writer commits a batch per repo or per N commits, then truncates the WAL at the end of the run. A sync takes an OS advisory lock (<code>fd-lock</code>), which the kernel releases if the process dies, so the lock can't go stale. Only a full rebuild or a schema migration writes a new file and renames it into place. This closes X5.</p>
+      <p class="meta"><b>Rejected:</b> copying and renaming on every sync, which is 412 MB of I/O, and Windows can't rename over a file that's open. PID-file locks, whose stale-lock guessing is a classic source of bugs.</p>
+    </div></div>
+    <div class="row"><span class="id">B3</span><div>
+      <h3>Every file format carries a version, and the rules are written down</h3>
+      <p><b>Index:</b> SQLite <code>application_id</code> (a Cartograph magic number) and <code>user_version</code>, plus a <code>meta</code> table holding <code>format_version</code>, <code>min_reader_version</code>, <code>writer_version</code> and each extractor's version. If the index is newer and still readable, this CLI opens it read-only. If it's newer and not readable, the error says to upgrade. If it's older, the CLI migrates it, or rebuilds it when no migration exists, since the index is a cache.</p>
+      <p><b>cartograph.yaml and the override file:</b> a required <code>version: 1</code>, plus a JSON Schema generated from the Rust types with <code>schemars</code>. The schema ships on disk and is linked through the yaml-language-server comment, so editors validate it offline. This closes X6.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://docs.rs/rusqlite_migration/latest/rusqlite_migration/">rusqlite_migration</a> (user_version), Cargo.lock's <code>version</code>, Terraform state's version and lineage.</p>
+    </div></div>
+    <div class="row"><span class="id">B4</span><div>
+      <h3>Compare indexes by a hash of their facts, not their bytes</h3>
+      <p>The same commits produce the same <b>fact hash</b>: SHA-256 over a sorted, canonical list of facts and intervals, with row ids and timestamps left out. It's stored in <code>meta</code>, and <code>cartograph verify</code> compares two indexes, or an index against a manifest. This answers X12.</p>
+      <p class="why"><b>Why:</b> a SQLite file's bytes depend on page size, the SQLite version, the freelist and the insert order. SQLite's own <code>dbhash</code> tool uses the same idea.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://www.sqlite.org/dbhash.html">sqlite.org/dbhash</a>. <b>Rejected:</b> byte-identical files.</p>
+    </div></div>
+    <div class="row"><span class="id">B5</span><div>
+      <h3>One branch per repo, with branch overlays on demand</h3>
+      <p>The timeline is the first-parent history of each repo's default branch. A branch or PR is an <b>overlay</b>: a <code>branch</code> row (repo, ref, base commit, head commit) plus intervals tagged with that branch's id, for the commits between the merge base and the branch head. A query for a branch reads main as of the base commit, and the overlay rows win. Facts are cached by blob id, so an overlay costs about the size of its diff. Overlays are created for the checked-out branch and for <code>cartograph impact &lt;ref&gt;</code>, and dropped once the branch is merged or deleted. This closes X3 and the open question about branches.</p>
+      <p class="meta"><b>Precedent:</b> zoekt stores each blob once with a bitmask of the branches it's on. <b>Rejected:</b> indexing every branch fully, and GitNexus's full copy of the index per branch.</p>
+    </div></div>
+    <div class="row"><span class="id">B6</span><div>
+      <h3>Every derived row records what it was built from</h3>
+      <p>Each derived row stores an <code>inputs_key</code>: a hash of its input blob ids or upstream fact hashes, the extractor name and version, a config hash, and for AI output the model id and prompt version. A run recomputes the keys and rebuilds only the rows whose key changed. AI output is marked stale instead of deleted. Extractors are versioned one by one, so a release doesn't invalidate everything. This closes X10.</p>
+      <p class="meta"><b>Precedent:</b> Bazel action keys, Salsa in rust-analyzer, Glean's derived predicates. <b>Rejected:</b> one cache version for the whole package, which is what GitNexus does.</p>
+    </div></div>
+    <div class="row"><span class="id">B7</span><div>
+      <h3>Read git with gitoxide; replay from the merge base after a rewrite<span class="ver">benchmark</span></h3>
+      <p><code>gix</code> handles object reads, walking history and diffing trees. Rename detection runs per first-parent commit: exact blob matches first, which costs almost nothing given the cache, then <code>gix-diff</code>'s similarity matching (50%, at most 1,000 candidates), with a note on the commit whenever the limit is hit. If the last indexed commit is no longer an ancestor of the branch, Cartograph finds the merge base, reopens the intervals opened after it and replays from there. It falls back to the <code>git</code> command only for partial clones.</p>
+      <p class="meta"><b>Precedent:</b> Cargo, jj and GitButler all use gix. <a href="https://docs.rs/gix-diff/latest/gix_diff/">gix-diff docs</a>. <b>Rejected:</b> libgit2, which is C with a GPL-plus-exception licence; and parsing <code>git log -M</code>. <b>Before code:</b> benchmark rename detection on remotion against libgit2.</p>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-c">
+  <div class="head"><h2 id="s-c">C · Discovering the workspace</h2><span>.code-workspace · registry · services</span></div>
+  <div class="list">
+    <div class="row"><span class="id">C1</span><div>
+      <h3>Read <code>.code-workspace</code> exactly as VS Code does</h3>
+      <p>Parse it with the <code>jsonc-parser</code> crate, which allows comments and trailing commas. Resolve <code>folders[].path</code> against the folder holding the workspace file; an absolute path is used as it is. <code>~</code> and <code>${env:…}</code> stay literal, because VS Code doesn't expand them, and <code>doctor</code> warns about them. A <code>uri</code> is accepted only if it's <code>file:</code>. If <code>remoteAuthority</code> is set, the whole file is skipped. <code>name</code> falls back to the folder's name, and duplicate folders are removed.</p>
+      <p class="meta"><b>Precedent:</b> VS Code <a href="https://github.com/microsoft/vscode/blob/main/src/vs/platform/workspaces/common/workspaces.ts">workspaces.ts</a>, <code>toWorkspaceFolders</code> and <code>resolvePath</code>. <b>Rejected:</b> <code>json5</code>, which is a different grammar, and <code>serde_jsonc</code>, which is unmaintained.</p>
+    </div></div>
+    <div class="row"><span class="id">C2</span><div>
+      <h3>With no workspace file, walk three levels and stop at each repo</h3>
+      <p>The <code>ignore</code> crate's walker respects <code>.gitignore</code>, and the depth is 3. It stops going down a branch at the first <code>.git</code>, never follows symlinks, and always skips <code>node_modules</code>, <code>target</code> and <code>.venv</code>. Submodules belong to their parent repo unless the workspace file lists them. Worktrees are grouped by <code>--git-common-dir</code>. Shallow clones are flagged, and bare repos are skipped.</p>
+    </div></div>
+    <div class="row"><span class="id">C3</span><div>
+      <h3>How the default branch is found, in order, without the network</h3>
+      <p>1. <code>default_branch</code> in cartograph.yaml. 2. <code>origin/HEAD</code>. 3. <code>init.defaultBranch</code>, if that branch exists. 4. <code>main</code>, then <code>master</code>. 5. The current branch, with a warning. It never runs <code>git remote show</code>, which contacts the remote. Since Git 2.48, a fetch fills in a missing <code>origin/HEAD</code>, so <code>sync --fetch</code> fixes that case on its own.</p>
+      <p class="meta"><b>Precedent:</b> git-town's <code>commands.go</code>, Git 2.48 release notes.</p>
+    </div></div>
+    <div class="row"><span class="id">C4</span><div>
+      <h3>A per-user registry at <code>~/.cartograph/registry.toml</code></h3>
+      <p>Entries are keyed by the repo's canonical path, with its remote URL and root commit stored too, so a clone that moves can be matched again. It's written under a lock to a temp file, then renamed into place. If two folders hold clones of the same repo, Cartograph warns.</p>
+      <p class="meta"><b>Precedent:</b> direnv's allow list, gh's and mise's use of <code>~/.config</code>, GitNexus's sibling-clone warning. <b>Rejected:</b> keying by remote URL, because forks share URLs and repos without a remote have none.</p>
+    </div></div>
+    <div class="row"><span class="id">C5</span><div>
+      <h3>cartograph.yaml is committed next to the workspace file</h3>
+      <p>If that folder isn't a repo, <code>init</code> says so and suggests the usual fix: keep <code>acme.code-workspace</code> and <code>cartograph.yaml</code> in one of the repos, or in a small workspace repo, with <code>../</code> paths to the others. Then teammates can share the map by committing one file.</p>
+    </div></div>
+    <div class="row"><span class="id">C6</span><div>
+      <h3>How a monorepo is split into services, first match wins</h3>
+      <p>1. Entries in cartograph.yaml. 2. Backstage <code>catalog-info.yaml</code> components. 3. Workspace manifests: pnpm, npm, go.work, Nx <code>project.json</code>, Cargo, Composer. 4. Something deployable turns a package into a <b>service</b> rather than a library: a Dockerfile, a compose <code>build</code>, the source behind a k8s Deployment, a Procfile, serverless config. 5. Otherwise the whole repo is one service. Compose and k8s service names become host aliases, so <code>http://orders:8080</code> resolves to the <code>orders</code> service.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://backstage.io/docs/reference/catalog-model.componententityv1alpha1">Backstage catalog model</a>, Nx project graph. <b>Rejected:</b> guessing from folder names like <code>services/*</code>, and running build tools, which need a toolchain and the network.</p>
+    </div></div>
+    <div class="row"><span class="id">C7</span><div>
+      <h3>"Split" on board S4 writes to the manifest</h3>
+      <p>It adds a <code>services:</code> entry to cartograph.yaml, the first rule in C6, shows the diff, and re-indexes only that repo.</p>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-d">
+  <div class="head"><h2 id="s-d">D · Keeping the index current</h2><span>open question 1 · board S3</span></div>
+  <div class="list">
+    <div class="row"><span class="id">D1</span><div>
+      <h3>Answer now, refresh in the background<span class="chg">changes spec</span></h3>
+      <p>Every read (the CLI, MCP, the app) runs a cheap check: each repo's HEAD against its indexed commit. That takes under 100 ms and doesn't touch the network. If a repo is behind, the read answers from the current index straight away and says how many commits behind it is. Then it starts an incremental sync in the background if none is running. The next read is current. <code>auto_sync = "background" | "never"</code> in config, default <code>background</code>. A command that needs a current answer, such as <code>impact</code> in CI, takes <code>--wait</code>.</p>
+      <p class="why"><b>Why:</b> the research disagreed with itself. The CLI research wanted reads to block on a sync; the MCP research wanted reads only to report stale data. A sync that blocks can run past agent tool timeouts (Claude Code moves calls longer than about 2 minutes to the background, and the TS SDK client gives up after about 60 s). Only reporting it leaves the index behind forever unless something else runs. Answering now and refreshing in the background gets the speed of the second with the freshness of the first, and needs no hooks or daemon to be correct.</p>
+      <p class="meta"><b>Precedent:</b> HTTP's stale-while-revalidate, and GitNexus's "N commits behind" hint. <b>Rejected:</b> blocking reads, and reads that only report.</p>
+    </div></div>
+    <div class="row"><span class="id">D2</span><div>
+      <h3>Only one sync at a time; a second request marks it dirty</h3>
+      <p>A sync that finds the lock held sets a "dirty" flag and exits with code 0. The sync that's running checks the flag before it finishes and runs one more round if it's set. So hooks, background refreshes and agents can all ask for a sync without piling up. This replaces exit code 4.</p>
+    </div></div>
+    <div class="row"><span class="id">D3</span><div>
+      <h3>Hooks are optional, and installed the way git now prefers</h3>
+      <p>On Git 2.54 and later, hooks go in config: <code>hook.cartograph.command</code> plus a <code>hook.cartograph.event</code> for post-commit, post-merge, post-checkout and post-rewrite. These run alongside any other hooks. On older git, Cartograph finds the hooks folder with <code>git rev-parse --git-path hooks</code>, which respects <code>core.hooksPath</code>. It creates the hook if there isn't one, or appends a marked block to an existing shell hook, and otherwise refuses and prints the line to add. If husky or lefthook owns the hooks, it writes nothing and prints a snippet for their config. A post-checkout that only checked out files does nothing, and so do hooks fired during a rebase. The background child points its stdio at null, so git doesn't wait for it.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://github.com/git/git/blob/master/Documentation/config/hook.adoc">git hook config</a>, git-lfs (refuses to overwrite a hook), pre-commit and lefthook (both refuse when <code>core.hooksPath</code> is set). <b>Rejected:</b> setting <code>core.hooksPath</code> ourselves, overwriting hooks, and a watcher daemon as the default.</p>
+    </div></div>
+    <div class="row"><span class="id">D4</span><div>
+      <h3>The schedule is opt-in and exists for fetching<span class="chg">changes spec</span></h3>
+      <p>D1 already keeps local commits current, so the hourly job is only for <code>sync --fetch</code>, to pick up commits teammates pushed. It's one user-level job that loops over the registry and runs at a random minute: launchd on macOS, a systemd user timer with <code>Persistent=true</code> on Linux (crontab if there's no systemd), and schtasks on Windows. <code>doctor</code> warns when the binary path stored in the job is stale. Board S3's options become: "Keep it current as you work" (D1, default), "Also after each commit or pull" (hooks), and "Also fetch every hour".</p>
+      <p class="meta"><b>Precedent:</b> <code>git maintenance start</code> in <a href="https://github.com/git/git/blob/master/builtin/gc.c">builtin/gc.c</a>, including its random minute.</p>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-e">
+  <div class="head"><h2 id="s-e">E · The command line</h2><span>D12 · distribution</span></div>
+  <div class="list">
+    <div class="row"><span class="id">E1</span><div>
+      <h3>Output conventions</h3>
+      <p>Progress bars (indicatif) go to stderr, and only on a terminal. <code>--json</code> prints a versioned object, <code>{"schema":1,…}</code>, to stdout; new fields can be added freely, and removing one bumps the schema. It respects <code>NO_COLOR</code> and <code>CLICOLOR_FORCE</code>. An error says what went wrong, why, and what to try. Anything destructive asks first, and on a non-terminal it fails and names <code>--yes</code>. <code>doctor</code> prints one ✓ or ✗ line per check, with the exact command that fixes each ✗.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://clig.dev">clig.dev</a>, brew doctor, flutter doctor.</p>
+    </div></div>
+    <div class="row"><span class="id">E2</span><div>
+      <h3>Exit codes are 0, 1, 2 and 3<span class="chg">changes spec</span></h3>
+      <p>0 means done, 1 an error, 2 bad usage, and 3 that <code>status --check</code> found a repo behind. Code 4 (lock busy) is gone because of D2. Code 5 (index format too new) is now code 1, with an error message that says so.</p>
+    </div></div>
+    <div class="row"><span class="id">E3</span><div>
+      <h3><code>init</code> writes the manifest and asks before anything else</h3>
+      <p>It always writes <code>cartograph.yaml</code>. Before adding a <code>.gitignore</code> entry, agent setup or hooks, it shows a preview of each change and asks. <code>--yes</code> accepts all of them. Without a terminal and without flags, it writes only the manifest and prints the next commands.</p>
+      <p class="meta"><b>Precedent:</b> husky init, changesets init, and lefthook, which refuses to touch hook config it doesn't own. <b>Rejected:</b> changing CLAUDE.md or AGENTS.md without asking.</p>
+    </div></div>
+    <div class="row"><span class="id">E4</span><div>
+      <h3>The command is <code>cartograph</code>; the packages need other names</h3>
+      <p>On crates.io, <code>cartograph</code> belongs to a 2020 datacube project, and on npm to a 2022 router. Homebrew has nothing by that name. So: publish the crate as <code>cartograph-cli</code>, or ask the 2020 owner for the name. Releases are built with cargo-dist: shell and PowerShell installers, a Homebrew tap, an MSI, and winget later. On npm, publish a scoped package with one prebuilt package per platform, the way Biome does, so installs work offline and behind proxies.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://github.com/axodotdev/cargo-dist/blob/main/book/src/installers/index.md">cargo-dist installers</a>, Biome's npm packaging. <b>Note:</b> "Cartograph" is still a placeholder in PRODUCT.md. Decide the final name before the first crate or npm release.</p>
+    </div></div>
+    <div class="row"><span class="id">E5</span><div>
+      <h3>Cancel keeps the last complete index</h3>
+      <p>On board 02, Cancel stops the run and leaves the previous index readable. Blobs already parsed stay in the cache, so the next run picks up where this one stopped. The board's copy says exactly that.</p>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-f">
+  <div class="head"><h2 id="s-f">F · MCP and coding agents</h2><span>open question 2 · X2</span></div>
+  <div class="list">
+    <div class="row"><span class="id">F1</span><div>
+      <h3>Eight tools, not fourteen<span class="chg">changes spec</span></h3>
+      <p><b>Read-only:</b></p>
+      <ul>
+        <li><code>status</code>, which also reports background jobs</li>
+        <li><code>find</code>, which also covers entrypoints, through <code>kind</code></li>
+        <li><code>describe</code>, which also covers contracts</li>
+        <li><code>neighbors</code>, with <code>direction</code> and <code>cross_service</code>; it replaces callers, dependencies and cross_service</li>
+        <li><code>path</code></li>
+        <li><code>impact</code>, which takes paths, a ref, the working tree, or <code>since</code>; it replaces changes_since</li>
+      </ul>
+      <p><b>Write:</b> <code>sync</code>, which runs init when there's no index and defaults to a dry run in that case, and <code>correct</code>.</p>
+      <p class="why"><b>Why:</b> more tools make an agent choose worse. Cursor sends at most 40 tools in total across all servers. Claude Code runs read-only tools in parallel, and Anthropic's guidance is to consolidate tools and return concise output.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://www.anthropic.com/engineering/writing-tools-for-agents">Writing tools for agents</a>, GitNexus's 8 core tools. <b>Rejected:</b> keeping 14, and a single query-language tool that agents get wrong.</p>
+    </div></div>
+    <div class="row"><span class="id">F2</span><div>
+      <h3>Every answer is small and says how current it is</h3>
+      <p><code>content</code> holds compact Markdown for the model. <code>structuredContent</code> holds the full JSON, with an <code>outputSchema</code>. <code>response_format</code> is <code>concise</code> or <code>detailed</code>, the limit is 50 with an opaque cursor, and the target is under 10k tokens; Claude Code warns above 10k and cuts off at 25k. Each result carries <code>freshness</code>: each repo's indexed commit, its HEAD, how many commits behind it is, and whether a sync is running. The server's <code>instructions</code> field stays under 4,096 characters, because with tool search it decides whether an agent finds Cartograph at all.</p>
+    </div></div>
+    <div class="row"><span class="id">F3</span><div>
+      <h3>Long work returns a handle</h3>
+      <p><code>sync</code> returns its result if it finishes within <code>wait_ms</code> (default 15 s). Otherwise it returns a <code>job_id</code>, which <code>status</code> reports on. It sends progress notifications when the client provides a progress token. The MCP Tasks extension is added later, and only for clients that ask for it.</p>
+      <p class="why"><b>Why:</b> Tasks moved out of the core spec into an extension and changed shape on the way. Claude Code supports them only in beta, and Cursor doesn't list them. Polling works on every client.</p>
+      <p class="meta"><b>Precedent:</b> Claude Context's <code>index_codebase</code> with <code>get_indexing_status</code>. <a href="https://modelcontextprotocol.io/seps/2663-tasks-extension">SEP-2663</a>.</p>
+    </div></div>
+    <div class="row"><span class="id">F4</span><div>
+      <h3>stdio by default; HTTP is opt-in and locked down</h3>
+      <p><code>--http</code> exists for one server shared by several clients. It binds only to loopback, checks <code>Host</code>, refuses any <code>Origin</code> not on the allow list, and needs a 256-bit token from a file only you can read. Clients pass the token through an env var or Claude Code's <code>headersHelper</code>, never written into a committed file.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/transports">MCP transports</a>: servers must validate Origin, and local servers should prefer stdio.</p>
+    </div></div>
+    <div class="row"><span class="id">F5</span><div>
+      <h3>Agent setup is per user by default, not per repo<span class="chg">changes spec</span></h3>
+      <p><code>cartograph agents install</code> writes user-level config:</p>
+      <ul>
+        <li><code>claude mcp add --scope user</code></li>
+        <li><code>~/.cursor/mcp.json</code></li>
+        <li><code>~/.codex/config.toml</code></li>
+        <li>VS Code's user <code>mcp.json</code></li>
+      </ul>
+      <p>The registry already lets <code>cartograph mcp</code> run without a path, so one entry covers every workspace. <code>--project</code> writes config into the workspace folder. <code>--per-repo</code> writes it into every repo, and is never the default.</p>
+      <p class="why"><b>Why:</b> writing into each repo means a commit in N repos. Teammates without the binary would get a server that fails to start, and in <code>-p</code> mode Claude Code loads a project's servers without asking.</p>
+      <p class="meta"><b>Precedent:</b> Serena's <code>--scope user</code> setup, and GitNexus's setup, which writes global config.</p>
+    </div></div>
+    <div class="row"><span class="id">F6</span><div>
+      <h3>Claude Code gets a plugin; other agents get a short instruction block<span class="chg">changes spec</span></h3>
+      <p>The Cartograph repo publishes its own plugin marketplace. The plugin bundles:</p>
+      <ul>
+        <li>the MCP server</li>
+        <li>a skill holding the procedures: check <code>status</code>, run <code>impact</code> before editing across services, and treat "guessed" results as leads</li>
+        <li>a <code>SessionStart</code> hook that prints one line about how current the index is</li>
+      </ul>
+      <p>For Codex, Copilot and Cursor, a marked block of about five lines goes into AGENTS.md, <code>copilot-instructions.md</code> or a <code>.mdc</code> rule. For Claude Code without the plugin, the block goes into <code>CLAUDE.local.md</code>, which is personal and not committed. Writing it into the shared <code>CLAUDE.md</code> takes <code>--shared</code>. The block holds pointers only, never state, and never <code>@</code>-imports CARTOGRAPH.md.</p>
+      <p class="why"><b>Why:</b> a plugin is one versioned unit that changes no shared files. An import loads the whole file into every session and goes stale during it. <code>agents install</code> detects the plugin, so hooks don't run twice.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://code.claude.com/docs/en/plugins">Claude Code plugins</a>, <a href="https://code.claude.com/docs/en/memory">memory docs</a>, GitNexus's <code>&lt;!-- gitnexus:start --&gt;</code> blocks. <b>Rejected:</b> a sync after every edit; a plugin as the only way to install.</p>
+    </div></div>
+    <div class="row"><span class="id">F7</span><div>
+      <h3>CARTOGRAPH.md stays, kept out of git, generated from <code>status</code></h3>
+      <p>The MCP <code>status</code> tool and the <code>cartograph://status</code> resource are the source of truth. CARTOGRAPH.md is the same data, written for people and for agents that don't use MCP. It's rewritten after every sync, and it now also says where the index lives (B1).</p>
+    </div></div>
+    <div class="row"><span class="id">F8</span><div>
+      <h3>Text from the repo is treated as data everywhere (X2)</h3>
+      <p>Tools return structure by default. Comments, docstrings and README text come back only when asked for, truncated, in fields labelled <code>untrusted_text</code> that say where the text came from. Repo text never goes into tool descriptions, server instructions, CARTOGRAPH.md or the instruction blocks, because those load automatically into every session. No tool runs code or uses the network. <code>sync</code> only acts on repos in the registry. <code>correct</code> stores data, never instructions.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://arxiv.org/abs/2403.14720">Spotlighting</a> (Microsoft), the MCP spec's requirement that servers sanitise tool output, and Context7's prompt-injection incident.</p>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-g">
+  <div class="head"><h2 id="s-g">G · AI, and the Claude Code idea</h2><span>stage 6 · X2 · D15</span></div>
+  <div class="list">
+    <div class="row"><span class="id">G1</span><div>
+      <h3>Don't build the Claude Agent SDK in. Put Cartograph inside your Claude Code instead.</h3>
+      <p>The idea is sound and the goal is right: use the Claude Code you already pay for, with the map. The way to get there is the other direction. Cartograph is an MCP server and plugin inside your own Claude Code (F5, F6). Your login, your billing and your agent stay yours, and the same setup works for Codex, Cursor and Gemini.</p>
+      <p class="why"><b>Why not the SDK:</b></p>
+      <ul class="why">
+        <li><b>Policy.</b> Anthropic's terms say third-party apps may not offer claude.ai login or route requests through Pro, Max or other plan credentials. The exception is a user running the unmodified <code>claude</code> binary themselves.</li>
+        <li><b>Size and runtime.</b> The SDK runs the Claude Code binary, about 364 MB per platform, and needs Node. The Rust core can't host it.</li>
+        <li><b>Risk.</b> A full coding agent with shell and edit tools, reading text from indexed code, turns prompt injection into code execution.</li>
+        <li><b>Naming.</b> The feature can't be called "Claude Code".</li>
+      </ul>
+      <p class="meta"><b>Source:</b> <a href="https://code.claude.com/docs/en/legal-and-compliance">Claude Code legal and compliance</a>, <a href="https://code.claude.com/docs/en/agent-sdk/overview">Agent SDK overview</a>. Anthropic has changed this policy several times this year, so read it again before any change to G2.</p>
+    </div></div>
+    <div class="row"><span class="id">G2</span><div>
+      <h3>Later, an "External agent" choice in Ask, over ACP</h3>
+      <p>The Ask panel can run the user's own agent over the Agent Client Protocol: Claude Agent through <code>claude-agent-acp</code>, Codex or Gemini CLI. Cartograph starts the agent as a subprocess and passes only its read-only MCP tools to <code>session/new</code>. It offers no file system or terminal capability, rejects every permission request that isn't for a Cartograph tool, and caps the number of turns. You sign in inside the agent. Cartograph never sees, stores or relays credentials, and never shows its own "Sign in with Claude" button. This comes after stage 6 ships, not before.</p>
+      <p class="meta"><b>Precedent:</b> Zed's <a href="https://zed.dev/docs/ai/external-agents">external agents</a> ("Claude Agent owns its own authentication and billing"), <a href="https://agentclientprotocol.com/overview/introduction">ACP</a>, <a href="https://github.com/agentclientprotocol/claude-agent-acp">claude-agent-acp</a>. <b>Rejected:</b> shelling out to <code>claude -p</code>, which is a grey area on policy, loads the project's hooks and <code>.mcp.json</code>, and has an output format that's brittle to parse.</p>
+    </div></div>
+    <div class="row"><span class="id">G3</span><div>
+      <h3>The Ask loop runs in Rust, and providers come from <code>genai</code></h3>
+      <p>The app, <code>cartograph ask</code> and the HTTP API share one agent loop in the binary, so citations are checked in one place and keys never reach the browser. The <code>genai</code> crate speaks the native OpenAI, Anthropic, Gemini and Ollama APIs, plus any OpenAI-compatible endpoint, and the current <code>lib/ai.ts</code> presets map onto it. The provider registry is a small TOML file. Anthropic is used through its native API with an API key, so features like citations and caching work. When Cartograph runs as an MCP server it needs no model at all: the host agent does the reasoning.</p>
+      <p class="meta"><b>Precedent:</b> Codex CLI and Goose both run their agent loop in Rust. <b>Rejected:</b> the Vercel AI SDK in Next.js, which would tie the loop to Node so the CLI needs a second copy; a LiteLLM proxy, which is another service to run.</p>
+    </div></div>
+    <div class="row"><span class="id">G4</span><div>
+      <h3>API keys go in the OS keychain</h3>
+      <p>The <code>keyring</code> crate stores them in Keychain, Credential Manager or Secret Service. <code>CARTOGRAPH_AI_KEY</code> and <code>CARTOGRAPH_AI_BASE_URL</code> override it (board G15). A file only you can read is the fallback on Linux with no keychain. The browser only learns whether a key is set. Keys in localStorage today are moved once and then deleted from it.</p>
+      <p class="meta"><b>Precedent:</b> gh; uv, which vendors keyring-rs.</p>
+    </div></div>
+    <div class="row"><span class="id">G5</span><div>
+      <h3>Citations point to results from this turn, and are checked deterministically</h3>
+      <p>Each row a tool returns gets a short handle, like <code>e3</code>, and the model cites handles, never raw ids. A citation stands only if all of these hold:</p>
+      <ul>
+        <li>the handle came from this turn</li>
+        <li>the object still exists</li>
+        <li>its interval covers the date being asked about</li>
+        <li>every identifier and relationship claimed in the sentence is among that sentence's citations</li>
+      </ul>
+      <p>Citations that fail are removed, and sentences left with none are shown as unsupported. If more than 30% of sentences are unsupported, the model gets one repair attempt. If that fails too, the answer comes from the graph engine alone, without the model's wording.</p>
+      <p class="meta"><b>Precedent:</b> Anthropic's <a href="https://platform.claude.com/docs/en/build-with-claude/search-results">search-result citations</a>, <a href="https://arxiv.org/abs/2305.14627">ALCE</a>. <b>Rejected:</b> a model judge as the main check, which is slow and can itself be injected.</p>
+    </div></div>
+    <div class="row"><span class="id">G6</span><div>
+      <h3>Injection can at worst cause a wrong answer, which citations catch</h3>
+      <p>Ask's tools are read-only graph tools, with no shell, no writes and no network. Code-derived text sits inside randomised delimiters and is marked as data. Answers render as plain text. Links come only from checked citations, never from URLs or images the model writes, so there's no way to send data out. Together with F8, this closes X2.</p>
+      <p class="meta"><b>Precedent:</b> Spotlighting, and Willison's <a href="https://simonwillison.net/2023/Apr/25/dual-llm-pattern/">dual-LLM pattern</a>. <b>Rejected:</b> a full CaMeL interpreter for now. Revisit it if any write tool is ever added.</p>
+    </div></div>
+    <div class="row"><span class="id">G7</span><div>
+      <h3>No embeddings to start with</h3>
+      <p>Retrieval uses graph traversal, SQLite FTS5 over names, paths and docstrings, and tool calls. Summaries stay off by default, suggest a local model, and are cached by blob id, model id and prompt version. If embeddings are added later, they're built over summaries rather than raw code, with fastembed-rs and sqlite-vec in the same file.</p>
+      <p class="meta"><b>Precedent:</b> Aider's repo map, built from tree-sitter tags and PageRank; Claude Code's agentic search; Continue and Sourcegraph moving away from embeddings; Greptile finding that summaries embed better than code. <b>Rejected:</b> LanceDB, a second store; embedding raw code chunks.</p>
+    </div></div>
+    <div class="row"><span class="id">G8</span><div>
+      <h3>"Ultra" becomes a budget, not the whole map</h3>
+      <p>It starts from the evidence, adds neighbours ranked by personalised PageRank, and stops at half the model's context window, capped at about 100k tokens. It says how many nodes it left out. The retrieval inspector (board A6) shows every tool call, the tokens for each block against the budget, which handles were cited or dropped, and the system prompt.</p>
+      <p class="meta"><b>Why:</b> models recall facts in the middle of long contexts less well (<a href="https://arxiv.org/abs/2307.03172">Lost in the Middle</a>), and a multi-repo map soon outgrows any context window.</p>
+    </div></div>
+    <div class="row"><span class="id">G9</span><div>
+      <h3>Ask history goes in its own file, next to the index (D15)</h3>
+      <p>It's <code>ask.db</code> in the same data folder, because the index can be rebuilt and history can't. Each turn stores the question, the date asked about, the index's fact hash, the model id, the tool calls, the answer and the citation results, and never any keys. History can be re-run as of another date. An answer is marked stale when ids it cited no longer exist, and <code>cartograph ask --forget</code> wipes everything.</p>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-h">
+  <div class="head"><h2 id="s-h">H · Extracting links</h2><span>X7 · X8 · X9 · X11 · board decisions</span></div>
+  <div class="list">
+    <div class="row"><span class="id">H1</span><div>
+      <h3>tree-sitter for every language, and oxc's resolver for TypeScript and JavaScript<span class="ver">benchmark</span></h3>
+      <p>Imports are syntax, and tree-sitter parses old blobs from history without a toolchain or a build. <code>oxc_resolver</code> handles tsconfig <code>paths</code> and <code>extends</code>, package <code>exports</code> and <code>imports</code>, pnpm symlinks and Yarn PnP, natively in Rust. Stage 2 needs only small resolvers: Go reads <code>go.mod</code> and <code>go.work</code>, Python reads <code>pyproject.toml</code>, and PHP reads Composer's PSR-4 map. SCIP is import and export only, in stage 5.</p>
+      <p class="meta"><b>Precedent:</b> Sourcegraph's split between search-based and precise code navigation, and <a href="https://oxc.rs/docs/guide/usage/resolver">oxc resolver</a>. <b>Rejected:</b> swc or oxc_parser, which cover TypeScript only; go/packages and SCIP as the main source, because they need a build for every commit. <b>Before code:</b> check oxc's claimed speed-up on a real monorepo.</p>
+    </div></div>
+    <div class="row"><span class="id">H2</span><div>
+      <h3>Confidence comes from the class of evidence, not from cut-offs on the score</h3>
+      <p><b>exact</b> (0.90–1.00): both ends are anchored. A contract operation matches on both sides, or a literal method and path match a parsed route, or a literal topic or table name appears on both ends.</p>
+      <p><b>likely</b> (0.60–0.89): one end is literal and the other is resolved through config or env, or a call through a generated client is mapped to its spec.</p>
+      <p><b>guessed</b> (0.30–0.59): a partial path match, string concatenation, or a match on name only. Below 0.30, the link is stored but hidden by default.</p>
+      <p>Within a level, the score combines fixed weights per evidence type as <code>1 − ∏(1 − wᵢ)</code>, clamped to that level's band. This settles the open decision on cut-offs.</p>
+      <p class="why"><b>Why:</b> adding a new kind of evidence can't quietly move a link from one level to another, and each word has a stated meaning. Precision per level is measured on the 17 apps in the Code2DFD dataset and published, the way CodeQL publishes <code>@precision</code>.</p>
+      <p class="meta"><b>Precedent:</b> Sourcegraph's precise versus search-based results, <a href="https://codeql.github.com/docs/writing-codeql-queries/metadata-for-codeql-queries/">CodeQL @precision</a>, Semgrep's confidence levels, and <a href="https://arxiv.org/html/2412.08352">a 2024 comparison of architecture-recovery tools</a>. <b>Rejected:</b> a bare score with cut-offs; a model trained to calibrate scores, which has no training data and can't explain itself.</p>
+    </div></div>
+    <div class="row"><span class="id">H3</span><div>
+      <h3>Corrections use keys a person can read, and every one needs a reason</h3>
+<pre>version: 1
+corrections:
+  - remove: { kind: http, from: storefront, to: billing-api, op: "GET /legacy/invoice" }
+    reason: Dead route behind a feature flag removed in 2024.
+  - retarget: { kind: event, from: orders, topic: "order.paid", to: ledger }
+    reason: Ledger consumes through the outbox relay.
+  - set: { kind: http, from: web, to: auth, op: "POST /session", confidence: exact }
+    reason: Checked by hand against the gateway config.
+  - add: { kind: http, from: mobile-bff, to: orders, op: "GET /orders/{id}" }
+    reason: Called through the API gateway, which isn't in the workspace.</pre>
+      <p>The indexer resolves each key to lineage ids and stores that binding, so a correction survives a rename (X7). <code>cartograph check</code> fails on a correction that no longer matches anything; set <code>stale: error | warn | off</code>, default <code>error</code>. The precedence stays as parsed &lt; contract &lt; config &lt; runtime &lt; correction, and each link records which layer won. This settles the open decision on YAML keys, and adds <code>add</code>, which the first draft didn't have.</p>
+      <p class="meta"><b>Precedent:</b> import-linter's <code>ignore_imports</code>, where unmatched ignores are an error by default; Backstage entity refs; the SCIP symbol grammar. <b>Rejected:</b> keying by lineage id, which people can't write; keying by path only, which breaks on renames.</p>
+    </div></div>
+    <div class="row"><span class="id">H4</span><div>
+      <h3>Adapters are tree-sitter queries first, a subprocess second (X8)</h3>
+      <p>(a) <code>.scm</code> query files that use Cartograph capture names (<code>@route.method</code>, <code>@route.path</code>, <code>@http.call.url</code>, <code>@event.publish.topic</code>, <code>@db.table</code>), the same convention as tree-sitter's <code>tags.scm</code>. (b) For anything a query can't express, a subprocess that prints NDJSON facts:</p>
+<pre>{"schema":1,"kind":"http.call","repo":"web","commit":"77c0e2b","path":"src/api.ts",
+ "span":[12,4,12,38],"attrs":{"method":"GET","url":"/orders/{id}"},
+ "evidence":{"type":"literal","text":"fetch(`/orders/${id}`)"},"extractor":{"name":"fetch","version":"1.2.0"}}</pre>
+      <p>"Request an adapter" on board S5 opens the local guide to writing one, and links to the issue template on GitHub. WebAssembly plugins are deferred until third parties ship binaries.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://github.com/tree-sitter/tree-sitter-javascript/blob/master/queries/tags.scm">tags.scm</a>, ast-grep rules, SCIP's one-indexer-per-language model. <b>Rejected:</b> stack-graphs, which GitHub archived; Glean, which needs a server.</p>
+    </div></div>
+    <div class="row"><span class="id">H5</span><div>
+      <h3>Generated API clients are found by their markers and matched by path (X9)</h3>
+      <p>Detect generated files by <code>// Code generated … DO NOT EDIT.</code>, by <code>.openapi-generator/FILES</code>, and by orval or openapi-typescript banners. Find the spec through the generator's config. The literal method and path template inside the generated code are matched to the spec operation, and the function is recorded as an alias for its <code>operationId</code>. Calls through that function are <b>likely</b>, and become <b>exact</b> when the spec also matches the server's parsed route.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://go.dev/s/generatedcode">Go's generated-code convention</a>, oapi-codegen's headers. <b>Rejected:</b> predicting method names from operationIds, which breaks between generator versions. <b>Before code:</b> confirm the exact orval and openapi-typescript banner text.</p>
+    </div></div>
+    <div class="row"><span class="id">H6</span><div>
+      <h3>Architecture rules live in cartograph.yaml (X11, D8)</h3>
+<pre>rules:
+  - name: web-no-direct-db
+    severity: error                 # error | warn | info
+    forbid:
+      from: { tags: [layer:web] }
+      to:   { kind: db_table }
+    min_confidence: likely          # guessed links never fail CI
+baseline: cartograph.baseline.json  # known violations, so old repos can adopt rules</pre>
+      <p>Rules are checked by <code>cartograph check</code> and in the app's rules view. Selectors match tags, service, a path regex with <code>$1</code> captures, and link kind.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://github.com/sverweij/dependency-cruiser/blob/main/doc/rules-reference.md">dependency-cruiser</a>, <a href="https://nx.dev/docs/features/enforce-module-boundaries">Nx module boundaries</a>, go-arch-lint, import-linter. <b>Rejected:</b> ArchUnit-style rules written in code, which tie rules to one language.</p>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-i">
+  <div class="head"><h2 id="s-i">I · The app</h2><span>O1 · O2 · O4 · D1–D14</span></div>
+  <div class="list">
+    <div class="row"><span class="id">I1</span><div>
+      <h3>sigma.js 4 with graphology for the map, keeping SVG for small views<span class="ver">benchmark</span></h3>
+      <p>Both are MIT-licensed, render with WebGL, thin out labels with a label grid, and pick with the GPU. The graph data (graphology) is separate from the renderer, which fits a model where Rust owns the data. Level of detail swaps the graph per level instead of drawing 60k files at once. d3-force SVG stays for views under about 2,000 elements and for SVG export.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://github.com/gephi/gephi-lite">Gephi Lite</a>, which is GPL, so read it but don't copy it. <a href="https://www.sigmajs.org/how-to/technical/performance/">sigma performance guide</a>. <b>Rejected:</b> Cosmograph, which is CC-BY-NC; deck.gl, PixiJS and regl, which would mean rebuilding picking and labels; Ogma, which is commercial. <b>Before code:</b> run sigma's benchmark on a 60k-node, 200k-link fixture.</p>
+    </div></div>
+    <div class="row"><span class="id">I2</span><div>
+      <h3>Layout is computed in Rust at index time, stored, and stable over time</h3>
+      <p>Layout runs top-down: services first, then modules inside each service's area, then files, so a change in files can't move services. Each snapshot starts from the previous one. New nodes start at their parent's position, and nodes that didn't change are pinned. The browser only reads positions, and runs ForceAtlas2 locally only when you expand something.</p>
+      <p class="meta"><b>Watch the licence:</b> the <code>forceatlas2</code> crate is AGPL. Use <code>graphology/rust-fa2</code>, or about 300 lines of our own Barnes-Hut. <b>Precedent:</b> CodeCharta's stable maps, and research on stable treemaps. <b>Rejected:</b> running force layout in the browser on load, which differs on every load, so scrubbing jumps around.</p>
+    </div></div>
+    <div class="row"><span class="id">I3</span><div>
+      <h3>A table view and a keyboard walk (D3)</h3>
+      <p>The canvas is hidden from screen readers. Next to it are virtualised, sortable tables of nodes and links, which follow the same filters, date and level as the map. The keyboard walk is built on data-navigator:</p>
+      <ul>
+        <li>arrow keys move between siblings</li>
+        <li>Enter goes down a level, and Escape goes up</li>
+        <li>one key cycles through linked nodes</li>
+        <li>a live region announces "module X, 12 incoming, 4 outgoing"</li>
+      </ul>
+      <p>The result is audited against Chartability.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://github.com/cmudig/data-navigator">data-navigator</a>, Olli, Highcharts' keyboard model.</p>
+    </div></div>
+    <div class="row"><span class="id">I4</span><div>
+      <h3>Comparing two dates overlays both on one layout (D7)</h3>
+      <p>Added items show green, removed ones as a red ghost, changed ones amber, and everything unchanged is dimmed. A toggle shows the two dates side by side, with the camera and selection linked. The table has a matching filter for differences. This only works because I2 keeps positions stable.</p>
+      <p class="meta"><b>Precedent:</b> CodeScene's coupling trends, CodeCharta's delta mode.</p>
+    </div></div>
+    <div class="row"><span class="id">I5</span><div>
+      <h3>Toasts for now, an activity list for later (D5)</h3>
+      <p>Toasts can be dismissed with the keyboard and are announced to screen readers. A bell with an unread count opens the activity list, stored in <code>ask.db</code>'s sibling tables. The app doesn't send OS notifications by default; an opt-in one for "a long index finished" can come later.</p>
+      <p class="meta"><b>Precedent:</b> <a href="https://code.visualstudio.com/api/ux-guidelines/notifications">VS Code notifications</a>.</p>
+    </div></div>
+    <div class="row"><span class="id">I6</span><div>
+      <h3>Below 900 px, the table is the default view (O2)</h3>
+      <p>The map moves to a tab. On touch screens, file-level hover and the label grid are turned off. Settings stack into one column, with the left menu becoming a select.</p>
+    </div></div>
+    <div class="row"><span class="id">I7</span><div>
+      <h3>Share links are view links that any local copy can open (D9)</h3>
+      <p>The view state lives in the hash, so a link is <code>cartograph://acme#t=2019-04&amp;focus=billing-api</code>. On Windows and Linux the CLI registers the scheme. On macOS, which needs an app bundle to register one, you paste the link into "Open link" in the app or run <code>cartograph open &lt;link&gt;</code>. Exports are PNG from the canvas and SVG from the SVG renderer.</p>
+      <p class="meta"><b>Rejected:</b> Tauri only to get deep links, which would mean signing and packaging for every OS.</p>
+    </div></div>
+    <div class="row"><span class="id">I8</span><div>
+      <h3>Approve the colour rule, and write the boards back into DESIGN.md (O4, D13)</h3>
+      <p>Domains take the six pinned hues, services take tints of their domain's hue, and everything else is steel. At 62 services this is the only scheme that stays readable. It's what every board already assumes, and it keeps the pinned reference's hues instead of adding new ones. Then write the theme tokens, chip states, view tabs and settings menu into DESIGN.md, so the code has one source.</p>
+    </div></div>
+    <div class="row"><span class="id">I9</span><div>
+      <h3>One app shell (D4), and the remaining screens</h3>
+      <p><b>The shell</b> is the A boards' header with the view tabs, plus the S boards' settings menu; board 15 moves to it.</p>
+      <p><b>The remaining flows:</b></p>
+      <ul>
+        <li><b>First run (D2)</b> offers three ways in: add a workspace in the app, open an existing index, or try the demo.</li>
+        <li><b>The add-workspace wizard (D1)</b> needs its other steps drawn. Step 1 is "pick a workspace file or folder", using the discovery from C1 and C2. Step 3 reviews the services found by C6. Step 4 is the first index, then the map.</li>
+        <li><b>Empty states (O1)</b> follow one pattern. Each says what will appear, why it isn't there yet, and the one action that fills it.</li>
+        <li><b>"Trace on the map" (D6)</b> highlights what can be reached, dims the rest, and shows a Clear chip.</li>
+        <li><b>Recovery (D10)</b>: every warning row already has an action, per board decision 5. Undoing a correction reverts that entry in the override file, and the history is the file's own git log.</li>
+        <li><b>Owners (D14)</b> come from CODEOWNERS as a node attribute and a filter. A team view comes later.</li>
+        <li><b>Previous and Next commit</b> on board A5 step along the first-parent timeline, or along a branch overlay's commits when one is open.</li>
+      </ul>
+    </div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-v">
+  <div class="head"><h2 id="s-v">Check before building</h2><span>5 decisions rest on a number we haven't measured</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Decision</th><th>What to measure</th><th>If it fails</th></tr></thead>
+    <tbody>
+      <tr><td>B7 gitoxide</td><td>Rename detection over remotion's 9,498 first-parent commits, against libgit2</td><td>Use libgit2 for diffs only</td></tr>
+      <tr><td>H1 oxc_resolver</td><td>Resolve every import in a pnpm monorepo with tsconfig paths</td><td>Fall back to a tsconfig-paths port for the missing cases</td></tr>
+      <tr><td>I1 sigma.js</td><td>Frame time and picking on a 60k-node, 200k-link fixture, on an integrated GPU</td><td>Cosmos.gl (MIT) for the whole-workspace view only</td></tr>
+      <tr><td>H2 confidence</td><td>Precision per level on the Code2DFD apps</td><td>Re-weight the evidence; keep the levels</td></tr>
+      <tr><td>D1 freshness check</td><td>Checking HEAD against the indexed commit for 30 repos, in under 100 ms</td><td>Cache the HEAD file's mtime per repo</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section aria-labelledby="s-x">
+  <div class="head"><h2 id="s-x">What the earlier spec got wrong</h2><span>now updated</span></div>
+  <ul>
+    <li>The index was in the workspace folder. Now it's in the data folder (B1).</li>
+    <li>Hooks or a schedule kept it current. Now reads keep it current, and both are optional (D1, D4).</li>
+    <li>There were 14 MCP tools. Now there are 8 (F1).</li>
+    <li>Agent config was committed to the workspace folder. Now it's per user, and Claude Code gets a plugin (F5, F6).</li>
+    <li>The CLAUDE.md block was shared by default. Now it goes in <code>CLAUDE.local.md</code> unless you pass <code>--shared</code> (F6).</li>
+    <li>Exit codes 4 and 5 are gone (E2).</li>
+    <li>There was no <code>verify</code> or <code>check</code>. Both are added (B4, H3, H6).</li>
+    <li>An MCP <code>init</code> tool started background jobs. Now <code>sync</code> does init, and long work returns a job handle (F3).</li>
+  </ul>
+</section>
+
+<footer>
+  <span>The research was done by seven agents, one per area. They read GitNexus 1.6.8 as installed on this machine, VS Code, git, git-lfs, pre-commit, lefthook, husky, direnv, git-town, Next 16's bundled docs, the MCP spec and SEPs, Anthropic's Claude Code and Agent SDK docs, the ACP spec, SQLite's documentation, and the papers linked above.</span>
+  <span>GitNexus is licensed PolyForm Noncommercial: its ideas are referenced, and none of its code may be reused. Precedents marked as known, rather than read this session, are noted in the research. Nothing here changes DECISIONS.md item 12: local only.</span>
+</footer>
+
+</div>

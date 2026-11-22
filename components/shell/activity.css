@@ -1,0 +1,23 @@
+/* Popover shell shared by the bell, the index chip and the workspace menu. */
+.sh-pop-wrap { position: relative; display: flex; align-items: center; height: 100%; }
+.sh-pop {
+  position: absolute; top: calc(100% - 8px); right: 0; z-index: 30; width: 380px; max-width: calc(100vw - 24px);
+  background: var(--panel); border-radius: 16px; padding: 14px; box-shadow: var(--shadow-4), inset 0 0 0 1px var(--line2);
+  display: flex; flex-direction: column; gap: 10px; color: var(--text);
+}
+.sh-pop-note { margin: 0; color: var(--muted); font-size: 0.8125rem; line-height: 1.5; }
+.sh-link { color: var(--accent); font-size: 0.8125rem; font-weight: 600; }
+.sh-link:disabled { color: var(--faint); opacity: 1; }
+
+.sh-activity > header { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; }
+.sh-activity ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+.sh-activity li { border-top: 1px solid var(--line); font-size: 0.8125rem; line-height: 1.45; }
+.sh-activity-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 10px 6px; color: var(--text); text-decoration: none; border-radius: 8px; }
+a.sh-activity-row:hover { background: var(--slab); }
+a.sh-activity-row:visited { color: var(--text); }
+.sh-activity li:first-child { border-top: 0; }
+.sh-activity li.is-unread .sh-activity-ic { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.sh-activity-ic { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--slab); color: var(--muted); }
+.sh-activity-ic.is-warning { color: var(--warn); background: var(--warn-soft); }
+.sh-activity-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sh-activity-t small { color: var(--muted); font-size: 0.75rem; }
