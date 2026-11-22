@@ -178,7 +178,9 @@ pub fn json_schema() -> Value {
         ServerEvent,
         RunEvent,
     );
-    let names: Vec<Value> = props.keys().cloned().map(Value::String).collect();
+    let mut names: Vec<&String> = props.keys().collect();
+    names.sort();
+    let names: Vec<Value> = names.into_iter().cloned().map(Value::String).collect();
     let defs = g.take_definitions(true);
     json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -230,9 +232,28 @@ fn operation_id(method: &str, path: &str) -> String {
 
 /// Pretty JSON with a trailing newline, as checked in.
 pub fn render(v: &Value) -> String {
-    let mut s = serde_json::to_string_pretty(v).expect("JSON values always serialise");
+    let mut s = serde_json::to_string_pretty(&sorted(v)).expect("JSON values always serialise");
     s.push('\n');
     s
+}
+
+/// `v` with every object's keys in order. serde_json keeps insertion order when any crate in the
+/// build enables its `preserve_order` feature (oxc_resolver does), so the output must not rely on
+/// the map type.
+fn sorted(v: &Value) -> Value {
+    match v {
+        Value::Object(m) => {
+            let mut keys: Vec<&String> = m.keys().collect();
+            keys.sort();
+            Value::Object(
+                keys.into_iter()
+                    .map(|k| (k.clone(), sorted(&m[k])))
+                    .collect(),
+            )
+        }
+        Value::Array(a) => Value::Array(a.iter().map(sorted).collect()),
+        other => other.clone(),
+    }
 }
 
 /// Where the generated files live, relative to the repository root.
