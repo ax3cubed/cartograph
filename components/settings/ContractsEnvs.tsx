@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ADAPTERS, CALL_SITES, UNRECOGNISED_ROUTES, envKeys, type EnvName } from "@/lib/demo/settings";
+import { ADAPTERS, CALL_SITES, UNRECOGNISED_ROUTES, envKeys } from "@/lib/demo/settings";
+import type { EnvName } from "@/lib/model";
 import { getContracts } from "@/lib/source";
 import { Chip, Seg, SettingsPage, useFileDraft } from "./ui";
 import "./contractsEnvs.css";

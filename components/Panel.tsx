@@ -6,9 +6,9 @@ import { ArrowDownLeft, ArrowUpRight, Check, ChevronLeft, Copy, GitCommitHorizon
 import { Parts } from "./Ask";
 import { stories } from "@/lib/ask";
 import {
-  SERVICES, WORKSPACE, ancestry, byId, commitBySha, descendants, metrics, ranking, series, type Metrics,
+  SERVICES, WORKSPACE, ancestry, byId, commitBySha, descendants, metrics, ranking, series,
 } from "@/lib/workspace";
-import type { Correction } from "@/lib/model";
+import type { Correction, Metrics } from "@/lib/model";
 import { symbolById, symbolsIn } from "@/lib/demo/symbols";
 import History from "./timeline/History";
 import LinkInspector from "./map/LinkInspector";

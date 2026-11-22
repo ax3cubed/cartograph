@@ -10,7 +10,8 @@
 //    with Discard and Save. Leaving the page with a draft asks first (`beforeunload` plus an in-page bar).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { usePath } from "../shell/usePath";
 import { Check } from "lucide-react";
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS } from "@/lib/settings";
 import "./settings.css";
@@ -28,7 +29,7 @@ export function SettingsPage({ title, intro, saves, scope, saved, actions, file,
   actions?: React.ReactNode; file?: FileBar; children: React.ReactNode;
 }) {
   const router = useRouter();
-  const path = usePathname().replace(/\/$/, "");
+  const path = usePath().replace(/\/$/, "");
   const count = file?.count ?? 0;
   const [leave, setLeave] = useState<string | null>(null);
   const keepRef = useRef<HTMLButtonElement>(null);

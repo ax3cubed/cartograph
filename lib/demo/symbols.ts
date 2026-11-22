@@ -1,10 +1,6 @@
 // Demo symbols for northwind (G11). The map stops at files; symbols appear only in a file's focus view.
 // Every symbol call sits on top of a file link that already exists in lib/workspace.ts.
-export interface Sym {
-  id: string; name: string; kind: "function" | "type"; file: string; lines: [number, number];
-  sig: string; summary: string; // summary is written by a model
-}
-export interface SymLink { from: string; to: string; kind: "call" | "type" }
+import type { Sym, SymLink } from "../model.ts";
 
 const B = "billing", G = "gateway", S = "shared", C = "catalog";
 const sym = (file: string, name: string, kind: Sym["kind"], lines: [number, number], sig: string, summary: string): Sym =>

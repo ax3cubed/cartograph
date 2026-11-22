@@ -229,29 +229,16 @@ export function linkify(text: string): Part[] {
 
 // ---------- client call ----------
 
-/** Streams the model's wording of the retrieved `ctx`. Yields text chunks; throws with the provider's message on failure. */
-export async function* narrate(s: AiSettings, ctx: Context, signal: AbortSignal) {
-  const res = await fetch("/api/ai", {
-    method: "POST",
-    signal,
-    body: JSON.stringify({
-      ...endpoint(s), model: s.model, effort: EFFORTS[s.tier],
-      messages: ctx.messages,
-    }),
-  });
-  if (!res.ok || !res.body) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
-  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    yield value;
-  }
+// The static export has no server route (FE-01, A2), and the CSP's connect-src 'self' keeps the browser from
+// calling a provider itself. Model calls move into the binary in FE-20; until then Ask answers from the map.
+export const NO_MODEL = "This build has no model yet.";
+
+/** Streams the model's wording of the retrieved `ctx`. Throws until FE-20 gives the binary a model route. */
+export async function* narrate(_s: AiSettings, _ctx: Context, _signal: AbortSignal): AsyncGenerator<string> {
+  throw new Error(NO_MODEL);
 }
 
-/** Model ids the configured provider offers (GET {baseUrl}/models through the server). */
-export async function listModels(s: Pick<AiSettings, "baseUrl" | "apiKey">): Promise<string[]> {
-  const res = await fetch("/api/ai", { method: "POST", body: JSON.stringify({ baseUrl: s.baseUrl, apiKey: s.apiKey }) });
-  const json = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-  return json.models;
+/** Model ids the configured provider offers. Throws until FE-20. */
+export async function listModels(_s: Pick<AiSettings, "baseUrl" | "apiKey">): Promise<string[]> {
+  throw new Error(NO_MODEL);
 }

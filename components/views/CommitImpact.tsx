@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Copy, GitCommit } from "lucide-react";
 import { getCommitImpact, getCommits, getEntrypoints } from "@/lib/source";
-import { SERVICES, byId, type Link as Edge } from "@/lib/workspace";
-import type { CommitImpact as Impact } from "@/lib/model";
+import { SERVICES, byId } from "@/lib/workspace";
+import type { CommitImpact as Impact, Link as Edge } from "@/lib/model";
 import { AsideTop, Cell, Chip, KeyHint, NodeLink, Page, ViewSplit, fmtDate, mapHref, useHashState, useRoving } from "./shared";
 import "./commitImpact.css";
 

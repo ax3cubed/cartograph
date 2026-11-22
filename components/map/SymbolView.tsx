@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { byId } from "@/lib/workspace";
-import { SYMBOLS, SYMBOL_LINKS, symbolById, type Sym } from "@/lib/demo/symbols";
+import { SYMBOLS, SYMBOL_LINKS, symbolById } from "@/lib/demo/symbols";
+import type { Sym } from "@/lib/model";
 import { serviceHue } from "./domains";
 import "./map.css";
 

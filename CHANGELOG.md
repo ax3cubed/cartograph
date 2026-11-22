@@ -13,12 +13,17 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ### Changed
 
+- The app builds as a static export to `out/` (FE-01), for the binary to embed and serve on loopback. `pnpm build` also writes `out/csp.json`, the SHA-256 hashes of each page's inline scripts. `pnpm check:export` checks the route list and the size budget (6 MB raw, 1.8 MB brotli) in CI.
+- Fonts are vendored under `app/fonts/` (SIL OFL 1.1) and loaded with `next/font/local`, so the build needs no network.
+- The app's types live in `lib/model.ts`; components no longer import types from `lib/workspace.ts` or `lib/demo/*` (FE-02).
 - `docs/research/README.md` rewritten around the new measurements. The earlier claim that the speed comes from content addressing is corrected: it comes from processing only what each commit changed.
 - The landing page's research figures now come from the new experiments.
 
 ### Removed
 
 - `docs/research/spike.mjs`, replaced by `bench.mjs`.
+- `POST /api/ai` and its settings `CARTOGRAPH_AI_BASE_URL`, `CARTOGRAPH_AI_API_KEY` and `CARTOGRAPH_ALLOW_CLIENT_PROVIDER`. A static export has no server routes. Ask answers from the map until the binary serves model calls (FE-20).
+- `pnpm start`; serve `out/` with any static server instead.
 
 ## [0.2.0] - 2026-11-10
 

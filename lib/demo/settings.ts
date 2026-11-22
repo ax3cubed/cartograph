@@ -1,10 +1,7 @@
 // Demo data for the settings pages (northwind). Moves into lib/source.ts when the local API exists.
+import type { Connection, EnvKey, EnvName, Extractor, ProviderKind } from "../model.ts";
 import { NODES, SERVICES } from "../workspace.ts";
 import { SPECS } from "./contracts.ts";
-
-export type Tone = "ok" | "warn" | "bad" | "off";
-export type ProviderKind = "folder" | "github" | "gitlab" | "bitbucket" | "k8s" | "spec" | "traces" | "azure";
-export interface Connection { id: string; kind: ProviderKind; ic: string; name: string; auth: string; provides: string[]; status: string; tone: Tone; when: string; action?: string }
 
 export const CONNECTIONS: Connection[] = [
   { id: "local", kind: "folder", ic: "FS", name: "Local folder · ~/code/northwind", auth: "git on disk · no credentials", provides: ["Code", "History"], status: "Connected", tone: "ok", when: "synced 2h ago" },
@@ -28,7 +25,6 @@ export const PROVIDER_KINDS: { kind: ProviderKind; ic: string; label: string; ne
 ];
 
 const filesOf = (lang: string) => NODES.filter((n) => n.kind === "file" && SERVICES.find((s) => s.id === n.service)?.lang === lang).length;
-export interface Extractor { id: string; name: string; note: string; v: string; files: string; on: boolean }
 export const EXTRACTORS: Extractor[] = [
   { id: "ts", name: "TypeScript and JavaScript", note: "imports, exports, symbols, calls, fetch sites", v: "0.4.0", files: String(filesOf("TS")), on: true },
   { id: "go", name: "Go", note: "imports, symbols, net/http and gRPC clients", v: "0.3.0", files: String(filesOf("GO")), on: true },
@@ -60,8 +56,6 @@ export const SERVICE_DETECT: Record<string, { how: string; domain: string; owner
   shared: { how: "pnpm workspace package, no deployable", domain: "platform", owner: "@northwind/platform" },
 };
 
-export type EnvName = "prod" | "staging" | "local";
-export interface EnvKey { key: string; value: string; from: string; to: string; tone: "ok" | "off" }
 const ENV_SRC: Record<EnvName, string> = { prod: "helm · infra-values/prod", staging: "helm · infra-values/staging", local: ".env.example" };
 const HOSTS: Record<EnvName, [string, string, string, string]> = {
   prod: ["auth.identity.svc", "billing.payments.svc", "catalog.catalog.svc", "user-events"],

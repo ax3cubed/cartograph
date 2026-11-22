@@ -8,9 +8,9 @@ import {
 import { Maximize2, Minus, Plus } from "lucide-react";
 import {
   LINKS, NODES, SERVICES, WORKSPACE, byId, children, commitBySha, dayMs, descendants, isActive,
-  recentChange, type Link, type LinkType, type Node,
+  recentChange,
 } from "@/lib/workspace";
-import { HIDDEN_BELOW } from "@/lib/model";
+import { HIDDEN_BELOW, type Link, type LinkType, type Node } from "@/lib/model";
 import { serviceHue } from "./map/domains";
 import { level, lkey, neighboursOf, score, visibleIds, type EffLink } from "./map/links";
 import SymbolView from "./map/SymbolView";

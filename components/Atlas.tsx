@@ -24,12 +24,12 @@ import NodeMenu, { isMenuKey, longPress, onMenuEvent, type MenuItem, type MenuRe
 import { toast } from "./shell/toast";
 import { serviceHue } from "./map/domains";
 import { applyCorrections, between, neighboursOf, reach, score, traceStart, visibleIds, type EffLink } from "./map/links";
-import { HIDDEN_BELOW, type Correction } from "@/lib/model";
+import { HIDDEN_BELOW, type Correction, type LinkType } from "@/lib/model";
 import { getCorrections, getEntrypoints } from "@/lib/source";
 import { loadKeymap } from "@/lib/settings";
 import { symbolById, symbolsIn } from "@/lib/demo/symbols";
 import {
-  COMMITS, NODES, WORKSPACE, SERVICES, byId, children, commitBySha, dayMs, metrics, type LinkType,
+  COMMITS, NODES, WORKSPACE, SERVICES, byId, children, commitBySha, dayMs, metrics,
 } from "@/lib/workspace";
 import "./map/map.css";
 

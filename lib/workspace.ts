@@ -1,38 +1,7 @@
 // Mock multi-service workspace. Real indexing (file scan + `git log`) should emit this same shape.
 // ponytail: hand-authored data, swap for a generated JSON when the indexer exists.
 
-import { confidence, type Confidence } from "./model.ts";
-
-export type Kind = "workspace" | "service" | "module" | "file";
-export type LinkType = "imports" | "calls" | "http" | "event" | "db";
-
-export interface Node {
-  id: string;
-  name: string;
-  kind: Kind;
-  parent: string | null;
-  service: string; // owning service id ("" for the workspace root)
-  path: string;
-  summary: string;
-  lang?: "TS" | "GO" | "PY";
-}
-
-export interface Link {
-  from: string; // `from` depends on `to`
-  to: string;
-  type: LinkType;
-  added: string; // commit sha
-  removed?: string;
-  confidence?: Confidence; // absent = exact
-}
-
-export interface Commit {
-  sha: string;
-  date: string; // ISO day
-  author: string;
-  repo: string; // service id
-  message: string;
-}
+import { confidence, type Commit, type Confidence, type Link, type LinkType, type Metrics, type Node } from "./model.ts";
 
 export const WORKSPACE = "northwind";
 
@@ -269,8 +238,6 @@ export const ancestry = (id: string) => {
 };
 
 // ---------- metrics ----------
-
-export interface Metrics { links: number; fanIn: number; fanOut: number; cross: number; churn: number }
 
 export function metrics(scopeId: string, t: number): Metrics {
   const scope = descendants(scopeId);

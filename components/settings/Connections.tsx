@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { Check, X } from "lucide-react";
-import { CONNECTIONS, PROVIDER_KINDS, type Connection, type ProviderKind } from "@/lib/demo/settings";
+import { CONNECTIONS, PROVIDER_KINDS } from "@/lib/demo/settings";
+import type { Connection, ProviderKind } from "@/lib/model";
 import { getCurrentWorkspace } from "@/lib/source";
 import { Chip, SettingsPage } from "./ui";
 import "./connections.css";

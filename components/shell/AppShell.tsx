@@ -2,7 +2,8 @@
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { usePath } from "./usePath";
 import { ChevronDown, Search, Settings } from "lucide-react";
 import AiMark from "@/components/brand/AiMark";
 import { getWorkspaces } from "@/lib/source";
@@ -32,7 +33,7 @@ export const ASK_EVENT = "cartograph:ask";
  * `onPick` receives what the search palette picked (a node id on the map). `extra` is a slot before Ask (the map's pins).
  */
 export default function AppShell({ onPick, extra }: { onPick?: (id: string, kind: string) => void; extra?: ReactNode }) {
-  const raw = usePathname();
+  const raw = usePath();
   const path = raw.length > 1 ? raw.replace(/\/$/, "") : raw;
   const router = useRouter();
   const [searching, setSearching] = useState(false);

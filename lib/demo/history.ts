@@ -1,5 +1,6 @@
 // Demo history for the timeline (G04) and the file history panel (G10).
 // A getter in source.ts can replace these later; nothing here reads the network.
+import type { Bin, FileEvent, Rewrite } from "../model.ts";
 import { SERVICES } from "../workspace.ts";
 
 export const DAY = 86_400_000;
@@ -15,8 +16,6 @@ const perDay = (repoIdx: number, day: number) => {
   const years = (day - HISTORY_START) / (365 * DAY);
   return Math.floor(((h % 1000) / 1000) * (1.2 + years * 0.45) * (1 + repoIdx * 0.1));
 };
-
-export interface Bin { start: number; end: number; total: number; byRepo: Record<string, number> }
 
 /** Commit counts per bin between two days, split by repo. */
 export function density(from: number, to: number, binDays: number | "month"): Bin[] {
@@ -40,29 +39,6 @@ export function density(from: number, to: number, binDays: number | "month"): Bi
     start = end;
   }
   return bins;
-}
-
-/** One file's lifecycle. `kind: "rename"` moves it; `change` is a commit that touched it. */
-export interface FileEvent {
-  id: string;
-  kind: "created" | "rename" | "change";
-  date: string; // ISO day
-  sha: string;
-  author: string;
-  text: string; // what happened, short
-  from?: string; // earlier path, for renames
-  similarity?: number; // 0..1 content kept across a rename
-  note?: string;
-}
-
-/** History was rewritten: sync replayed from the merge base (decision on rewritten history). */
-export interface Rewrite {
-  id: string;
-  repo: string; // service id
-  date: string;
-  kind: "force-push" | "rebase";
-  mergeBase: string;
-  linksRebuilt: number; // links kept separately, so they don't vanish
 }
 
 export const REWRITES: Rewrite[] = [
