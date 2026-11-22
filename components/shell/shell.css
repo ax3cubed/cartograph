@@ -1,0 +1,145 @@
+/* sh-: app shell (top bar, settings nav, empty state). Everything reads tokens from globals.css. */
+
+.sh-chip {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 12px; padding: 3px 10px; border-radius: 99px;
+  border: 1px solid var(--line2); color: var(--muted);
+}
+.sh-chip-warn { color: var(--warn); border-color: var(--warn-line); }
+.sh-chip-down { color: var(--down); border-color: var(--down-line); }
+.sh-chip-up { color: var(--up); border-color: var(--up-line); }
+.sh-chip-demo { color: color-mix(in oklab, var(--demo-hue), black var(--hue-dim)); border-color: var(--demo-line); }
+.sh-k { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+/* frame for routes other than the map */
+.sh-frame { height: 100dvh; display: flex; flex-direction: column; background: var(--canvas); }
+.sh-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+
+/* top bar: .top and .brand live in globals.css */
+.sh-top { gap: 0; position: relative; z-index: 9; min-width: 0; height: 60px; flex: none; }
+.sh-top > *, .sh-right > * { flex: none; }
+.sh-top > .sh-search { flex: 1 1 140px; min-width: 150px; }
+.brand { color: var(--text); text-decoration: none; }
+.sh-ws {
+  height: 100%; width: max-content; padding: 0 16px 0 20px; display: flex; align-items: center; gap: 12px; text-align: left;
+  border-right: 1px solid var(--line); color: var(--text);
+}
+.sh-ws > * { flex: none; }
+.sh-ws:hover { background: var(--slab); }
+.sh-ws-text { display: flex; flex-direction: column; line-height: 1.25; font-size: 11px; color: var(--muted); }
+.sh-ws-text b { color: var(--text); font-size: 13.5px; font-weight: 600; }
+.sh-ws svg { color: var(--muted); }
+
+.sh-tabs { display: flex; height: 100%; padding: 0 8px; gap: 2px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; }
+.sh-tabs::-webkit-scrollbar { display: none; }
+.sh-tabs a { flex: none; white-space: nowrap; }
+.sh-top > .sh-tabs { flex: 0 1 auto; }
+.sh-tabsel { display: none; position: relative; align-items: center; margin: 0 var(--space-2); }
+.sh-tabsel select {
+  appearance: none; height: 36px; padding: 0 30px 0 12px; border-radius: var(--radius-md);
+  background: var(--slab); border: 1px solid var(--line); color: var(--text); font-weight: 600; font-size: var(--fs-md);
+}
+.sh-tabsel svg { position: absolute; right: 10px; pointer-events: none; color: var(--muted); }
+.sh-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sh-right .sh-chip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.sh-tabs a {
+  display: flex; align-items: center; padding: 0 12px; color: var(--muted); text-decoration: none;
+  font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.sh-tabs a:hover { color: var(--text); }
+.sh-tabs a[aria-current="page"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+
+.sh-search {
+  flex: 1 1 140px; max-width: 320px; min-width: 38px; margin-left: 8px; height: 38px; padding: 0 12px;
+  display: flex; align-items: center; gap: 10px; border-radius: 10px;
+  color: var(--faint); background: var(--slab); box-shadow: inset 0 0 0 1px var(--line); text-align: left;
+}
+.sh-search:hover { color: var(--text); }
+.sh-search span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.sh-search kbd { font: 500 11px var(--font-mono), monospace; padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line2); color: var(--muted); }
+
+.sh-right { margin-left: auto; display: flex; align-items: center; gap: 10px; padding-left: 12px; }
+.sh-ask {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 99px;
+  background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 13px;
+}
+.sh-ask:hover { filter: brightness(1.08); }
+.sh-icon, .sh-bell {
+  position: relative; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--muted); text-decoration: none;
+}
+.sh-icon:hover, .sh-bell:hover { background: var(--slab); color: var(--text); }
+.sh-icon[aria-current="page"] { color: var(--accent); }
+.sh-bell-n {
+  position: absolute; top: 3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px;
+  background: var(--accent); color: var(--on-accent); font-size: 10px; font-weight: 700; display: grid; place-items: center;
+}
+.sh-top .pins summary { background: var(--slab); }
+
+/* settings: fixed left nav + page */
+.sh-settings { flex: 1; min-height: 0; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
+.sh-settings > main { overflow: auto; padding: 32px 40px; background: var(--bg); }
+.sh-snav { background: var(--panel); border-right: 1px solid var(--line); padding: 20px 14px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.sh-snav a {
+  display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 10px;
+  color: var(--muted); text-decoration: none; font-size: 14px;
+}
+.sh-snav a:hover { color: var(--text); background: var(--slab); }
+.sh-snav a[aria-current="page"] { background: var(--slab); color: var(--text); font-weight: 600; }
+.sh-snav .sh-snav-back { color: var(--text); }
+.sh-snav-group { display: flex; flex-direction: column; gap: 2px; }
+.sh-snav .sh-k { padding: 16px 14px 6px; }
+
+/* empty state (decision I9): what will appear, why it isn't there yet, one action */
+.sh-empty {
+  margin: auto; max-width: 440px; padding: 40px 24px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.sh-empty-icon { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--slab); color: var(--muted); }
+.sh-empty h2 { margin: 6px 0 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.sh-empty p { margin: 0 0 8px; color: var(--muted); line-height: 1.55; }
+.sh-empty .btn { text-decoration: none; padding: 9px 18px; border-radius: 99px; font-weight: 600; }
+.sh-first { min-height: 100dvh; display: flex; background: var(--canvas); }
+
+/* Narrow headers drop only the neutral "index is current" chip. Warn and down chips always stay: they're the only signal. */
+@media (max-width: 1520px) {
+  .sh-right .sh-chip:not(.sh-chip-warn):not(.sh-chip-down) { display: none; }
+}
+@media (max-width: 1180px) {
+  .sh-search span, .sh-search kbd { display: none; }
+  .sh-top > .sh-search { flex: none; width: 38px; min-width: 0; justify-content: center; padding: 0; }
+  .sh-ws-text span:first-child, .sh-ws .sh-chip { display: none; }
+  .sh-right { gap: 6px; padding-left: 8px; }
+  .sh-right .sh-chip { max-width: 160px; }
+  .sh-ask { padding: 0 12px; }
+  .sh-top .pins summary { padding: 8px 10px; }
+}
+@media (max-width: 1024px) {
+  .sh-ws { padding: 0 10px 0 12px; }
+  .sh-ws-text b { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brand { padding: 0 14px; }
+  .brand span { display: none; }
+  .sh-ask span { display: none; }
+  .sh-ask { width: 36px; padding: 0; justify-content: center; }
+}
+@media (max-width: 900px) {
+  .sh-tabs a { padding: 0 9px; font-size: var(--fs-sm); }
+  .sh-settings { grid-template-columns: minmax(0, 1fr); }
+  .sh-snav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sh-snav .sh-k { display: none; }
+  .sh-snav-group { flex-direction: row; flex-wrap: wrap; }
+  .sh-settings > main { padding: 24px 16px; }
+}
+
+@media (max-width: 640px) {
+  .sh-top { padding-right: 8px; }
+  .sh-tabs { display: none; }
+  .sh-tabsel { display: inline-flex; }
+  .sh-ws { padding: 0 8px; }
+  .sh-ws-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .brand { display: none; }
+  .sh-right { gap: 2px; padding-left: 4px; }
+  .sh-right .sh-chip { max-width: 96px; }
+  .sh-top .pins summary { font-size: 0; gap: 0; padding: 0; width: 36px; height: 36px; justify-content: center; }
+  .sh-top > .sh-search { margin-left: 4px; }
+}

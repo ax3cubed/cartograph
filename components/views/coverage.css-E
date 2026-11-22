@@ -1,0 +1,23 @@
+/* cov-: coverage board. Shared parts are in views.css. */
+.cov-mets { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.cov-met { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cov-met b { font-size: calc(1.5rem * var(--ts)); font-weight: 600; }
+.cov-label { font-size: 0.8rem; color: var(--body); min-height: 2.2em; }
+.cov-small { font-size: 0.72rem; }
+.cov-status { font-weight: 600; }
+.cov-ok { color: var(--up); }
+.cov-bar { height: 6px; border-radius: 99px; background: var(--slab); overflow: hidden; }
+.cov-bar i { display: block; height: 100%; border-radius: 99px; background: var(--up); }
+.cov-bar i[data-miss] { background: var(--warn); }
+.cov-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .cov-grid { grid-template-columns: minmax(0, 1fr); } }
+.cov-list, .cov-refs { list-style: none; margin: 0; padding: 0; }
+.cov-gap { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; border-top: 1px solid var(--line); border-radius: 8px; padding-right: 4px; }
+.cov-gap[aria-current] { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+.cov-pick { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 14px; align-items: center; min-height: 54px; text-align: left; font-size: 0.84rem; }
+.cov-n { font-size: 0.95rem; font-weight: 500; text-align: right; }
+.cov-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cov-what span { font-size: 0.75rem; }
+.cov-un-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cov-ref { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; align-items: center; min-height: 40px; border-top: 1px solid var(--line); font-size: 0.75rem; }
+.cov-ref:first-child { border-top: 0; min-height: 26px; }

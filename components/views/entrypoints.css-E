@@ -1,0 +1,15 @@
+/* ep-: entrypoints board */
+.ep-cols { grid-template-columns: minmax(0, 1.4fr) 150px 100px 100px 120px; }
+.ep-label { display: flex; align-items: center; gap: 8px; }
+.ep-label .view-method { width: 44px; flex: none; }
+.ep-svc { display: flex; align-items: center; gap: 8px; }
+.ep-svc i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ep-title { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.ep-title h2 { margin: 0; font-size: calc(1.25rem * var(--ts)); font-weight: 600; overflow-wrap: anywhere; }
+.ep-con { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 52px; border-top: 1px solid var(--line); font-size: 0.8rem; }
+.ep-con-t { display: flex; flex-direction: column; min-width: 0; }
+.ep-con-t span { font-size: 0.7rem; overflow-wrap: anywhere; }
+.ep-ic { width: 30px; height: 30px; border-radius: 8px; background: var(--slab); display: grid; place-items: center; font-size: 0.62rem; font-weight: 700; color: var(--body); }
+.ep-none { margin-top: 6px; }
+.ep-trace { margin-top: auto; }
+@media (max-width: 900px) { .ep-cols { grid-template-columns: minmax(0, 1fr) 90px 70px; } .ep-cols > :nth-child(n+4) { display: none; } }

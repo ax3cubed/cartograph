@@ -1,0 +1,78 @@
+/* The Ask composer (components/ask/Composer.tsx): one rounded slab, one focus ring on the slab, never on the textarea. */
+.ask-cmp {
+  position: relative;
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: 10px 10px 8px 14px;
+  border-radius: 16px;
+  background: var(--slab-hi);
+  box-shadow: inset 0 0 0 1px var(--line2);
+  transition: box-shadow 120ms var(--ease);
+  font-family: var(--font-ui), system-ui, sans-serif;
+}
+.ask-cmp:focus-within { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* The textarea is not a focus surface of its own: beat the base `:focus-visible` and `.ask :focus-visible` rings. */
+.ask-cmp .ask-cmp-input,
+.ask-cmp .ask-cmp-input:focus,
+.ask-cmp .ask-cmp-input:focus-visible {
+  outline: none; border: 0; box-shadow: none; border-radius: 0;
+}
+.ask-cmp .ask-cmp-input {
+  display: block; width: 100%; min-height: calc(var(--fs-md) * 1.5); margin: 0; padding: 4px 0;
+  resize: none; overflow-y: auto; background: transparent; color: var(--text);
+  font: 400 var(--fs-md)/1.5 var(--font-ui), system-ui, sans-serif;
+}
+.ask-cmp .ask-cmp-input::placeholder { color: var(--ph); opacity: 1; }
+
+/* Context chip row: only rendered when a node is selected. */
+.ask-cmp-ctx { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-top: 2px; }
+.ask-cmp-chip {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 2px 0 8px; border-radius: 8px;
+  font-family: var(--font-mono), monospace; font-size: var(--fs-xs); color: var(--text);
+  background: var(--slab); box-shadow: inset 0 0 0 1px var(--line2);
+}
+.ask-cmp-chip button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--muted); }
+.ask-cmp-chip button:hover { color: var(--text); background: var(--seg-on); }
+.ask-cmp-ctx-hint { font-size: var(--fs-xs); color: var(--muted); }
+
+/* Action row: @ and / on the left, the model picker and Send on the right. */
+.ask-cmp-actions { display: flex; align-items: center; gap: var(--space-1); min-height: 32px; }
+.ask-cmp-spacer { flex: 1; }
+.ask-cmp-tool {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--muted);
+}
+.ask-cmp-tool:hover { color: var(--text); background: var(--seg-on); }
+.ask-cmp-picker { display: flex; min-width: 0; }
+.ask-cmp-picker .ask-model { height: 32px; background: transparent; }
+.ask-cmp-picker .ask-model:hover { background: var(--seg-on); }
+
+.ask-cmp-send {
+  flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent);
+  transition: background-color 120ms var(--ease), transform 120ms var(--ease);
+}
+.ask-cmp-send:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 88%, var(--text)); }
+.ask-cmp-send:active:not(:disabled) { transform: scale(0.94); }
+.ask-cmp-send:disabled { opacity: 1; background: var(--slab); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line2); }
+.ask-cmp-send.is-stop { background: var(--text); color: var(--bg); }
+
+/* "@" and "/" suggestions, above the composer. */
+.ask-cmp-suggest {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30; max-height: min(360px, 50vh); overflow-y: auto;
+  margin: 0; padding: 6px; list-style: none; border-radius: 14px;
+  background: var(--panel); box-shadow: var(--shadow-4), inset 0 0 0 1px var(--line);
+}
+.ask-cmp-suggest-head { padding: 6px 10px 4px; font-size: var(--fs-xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.ask-cmp-suggest-row {
+  display: grid; grid-template-columns: 16px minmax(0, auto) minmax(0, 1fr); align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 10px; cursor: pointer; color: var(--muted);
+}
+.ask-cmp-suggest-row[aria-selected="true"] { background: var(--slab-hi); color: var(--text); }
+.ask-cmp-suggest-name { color: var(--text); font-weight: 600; font-size: var(--fs-sm); white-space: nowrap; }
+.ask-cmp-suggest-name i { font-style: normal; font-weight: 400; color: var(--muted); font-family: var(--font-mono), monospace; font-size: var(--fs-xs); }
+.ask-cmp-suggest-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--muted); }
+.ask-cmp-suggest-detail.is-path { font-family: var(--font-mono), monospace; }
+
+.ask-cmp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) { .ask-cmp, .ask-cmp-send { transition: none; } }

@@ -1,0 +1,41 @@
+.sh-palette {
+  width: min(700px, calc(100vw - 32px)); max-height: 80dvh; padding: 0; border: 0; border-radius: 18px; margin: 10vh auto auto;
+  background: var(--panel); color: var(--text); box-shadow: var(--shadow-4), inset 0 0 0 1px var(--line2); overflow: hidden;
+}
+.sh-palette[open] { display: flex; flex-direction: column; }
+.sh-palette::backdrop { background: var(--scrim); }
+.sh-sp-inp { flex: none; height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--line); color: var(--accent); }
+.sh-sp-inp input::placeholder { color: var(--muted); opacity: 1; }
+.sh-sp-inp input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font-size: 1.0625rem; color: var(--text); }
+.sh-sp-inp:focus-within { box-shadow: inset 0 -2px var(--accent); }
+.sh-sp-n { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.sh-sp-tabs { flex: none; display: flex; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.sh-sp-tabs button { height: 32px; padding: 0 12px; border-radius: 99px; color: var(--muted); font-size: 0.8125rem; font-weight: 500; white-space: nowrap; }
+.sh-sp-tabs button:hover { color: var(--text); }
+.sh-sp-tabs button[aria-selected="true"] { background: var(--slab2); color: var(--text); }
+.sh-sp-list { list-style: none; margin: 0; padding: 0 0 8px; overflow-y: auto; min-height: 0; }
+.sh-sp-grp { display: flex; align-items: center; gap: 6px; padding: 10px 20px 4px; }
+.sh-sp-row {
+  display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 12px; align-items: center; width: 100%;
+  min-height: 48px; padding: 6px 20px; font-size: 0.875rem; text-align: left; cursor: pointer;
+}
+.sh-sp-row[aria-selected="true"] { background: var(--slab); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.sh-sp-t { display: flex; flex-direction: column; min-width: 0; }
+.sh-sp-p { font: 0.75rem var(--font-mono), monospace; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sh-sp-kind { font-size: 0.75rem; color: var(--muted); }
+.sh-sp-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); justify-self: center; }
+.sh-sp-dot.is-ring { background: none; box-shadow: inset 0 0 0 2px var(--c); }
+.sh-palette mark { background: none; color: var(--accent); font-weight: 600; }
+.sh-sp-empty, .sh-sp-more { padding: 16px 20px; color: var(--muted); font-size: 0.8125rem; line-height: 1.5; }
+.sh-sp-more { padding: 10px 20px 4px; }
+.sh-sp-none { padding: 24px 20px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.sh-sp-none > b { font-size: 1rem; font-weight: 600; }
+.sh-sp-none > span:not(.sh-k) { font-size: 0.875rem; color: var(--muted); }
+.sh-sp-none .sh-sp-row { padding: 0; }
+.sh-sp-ask, .sh-sp-ask:visited { color: var(--text); }
+.sh-sp-ask { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border-radius: 12px; background: var(--slab); color: var(--text); text-decoration: none; font-size: 0.875rem; align-self: stretch; }
+.sh-sp-ask { text-align: left; cursor: pointer; }
+.sh-sp-ask svg { color: var(--accent); }
+.sh-sp-keys { flex: none; display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 12px 20px; border-top: 1px solid var(--line); font-size: 0.75rem; color: var(--muted); }
+.sh-sp-keys kbd { font: 0.75rem var(--font-mono), monospace; border-radius: 5px; padding: 0 5px; margin-right: 6px; color: var(--text); box-shadow: inset 0 0 0 1px var(--line2); }
+.sh-sp-keys span:last-child { margin-left: auto; }

@@ -1,14 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Simulation, type SimulationNodeDatum,
 } from "d3-force";
 import { Maximize2, Minus, Plus } from "lucide-react";
 import {
-  LINKS, NODES, SERVICES, WORKSPACE, byId, children, commitBySha, dayMs, descendants, isActive, neighbours,
-  recentChange, serviceColor, type Link, type LinkType, type Node,
+  LINKS, NODES, SERVICES, WORKSPACE, byId, children, commitBySha, dayMs, descendants, isActive,
+  recentChange, type Link, type LinkType, type Node,
 } from "@/lib/workspace";
+import { HIDDEN_BELOW } from "@/lib/model";
+import { serviceHue } from "./map/domains";
+import { level, lkey, neighboursOf, score, visibleIds, type EffLink } from "./map/links";
+import SymbolView from "./map/SymbolView";
+import { isMenuKey, longPress, onMenuEvent, type MenuTarget } from "./map/NodeMenu";
+import { useRoving } from "./sidebar/useRoving";
+import "./map/map.css";
 
 export type Layout = "clusters" | "adaptive" | "ontology";
 export type Depth = 1 | 2 | 3;
@@ -16,12 +24,26 @@ type Pt = { x: number; y: number };
 type Cam = { x: number; y: number; w: number; h: number };
 
 const RANK: Record<Node["kind"], number> = { workspace: 0, service: 1, module: 2, file: 3 };
-const lift = (id: string, depth: Depth) => {
+/** Roll a node up to the visible depth. A module opened in place (depth 2) keeps its files. */
+const lift = (id: string, depth: Depth, open?: Set<string>) => {
   let n = byId.get(id)!;
-  while (RANK[n.kind] > depth) n = byId.get(n.parent!)!;
+  while (RANK[n.kind] > depth && !(n.kind === "file" && depth === 2 && open?.has(n.parent!))) n = byId.get(n.parent!)!;
   return n.id;
 };
-const lkey = (l: Link) => `${l.from}>${l.to}`;
+const nodeHue = (n: Node) => (n.kind === "workspace" ? "var(--accent)" : serviceHue(n.service));
+/** A five-point star centred on (cx, cy), for the pinned marker. */
+const star = (cx: number, cy: number, R: number) =>
+  Array.from({ length: 10 }, (_, i) => {
+    const r = i % 2 ? R * 0.45 : R, a = (i * Math.PI) / 5 - Math.PI / 2;
+    return `${i ? "L" : "M"}${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
+  }).join("") + "Z";
+type MenuOpen = (t: MenuTarget, at: Pt | null, from: Element) => void;
+/** Right-click, the ContextMenu key, Shift+F10 and a touch long-press all open the context menu for `t`. */
+const menuProps = (t: MenuTarget, onMenu?: MenuOpen) => onMenu ? {
+  onContextMenu: (e: React.MouseEvent) => { const el = e.currentTarget; onMenuEvent(e, (at) => onMenu(t, at, el)); },
+  menuKey: (e: React.KeyboardEvent) => { if (!isMenuKey(e)) return false; e.preventDefault(); e.stopPropagation(); onMenu(t, null, e.currentTarget); return true; },
+  press: (e: React.PointerEvent) => { const el = e.currentTarget; longPress(e, (at) => onMenu(t, at, el)); },
+} : { onContextMenu: undefined, menuKey: () => false, press: () => {} };
 
 // ---------- fixed layouts ----------
 
@@ -92,7 +114,7 @@ function useCamera(base: Cam) {
   const raf = useRef(0);
   const moved = useRef(false);
 
-  const clampW = (w: number) => Math.min(base.w * 1.8, Math.max(base.w / 5, w));
+  const clampW = (w: number) => Math.min(base.w * 2.6, Math.max(base.w / 5, w));
   const animateTo = (to: Cam) => {
     cancelAnimationFrame(raf.current);
     const from = camRef.current, t0 = performance.now();
@@ -182,10 +204,11 @@ function useCamera(base: Cam) {
   return { svg, cam, zoom: base.w / cam.w, moved, toSvg, onPointerDown, fitTo, home: () => animateTo(base), zoomBy: (f: number) => zoomAt(f, centre(), true) };
 }
 
-function ZoomControls({ camera }: { camera: ReturnType<typeof useCamera> }) {
+/** Zoom buttons sit on the map; the zoom text goes into the canvas bar's status line (`slot`) so nothing overlaps. */
+function ZoomControls({ camera, info, slot }: { camera: ReturnType<typeof useCamera>; info?: string; slot?: HTMLElement | null }) {
   return (
     <div className="zoom">
-      <span className="zoom-pct">{Math.round(camera.zoom * 100)}%</span>
+      {slot && createPortal(<>{Math.round(camera.zoom * 100)}%{info ? ` · ${info}` : ""}</>, slot)}
       <button className="round-btn" onClick={() => camera.zoomBy(1 / 1.35)} aria-label="Zoom out"><Minus size={16} /></button>
       <button className="round-btn" onClick={() => camera.zoomBy(1.35)} aria-label="Zoom in"><Plus size={16} /></button>
       <button className="round-btn" onClick={camera.home} aria-label="Fit map"><Maximize2 size={15} /></button>
@@ -205,12 +228,29 @@ interface Props {
   highlight: { nodes: Set<string>; links: Set<string> } | null;
   typeFilter: LinkType | "all";
   minUsedBy: number;
+  links: EffLink[]; // links after corrections
+  showWeak: boolean;
+  compare: { a: number; b: number } | null;
+  edgeSel: { a: string; b: string } | null;
+  symbolId: string | null;
+  onEdge: (e: { a: string; b: string }) => void;
+  onSymbol: (id: string) => void;
   onOpen: (id: string) => void;
   onSelect: (id: string) => void;
   onDepth: (d: Depth) => void;
+  /** Where the zoom and labelled text renders (the canvas bar's status line). */
+  statusSlot?: HTMLElement | null;
+  /** Pinned node ids: they get a star and an accent ring. */
+  pinned?: Set<string>;
+  /** Open the context menu for a node or link (`at` null = from the keyboard). */
+  onMenu?: MenuOpen;
 }
 
+/** Map items are one tab stop; arrows move between nodes first, then links. */
+const ROVE = [".node, .leaf", ".map-aggbtn", ".link-hit"];
+
 export default function Graph(p: Props) {
+  if (p.focus && p.focusId && p.symbolId) return <SymbolView symbolId={p.symbolId} onSymbol={p.onSymbol} />;
   return p.focus && p.focusId ? <FocusGraph key={p.focusId} {...p} focusId={p.focusId} /> : <MapGraph {...p} />;
 }
 
@@ -219,47 +259,61 @@ export default function Graph(p: Props) {
 type SimNode = SimulationNodeDatum & { id: string };
 const BASE: Cam = { x: -500, y: -380, w: 1000, h: 880 }; // extra room at the bottom for the Ask bar
 
-function MapGraph({ layout, depthSetting, t, scopeId, highlight, typeFilter, minUsedBy, onOpen, onSelect, onDepth }: Props) {
+function MapGraph({ layout, depthSetting, t, scopeId, highlight, typeFilter, minUsedBy, links, showWeak, compare, edgeSel, onEdge, onOpen, onSelect, onDepth, statusSlot, pinned, onMenu }: Props) {
   const camera = useCamera(BASE);
+  const rove = useRoving(camera.svg, ROVE);
   const { zoom } = camera;
   const [hover, setHover] = useState<string | null>(null);
   // comprehension depth follows zoom: far = services, mid = modules, close = files
-  const autoDepth: Depth = zoom < 0.85 ? 1 : zoom < 1.75 ? 2 : 3;
+  const autoDepth: Depth = zoom < 0.6 ? 1 : zoom < 1.4 ? 2 : 3; // board 00: services below 60%, modules to 140%, files above
+  const [open, setOpen] = useState<Set<string>>(new Set()); // modules whose files are shown in place
   const depth: Depth = depthSetting === "auto" ? autoDepth : depthSetting;
   useEffect(() => onDepth(autoDepth), [autoDepth, onDepth]);
 
   const scope = useMemo(() => (scopeId ? descendants(scopeId) : null), [scopeId]);
 
+  const lo = compare ? Math.min(compare.a, compare.b) : t, hi = compare ? Math.max(compare.a, compare.b) : t;
+  const passes = useMemo(() => visibleIds(links, depth, hi, typeFilter, minUsedBy, showWeak), [links, depth, hi, typeFilter, minUsedBy, showWeak]);
   const shown = useMemo(
     () => NODES.filter((n) =>
-      RANK[n.kind] <= depth &&
+      (RANK[n.kind] <= depth || (n.kind === "file" && depth === 2 && open.has(n.parent!))) &&
       (n.kind !== "workspace" || layout === "ontology") &&
-      (firstSeen.get(n.id) ?? 0) <= t &&
-      (n.kind !== "file" || fanIn(n.id, t) >= minUsedBy || highlight?.nodes.has(n.id))),
-    [depth, layout, t, minUsedBy, highlight],
+      (firstSeen.get(n.id) ?? 0) <= hi &&
+      (n.kind === "workspace" || passes.has(n.id) || passes.has(n.parent!) && open.has(n.parent!) || highlight?.nodes.has(n.id))),
+    [depth, layout, hi, passes, highlight, open],
   );
   const shownIds = useMemo(() => new Set(shown.map((n) => n.id)), [shown]);
 
   // links rolled up to the visible depth: file links become module or service links
+  type Edge = { from: string; to: string; count: number; types: Set<LinkType>; added: boolean; removed: boolean; hot: boolean; best: number; fixed: boolean; cross: boolean; a: number; b: number; cmp?: string };
   const edges = useMemo(() => {
-    const m = new Map<string, { from: string; to: string; count: number; types: Set<LinkType>; added: boolean; removed: boolean; hot: boolean }>();
-    for (const l of LINKS) {
+    const m = new Map<string, Edge>();
+    for (const l of links) {
       if (typeFilter !== "all" && l.type !== typeFilter) continue;
-      const change = recentChange(l, t);
-      const active = isActive(l, t);
-      if (!active && change !== "removed") continue;
-      const a = lift(l.from, depth), b = lift(l.to, depth);
+      if (!showWeak && score(l) < HIDDEN_BELOW) continue;
+      const A = compare ? isActive(l, lo) : false, B = compare ? isActive(l, hi) : false;
+      const active = compare ? B : isActive(l, t);
+      const change = compare ? null : recentChange(l, t);
+      if (compare ? !A && !B : !active && change !== "removed") continue;
+      const a = lift(l.from, depth, open), b = lift(l.to, depth, open);
       if (a === b || !shownIds.has(a) || !shownIds.has(b)) continue;
       const k = `${a}>${b}`;
-      const e = m.get(k) ?? { from: a, to: b, count: 0, types: new Set<LinkType>(), added: false, removed: true, hot: false };
+      const e = m.get(k) ?? { from: a, to: b, count: 0, types: new Set<LinkType>(), added: false, removed: true, hot: false, best: 0, fixed: false, cross: false, a: 0, b: 0 };
       if (active) (e.count++, (e.removed = false));
+      if (A) e.a++;
+      if (B) e.b++;
       e.types.add(l.type);
+      e.best = Math.max(e.best, score(l));
+      if (l.fix) e.fixed = true;
+      if (byId.get(l.from)!.service !== byId.get(l.to)!.service) e.cross = true;
       if (change === "added") e.added = true;
       if (highlight?.links.has(lkey(l))) e.hot = true;
       m.set(k, e);
     }
-    return [...m.values()];
-  }, [typeFilter, t, depth, shownIds, highlight]);
+    const out = [...m.values()];
+    if (compare) for (const e of out) e.cmp = e.a === 0 ? "added" : e.b === 0 ? "removed" : e.a !== e.b ? "changed" : "same";
+    return out;
+  }, [links, typeFilter, showWeak, t, lo, hi, compare, depth, open, shownIds, highlight]);
 
   // ----- adaptive (force) layout -----
   const sim = useRef<Simulation<SimNode, undefined> | null>(null);
@@ -353,14 +407,21 @@ function MapGraph({ layout, depthSetting, t, scopeId, highlight, typeFilter, min
   }, [hlKey]);
 
   // emphasis: hover beats answer beats rail scope
-  const hlLifted = useMemo(() => (highlight ? new Set([...highlight.nodes].map((id) => lift(id, depth))) : null), [highlight, depth]);
+  const hlLifted = useMemo(() => (highlight ? new Set([...highlight.nodes].map((id) => lift(id, depth, open))) : null), [highlight, depth, open]);
   const hoverSet = useMemo(() => {
     if (!hover) return null;
     const s = new Set([hover]);
     for (const e of edges) if (!e.removed && (e.from === hover || e.to === hover)) s.add(e.from).add(e.to);
     return s;
   }, [hover, edges]);
-  const lit = (id: string) => (hoverSet ? hoverSet.has(id) : hlLifted ? hlLifted.has(id) : scope ? scope.has(id) : true);
+  const touched = useMemo(() => {
+    if (!compare) return null;
+    const s = new Set<string>();
+    for (const e of edges) if (e.cmp !== "same") s.add(e.from).add(e.to);
+    for (const n of shown) if ((firstSeen.get(n.id) ?? 0) > lo) s.add(n.id);
+    return s;
+  }, [compare, edges, shown, lo]);
+  const lit = (id: string) => (touched ? touched.has(id) : hoverSet ? hoverSet.has(id) : hlLifted ? hlLifted.has(id) : scope ? scope.has(id) : true);
 
   const curve = (a: Pt, b: Pt, bend: number) => {
     const cx = ((a.x + b.x) / 2) * bend, cy = ((a.y + b.y) / 2) * bend;
@@ -370,11 +431,17 @@ function MapGraph({ layout, depthSetting, t, scopeId, highlight, typeFilter, min
   // zooming spreads things apart but keeps dots and text near screen size
   const k = Math.pow(zoom, -0.8), kr = Math.pow(zoom, -0.55);
   const labelFiles = zoom > 2.1 || layout === "ontology";
+  // top 12 services by fan-in carry labels at service level
+  const topSvc = useMemo(() => new Set<string>([...SERVICES].sort((p, q) => fanIn(q.id, t) - fanIn(p.id, t)).slice(0, 12).map((x) => x.id)), [t]);
+  const atDepth = shown.filter((n) => RANK[n.kind] === depth);
+  const zoomInfo = `${["", "services", "modules", "files"][depth]} · ${atDepth.filter((n) => n.kind !== "service" || topSvc.has(n.id)).length} of ${atDepth.length} labelled`;
 
   return (
     <>
-      <ZoomControls camera={camera} />
+      <ZoomControls camera={camera} info={zoomInfo} slot={statusSlot} />
       <svg
+        onKeyDown={(e) => rove.onKey(e)}
+        onFocus={rove.onFocus}
         ref={camera.svg}
         className={`graph ${live ? "is-live" : ""}`}
         style={{ ["--k" as string]: k }}
@@ -395,15 +462,31 @@ function MapGraph({ layout, depthSetting, t, scopeId, highlight, typeFilter, min
 
         <g className="links">
           {edges.map((e) => {
-            const d = curve(pos(e.from), pos(e.to), layout === "ontology" ? 0.25 : 1);
+            const bend = layout === "ontology" ? 0.25 : 1;
+            const pa = pos(e.from), pb = pos(e.to);
+            const d = curve(pa, pb, bend);
             const hot = (hover && (e.from === hover || e.to === hover)) || e.hot;
-            const dim = !hot && !(lit(e.from) && lit(e.to));
-            const cls = ["link", e.types.size === 1 ? `t-${[...e.types][0]}` : "", e.added ? "added" : "", e.removed ? "removed" : "", hot ? "is-hot" : "", dim ? "is-dim" : "", layout === "ontology" && !hot && !e.added ? "is-faint" : ""].join(" ");
+            const sel = edgeSel && ((edgeSel.a === e.from && edgeSel.b === e.to) || (descendants(edgeSel.a).has(e.from) && descendants(edgeSel.b).has(e.to)));
+            const dim = !hot && !sel && (e.cmp ? e.cmp === "same" : !(lit(e.from) && lit(e.to)));
+            const lvl = e.best >= 0.9 ? "exact" : e.best >= 0.6 ? "likely" : "guessed";
+            const cls = ["link", lvl !== "exact" ? `c-${lvl}` : "", e.cross ? "is-cross" : "", e.cmp && e.cmp !== "same" ? `cmp-${e.cmp}` : "", e.added && !compare ? "added" : "", e.removed && !compare ? "removed" : "", hot ? "is-hot" : "", sel ? "is-sel" : "", dim ? "is-dim" : "", layout === "ontology" && !hot && !e.added && !compare ? "is-faint" : ""].join(" ");
+            const w = Math.min(10, (e.cross ? 2.25 : 1.25) * Math.sqrt(Math.max(e.count, 1)));
+            const mx = (pa.x + pb.x) / 4 + ((pa.x + pb.x) / 2) * bend / 2, my = (pa.y + pb.y) / 4 + ((pa.y + pb.y) / 2) * bend / 2;
+            const label = `${byId.get(e.from)!.name} → ${byId.get(e.to)!.name}: ${e.count} link${e.count === 1 ? "" : "s"} (${[...e.types].join(", ")})${lvl !== "exact" ? `, ${lvl} at best` : ""}${e.fixed ? ", overridden" : ""}`;
+            const pick = () => !camera.moved.current && onEdge({ a: e.from, b: e.to });
+            const mp = menuProps({ type: "link", a: e.from, b: e.to }, onMenu);
             return (
-              <path key={e.from + e.to} d={d} className={cls}
-                style={{ strokeWidth: 1 + Math.log2(Math.max(e.count, 1)) * 0.9, ...(live ? {} : { d: `path('${d}')` }) } as React.CSSProperties}>
-                <title>{`${byId.get(e.from)!.name} → ${byId.get(e.to)!.name}: ${e.count} link${e.count === 1 ? "" : "s"} (${[...e.types].join(", ")})`}</title>
-              </path>
+              <g key={e.from + e.to}>
+                <path className="link-hit" d={d} style={live ? undefined : ({ d: `path('${d}')` } as React.CSSProperties)} tabIndex={-1} role="button" aria-label={`Inspect ${label}`}
+                  aria-haspopup="menu" onContextMenu={mp.onContextMenu} onPointerDown={mp.press}
+                  onClick={pick} onKeyDown={(ev) => mp.menuKey(ev) || ((ev.key === "Enter" || ev.key === " ") && (ev.preventDefault(), pick()))}
+                  onPointerEnter={() => setHover(e.from)} onPointerLeave={() => setHover(null)} />
+                <path d={d} className={cls}
+                  style={{ strokeWidth: `calc(${w}px * var(--link-w))`, ["--so" as string]: 0.2 + 0.3 * e.best, ...(live ? {} : { d: `path('${d}')` }) } as React.CSSProperties}>
+                  <title>{label}</title>
+                </path>
+                {e.fixed && <rect className="map-dia" x={mx - 5} y={my - 5} width="10" height="10" rx="1.5" transform={`rotate(45 ${mx} ${my})`} />}
+              </g>
             );
           })}
         </g>
@@ -412,21 +495,29 @@ function MapGraph({ layout, depthSetting, t, scopeId, highlight, typeFilter, min
           const { x, y } = pos(n.id);
           const r = radius(n, t) * kr;
           const hub = n.kind === "service" || n.kind === "workspace";
-          const showLabel = hub || n.kind === "module" || hover === n.id || (hoverSet?.has(n.id) ?? false) || labelFiles || (n.kind === "file" && (hlLifted?.has(n.id) ?? false));
+          const showLabel = (hub && (n.kind !== "service" || topSvc.has(n.id) || depth > 1)) || n.kind === "module" || hover === n.id || (hoverSet?.has(n.id) ?? false) || labelFiles || (n.kind === "file" && (hlLifted?.has(n.id) ?? false));
           const right = layout === "ontology" ? x >= 0 : true;
           const hidden = RANK[n.kind] === depth && depth < 3 ? descendants(n.id).size - 1 : 0;
+          const agg = n.kind === "module" && depth === 2 ? children(n.id).length : 0;
+          const isOpen = open.has(n.id);
+          const toggle = () => setOpen((o) => { const x = new Set(o); x.has(n.id) ? x.delete(n.id) : x.add(n.id); return x; });
+          const added = !!compare && (firstSeen.get(n.id) ?? 0) > lo;
+          const isPinned = !!pinned?.has(n.id) && n.kind !== "workspace";
+          const mp = menuProps({ type: "node", id: n.id }, onMenu);
           return (
             <g
               key={n.id}
-              className={`node k-${n.kind} ${lit(n.id) ? "" : "is-dim"} ${hover === n.id ? "is-hover" : ""} ${live ? "is-draggable" : ""}`}
-              style={{ transform: `translate(${x}px, ${y}px)`, ["--c" as string]: n.kind === "workspace" ? "var(--accent)" : serviceColor(n.service) }}
-              tabIndex={0}
+              className={`node k-${n.kind} ${lit(n.id) ? "" : "is-dim"} ${hover === n.id ? "is-hover" : ""} ${added ? "is-added" : ""} ${live ? "is-draggable" : ""}`}
+              style={{ transform: `translate(${x}px, ${y}px)`, ["--c" as string]: nodeHue(n) }}
+              tabIndex={-1}
               role="button"
-              aria-label={`${n.kind} ${n.name}${hidden ? `, ${hidden} items inside` : ""}`}
-              onPointerDown={(e) => dragNode(e, n.id)}
+              aria-label={`${n.kind} ${n.name}${isPinned ? ", pinned" : ""}${hidden ? `, ${hidden} items inside` : ""}`}
+              aria-haspopup="menu"
+              onPointerDown={(e) => { mp.press(e); dragNode(e, n.id); }}
+              onContextMenu={mp.onContextMenu}
               onClick={() => !camera.moved.current && onSelect(n.id)}
               onDoubleClick={() => onOpen(n.id)}
-              onKeyDown={(e) => (e.key === "Enter" ? (e.preventDefault(), onOpen(n.id)) : e.key === " " && (e.preventDefault(), onSelect(n.id)))}
+              onKeyDown={(e) => mp.menuKey(e) || (e.key === "Enter" ? (e.preventDefault(), onOpen(n.id)) : e.key === " " && (e.preventDefault(), onSelect(n.id)))}
               onPointerEnter={() => setHover(n.id)}
               onPointerLeave={() => setHover(null)}
               onFocus={() => setHover(n.id)}
@@ -434,7 +525,18 @@ function MapGraph({ layout, depthSetting, t, scopeId, highlight, typeFilter, min
             >
               <circle className="hit" r={Math.max(r + 6 * k, 12 * k)} />
               <circle className={n.kind === "file" ? "ring" : "dot"} r={r} />
+              {isPinned && <>
+                <circle className="map-pin-ring" r={r + 3.5 * k} />
+                <path className="map-pin-star" d={star((r + 2 * k) * 0.71, -(r + 2 * k) * 0.71, 7 * k)} />
+              </>}
               {hidden > 0 && <text className="count" y={4 * k} textAnchor="middle">{hidden}</text>}
+              {agg > 0 && (
+                <g className="map-aggbtn" role="button" tabIndex={-1} aria-pressed={isOpen} aria-label={`${isOpen ? "Hide" : "Show"} ${agg} files in ${n.name}`}
+                  onPointerDown={(e) => e.stopPropagation()} onClick={(e) => (e.stopPropagation(), toggle())}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), e.stopPropagation(), toggle())}>
+                  <circle className="map-agg" r={r + 7 * k} />
+                </g>
+              )}
               {showLabel && (
                 hub && layout !== "ontology" ? (
                   <text className="lbl lbl-hub" y={r + 16 * k} textAnchor="middle">
@@ -458,12 +560,14 @@ function MapGraph({ layout, depthSetting, t, scopeId, highlight, typeFilter, min
 
 const FOCUS_BASE: Cam = { x: -560, y: -330, w: 1120, h: 660 };
 
-function FocusGraph({ t, focusId, typeFilter, highlight, onOpen }: Props & { focusId: string }) {
+function FocusGraph({ t, focusId, typeFilter, highlight, links, showWeak, onEdge, onOpen, statusSlot, pinned, onMenu }: Props & { focusId: string }) {
   const camera = useCamera(FOCUS_BASE);
+  const rove = useRoving(camera.svg, ROVE);
   const [hover, setHover] = useState<string | null>(null);
   const node = byId.get(focusId)!;
-  const { dependsOn, usedBy } = neighbours(focusId, t);
-  const keep = (ls: Link[]) => typeFilter === "all" || ls.some((l) => l.type === typeFilter);
+  const shownLinks = useMemo(() => links.filter((l) => showWeak || score(l) >= HIDDEN_BELOW), [links, showWeak]);
+  const { dependsOn, usedBy } = neighboursOf(shownLinks, focusId, t);
+  const keep = (ls: EffLink[]) => typeFilter === "all" || ls.some((l) => l.type === typeFilter);
   const left = [...dependsOn].filter(([, ls]) => keep(ls));
   const right = [...usedBy].filter(([, ls]) => keep(ls));
 
@@ -473,24 +577,34 @@ function FocusGraph({ t, focusId, typeFilter, highlight, onOpen }: Props & { foc
     return { x: Math.round(side * Math.cos(a) * 330), y: Math.round(Math.sin(a) * 270) };
   };
 
-  const column = (items: [string, Link[]][], side: -1 | 1) =>
+  const column = (items: [string, EffLink[]][], side: -1 | 1) =>
     items.map(([id, ls], i) => {
       const other = byId.get(id)!;
       const pt = place(i, items.length, side);
       const hot = hover === id || ls.some((l) => highlight?.links.has(lkey(l)));
       const d = `M0,0 C${pt.x * 0.45},0 ${pt.x * 0.55},${pt.y} ${pt.x},${pt.y}`;
       const change = ls.map((l) => recentChange(l, t)).find(Boolean);
+      const best = Math.max(...ls.map(score));
+      const inspect = () => !camera.moved.current && onEdge(side < 0 ? { a: focusId, b: id } : { a: id, b: focusId });
+      const lm = menuProps(side < 0 ? { type: "link", a: focusId, b: id } : { type: "link", a: id, b: focusId }, onMenu);
+      const nm = menuProps({ type: "node", id }, onMenu);
+      const isPinned = !!pinned?.has(id);
       return (
         <g key={id}>
-          <path className={`spoke ${hot ? "is-hot" : ""} ${change ?? ""}`} d={d} />
+          <path className="link-hit" d={d} tabIndex={-1} role="button" aria-label={`Inspect ${ls.length} link${ls.length === 1 ? "" : "s"} with ${other.name}`}
+            aria-haspopup="menu" onContextMenu={lm.onContextMenu} onPointerDown={lm.press}
+            onClick={inspect} onKeyDown={(e) => lm.menuKey(e) || ((e.key === "Enter" || e.key === " ") && (e.preventDefault(), inspect()))} />
+          <path className={`spoke ${best < 0.9 ? "c-" + (best >= 0.6 ? "likely" : "guessed") : ""} ${hot ? "is-hot" : ""} ${change ?? ""}`} d={d} style={{ ["--so" as string]: 0.2 + 0.3 * best }} />
+          {ls.some((l) => l.fix) && <rect className="map-dia" x={pt.x / 2 - 5} y={pt.y / 2 - 5} width="10" height="10" rx="1.5" transform={`rotate(45 ${pt.x / 2} ${pt.y / 2})`} />}
           <g
             className="leaf"
-            style={{ transform: `translate(${pt.x}px, ${pt.y}px)`, ["--c" as string]: serviceColor(other.service) }}
-            tabIndex={0}
+            style={{ transform: `translate(${pt.x}px, ${pt.y}px)`, ["--c" as string]: serviceHue(other.service) }}
+            tabIndex={-1}
             role="button"
-            aria-label={`Open ${other.name}, ${ls.map((l) => l.type).join(", ")}`}
+            aria-label={`Open ${other.name}${isPinned ? ", pinned" : ""}, ${ls.map((l) => l.type).join(", ")}`}
+            aria-haspopup="menu" onContextMenu={nm.onContextMenu} onPointerDown={nm.press}
             onClick={() => !camera.moved.current && onOpen(id)}
-            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(id))}
+            onKeyDown={(e) => nm.menuKey(e) || ((e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(id)))}
             onPointerEnter={() => setHover(id)}
             onPointerLeave={() => setHover(null)}
             onFocus={() => setHover(id)}
@@ -498,6 +612,7 @@ function FocusGraph({ t, focusId, typeFilter, highlight, onOpen }: Props & { foc
           >
             <circle className="hit" r="12" />
             <circle className="ring" r="5.5" />
+            {isPinned && <path className="map-pin-star" d={star(6, -6, 4.5)} />}
             <text className="lbl lbl-leaf" x={side * 13} y="4" textAnchor={side < 0 ? "end" : "start"}>
               {other.name}
               <tspan className="lbl-type" dx="7">{[...new Set(ls.map((l) => l.type))].join(" · ")}</tspan>
@@ -509,8 +624,10 @@ function FocusGraph({ t, focusId, typeFilter, highlight, onOpen }: Props & { foc
 
   return (
     <>
-      <ZoomControls camera={camera} />
+      <ZoomControls camera={camera} info="focus view" slot={statusSlot} />
       <svg
+        onKeyDown={(e) => rove.onKey(e)}
+        onFocus={rove.onFocus}
         ref={camera.svg}
         className="graph focus"
         viewBox={`${camera.cam.x} ${camera.cam.y} ${camera.cam.w} ${camera.cam.h}`}
@@ -527,6 +644,7 @@ function FocusGraph({ t, focusId, typeFilter, highlight, onOpen }: Props & { foc
         {column(right, 1)}
         <circle className="halo" r="120" />
         <circle className="core" r="46" />
+        {pinned?.has(focusId) && <path className="map-pin-star" d={star(34, -34, 9)}><title>Pinned</title></path>}
         <text className="lbl lbl-core" y="72" textAnchor="middle">
           {hubLabel(node.name).map((s, i) => <tspan key={i} x="0" dy={i ? 18 : 0}>{s}</tspan>)}
         </text>

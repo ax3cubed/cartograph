@@ -1,6 +1,7 @@
 // Answers questions by walking the graph. Every claim carries the nodes/commits it came from,
 // so the UI can show the evidence. These same functions are the tools an LLM agent would call later.
 
+import type { McpToolName } from "./model.ts";
 import {
   COMMITS, LINKS, NODES, byId, commitBySha, dayMs, descendants, isActive, type Link, type LinkType,
 } from "./workspace.ts";
@@ -14,6 +15,75 @@ export interface Answer {
   links: string[]; // `${from}>${to}`
   steps: string[]; // how the answer was reached
   by?: string; // model that worded `lines`; absent when the graph engine's own wording is shown
+  plan?: Plan; // which kind of question the router decided this was
+  asOf?: number; // the date the question was asked about (ms)
+  context?: Context; // what was retrieved and sent to the model (board A06)
+  checked?: Checked; // the model's wording after citation checks (decision G5)
+  notice?: string; // something the reader should know about how this answer was produced
+}
+
+export type Plan = "history" | "path" | "impact" | "describe" | "none";
+
+// ---------- retrieval and citations (decisions G5, G8) ----------
+
+/** One row a tool returned this turn. The model cites `handle`, never a raw id. */
+export interface Handle {
+  handle: string; // e1, e2…
+  kind: "node" | "link" | "commit";
+  id: string; // node id, `${from}>${to}`, or sha
+  label: string;
+  from: number; // the interval in which the object is true, in ms
+  to: number | null; // null = still true
+}
+export interface ToolRun { tool: McpToolName; args: string; rows: string[] } // rows are handles
+export interface Block { name: string; tokens: number }
+export interface Context {
+  system: string;
+  messages: { role: string; content: string }[];
+  handles: Handle[];
+  tools: ToolRun[];
+  blocks: Block[];
+  budget: number; // tokens
+  tokens: number; // tokens sent
+  leftOut: number; // map nodes not sent
+  ultra: boolean;
+  seeds: string[]; // node ids named in the question
+}
+
+export interface CheckedCitation { handle: string; ok: boolean; why?: string }
+export interface Sentence { text: string; cites: CheckedCitation[]; supported: boolean }
+export interface Checked {
+  paragraphs: Sentence[][];
+  stats: { sentences: number; unsupported: number; cited: number; kept: number; dropped: number };
+}
+
+const CITE = /\[(e\d+)\]/g;
+
+/** Decision G5 as a pure function. A citation stands only if its handle came from this turn and its interval
+ *  covers `t`. Failed citations are stripped; a sentence left with none is marked unsupported. */
+export function checkCitations(answerText: string, handles: Pick<Handle, "handle" | "from" | "to">[], t: number): Checked {
+  const by = new Map(handles.map((h) => [h.handle, h]));
+  const ok = new Set<string>(), bad = new Set<string>();
+  const paragraphs = answerText.split(/\n+/).map((p) => p.trim()).filter(Boolean).map((p) =>
+    // a citation after the full stop belongs to the sentence before it
+    p.replace(/([.!?])\s*((?:\[e\d+\]\s*)+)/g, (_, end: string, cs: string) => `${cs.trim()}${end} `)
+      .split(/(?<=[.!?])\s+/)
+      .map((raw): Sentence => {
+        const cites = [...new Set([...raw.matchAll(CITE)].map((m) => m[1]))].map((handle): CheckedCitation => {
+          const h = by.get(handle);
+          const c = !h ? { handle, ok: false, why: "not in this turn's results" }
+            : h.from > t || (h.to !== null && h.to <= t) ? { handle, ok: false, why: "not true on the date asked about" }
+            : { handle, ok: true };
+          (c.ok ? ok : bad).add(handle);
+          return c;
+        });
+        const text = raw.replace(CITE, "").replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
+        return { text, cites, supported: cites.some((c) => c.ok) };
+      })
+      .filter((s) => s.text),
+  ).filter((p) => p.length);
+  const all = paragraphs.flat();
+  return { paragraphs, stats: { sentences: all.length, unsupported: all.filter((s) => !s.supported).length, cited: ok.size + bad.size, kept: ok.size, dropped: bad.size } };
 }
 
 const DAY = 86_400_000;
@@ -191,10 +261,41 @@ export const SUGGESTIONS = [
   "What does auth-service do?",
 ];
 
-export function ask(q: string, t: number): Answer {
-  const ids = mentions(q);
-  const s = q.toLowerCase();
+/** Tools the composer offers after "/". Each forces one of the engine's answer plans instead of guessing it from the wording. */
+export const TOOLS = [
+  { id: "impact", label: "/impact", hint: "What breaks if a file, module or service changes", args: "@node" },
+  { id: "path", label: "/path", hint: "How one node reaches another", args: "@from @to" },
+  { id: "describe", label: "/describe", hint: "What a node does, and what it uses and is used by", args: "@node" },
+  { id: "changes", label: "/changes", hint: "Links added and removed since a date", args: "[@node] since June" },
+] as const;
+export type ToolId = (typeof TOOLS)[number]["id"];
+// The words each tool's plan is routed on below.
+const TOOL_WORDS: Record<ToolId, string> = { impact: "impact", path: "path", describe: "describe", changes: "changes since" };
+
+/** A node picked with "@": the text inserted for it and the exact id it stands for. */
+export interface Ref { token: string; id: string }
+
+/** Splits composer text into the question, the "/" tool (only at the very start) and the "@" nodes still present, in order. */
+export function parseComposer(text: string, refs: Ref[]): { text: string; tool?: ToolId; ids: string[] } {
+  const m = /^\/(\w+)\s*/.exec(text);
+  const tool = m && TOOLS.some((t) => t.id === m[1]) ? (m[1] as ToolId) : undefined;
+  const ids = refs
+    .map((r) => ({ id: r.id, at: text.indexOf(r.token) }))
+    .filter((r) => r.at >= 0)
+    .sort((a, b) => a.at - b.at)
+    .map((r) => r.id);
+  return { text: tool ? text.slice(m![0].length) : text, tool, ids };
+}
+
+/** `opts.ids` are nodes picked with "@" (exact ids, in order); `opts.tool` is a "/" command. */
+export function ask(q: string, t: number, opts: { ids?: string[]; tool?: ToolId } = {}): Answer {
+  let ids = opts.ids?.length ? [...new Set(opts.ids)] : mentions(q);
+  if (opts.tool && opts.tool !== "path") ids = ids.slice(0, 1); // one subject, so the path plan can't take over
+  const s = opts.tool ? TOOL_WORDS[opts.tool] : q.toLowerCase();
   const base = { q, nodes: [] as string[], links: [] as string[], steps: [] as string[] };
+  if (opts.tool === "path" && ids.length < 2) {
+    return { ...base, plan: "none", title: "Pick two nodes", lines: [["/path needs a start and an end. Type @ to pick each one, for example: /path @checkout @stripeAdapter.ts"]] };
+  }
 
   if (/chang|happen|done|new|since|recent|histor|last (week|month|year)|this (week|month|year)/.test(s) && !/if i change|break|impact|affect/.test(s)) {
     const scope = ids[0] ?? null;
@@ -205,7 +306,7 @@ export function ask(q: string, t: number): Answer {
     const crossNow = LINKS.filter((l) => isActive(l, t) && svc(l.from) !== svc(l.to) && (!scope || descendants(scope).has(l.from) || descendants(scope).has(l.to))).length;
     const crossThen = LINKS.filter((l) => isActive(l, from) && svc(l.from) !== svc(l.to) && (!scope || descendants(scope).has(l.from) || descendants(scope).has(l.to))).length;
     return {
-      ...base,
+      ...base, plan: "history",
       title: `What changed${scope ? ` around ${name(scope)}` : ""} since ${fmt(from)}`,
       lines: st.length
         ? [
@@ -222,7 +323,7 @@ export function ask(q: string, t: number): Answer {
   if (ids.length >= 2) {
     const [a, b] = ids;
     const p = path(a, b, t);
-    if (!p) return { ...base, title: `${name(a)} → ${name(b)}`, lines: [["No chain of links connects ", { node: a }, " and ", { node: b }, ` on ${fmt(t)}.`]], nodes: [a, b] };
+    if (!p) return { ...base, plan: "path", title: `${name(a)} → ${name(b)}`, lines: [["No chain of links connects ", { node: a }, " and ", { node: b }, ` on ${fmt(t)}.`]], nodes: [a, b] };
     const first = p.links[0];
     const chain: Part[] = [{ node: descendants(a).has(first.from) ? first.from : first.to }];
     let cur = chain[0] as { node: string };
@@ -235,7 +336,7 @@ export function ask(q: string, t: number): Answer {
     const services = new Set(p.links.flatMap((l) => [svc(l.from), svc(l.to)]));
     const network = p.links.filter((l) => l.type === "http" || l.type === "event").length;
     return {
-      ...base,
+      ...base, plan: "path",
       title: `How ${name(a)} reaches ${name(b)}`,
       lines: [
         [...chain, "."],
@@ -257,7 +358,7 @@ export function ask(q: string, t: number): Answer {
     const links = levels.flatMap((l) => l.links);
     const network = links.filter((l) => l.type === "http" || l.type === "event");
     return {
-      ...base,
+      ...base, plan: "impact",
       title: `If you change ${name(id)}`,
       lines: all.length
         ? [
@@ -281,7 +382,7 @@ export function ask(q: string, t: number): Answer {
     const last = [...COMMITS].reverse().find((c) => dayMs(c.date) <= t && LINKS.some((l) => (l.added === c.sha || l.removed === c.sha) && (scope.has(l.from) || scope.has(l.to))));
     const order = n.kind === "file" ? [] : readingOrder(id, t);
     return {
-      ...base,
+      ...base, plan: "describe",
       title: `What ${n.name} does`,
       lines: [
         [{ node: id }, `: ${n.summary}`],
@@ -297,7 +398,7 @@ export function ask(q: string, t: number): Answer {
   }
 
   return {
-    ...base,
+    ...base, plan: "none",
     title: "Try naming a service, module or file",
     lines: [["I answer from the map, so I need something to look at. For example:"], ...SUGGESTIONS.map((x) => [x])],
   };

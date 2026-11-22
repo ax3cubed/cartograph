@@ -1,0 +1,14 @@
+/* cn-: concepts board */
+.cn-h1 { font-size: calc(1.875rem * var(--ts)); }
+.cn-alias { color: var(--body); }
+.cn-pick { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+.cn-layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; align-items: start; }
+.cn-layer { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cn-lh { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.875rem; }
+.cn-mem { background: var(--slab); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; align-items: flex-start; min-width: 0; }
+.cn-name { font-size: 0.8rem; color: var(--text); overflow-wrap: anywhere; }
+.cn-where { font-size: 0.72rem; overflow-wrap: anywhere; }
+.cn-mem .view-chip { margin-top: 2px; white-space: normal; }
+.cn-decide { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.cn-why { font-size: 0.84rem; flex: 1; min-width: 260px; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .cn-pick { align-items: flex-start; } }

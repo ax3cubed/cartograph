@@ -1,0 +1,119 @@
+/* Timeline (boards G04, G10, decision I4). Classes are tl-*; `.timeline` only places it in the app grid. */
+
+.timeline {
+  grid-area: time;
+  display: grid; grid-template-columns: 150px 132px minmax(0, 1fr);
+  align-items: stretch;
+  background: var(--bar); border-top: 1px solid var(--line);
+  position: relative; z-index: 7; min-height: 0;
+}
+.tl-k { font-size: 0.75rem; color: var(--muted); }
+.tl-range { position: relative; padding: 12px 20px; border-right: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.tl-label { font-size: 1rem; font-weight: 600; line-height: 1.3; }
+.tl-sub { font-family: var(--font-mono), ui-monospace, monospace; font-size: 0.6875rem; color: var(--faint); }
+.tl-shift { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; color: var(--muted); }
+.tl-shift button { display: grid; place-items: center; width: 22px; height: 22px; }
+.tl-shift button:hover:not(:disabled) { color: var(--text); }
+.tl-shift button:disabled { opacity: 0.35; }
+
+.tl-steps { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border-right: 1px solid var(--line); padding: 8px; }
+.tl-btns { display: flex; gap: 10px; }
+.tl-btns .round-btn { width: 36px; height: 36px; }
+.tl-btns .round-btn:disabled { opacity: 0.35; }
+.tl-seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 999px; padding: 2px; }
+.tl-seg button { padding: 2px 10px; border-radius: 999px; font-size: 0.6875rem; color: var(--muted); }
+.tl-seg button[aria-pressed="true"] { background: var(--slab-hi); color: var(--text); }
+.tl-compare {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--line2); font-size: 0.6875rem; color: var(--body);
+}
+.tl-compare:hover { background: var(--slab); }
+.tl-compare[aria-pressed="true"] { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+
+.tl-main { position: relative; display: flex; flex-direction: column; padding: 8px 28px 6px 20px; min-width: 0; gap: 4px; }
+.tl-over { position: relative; height: 18px; flex: none; display: flex; align-items: flex-end; gap: 1px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.tl-over > span { flex: 1; background: var(--line2); border-radius: 1px; }
+.tl-over > span.is-in { background: var(--accent); }
+.tl-brush { position: absolute; top: -2px; bottom: -1px; border: 1.5px solid var(--accent); border-radius: 5px; background: var(--accent-soft); pointer-events: none; }
+.tl-rewrite { position: absolute; top: -3px; bottom: 0; border-left: 1.5px dashed var(--warn); pointer-events: none; }
+.tl-rewrite.is-strip { top: 0; bottom: -4px; z-index: 1; }
+
+.tl-strip { position: relative; flex: 1; min-height: 0; margin-top: 22px; display: flex; flex-direction: column; }
+.tl-bars { position: relative; flex: 1; min-height: 0; display: flex; align-items: flex-end; overflow: visible; }
+.tl-bin { display: flex; flex-direction: column-reverse; flex: none; min-height: 1px; padding-right: 1px; box-sizing: border-box; background-clip: content-box; }
+.tl-bin > span { display: block; min-height: 0; opacity: 0.85; }
+.tl-bin.is-after > span { opacity: 0.35; }
+.tl-bin.is-future { visibility: hidden; }
+.tl-cursor { position: absolute; top: -6px; bottom: -12px; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+.tl-band { position: absolute; top: -6px; bottom: 0; background: var(--accent-soft); border-inline: 1px dashed var(--accent); pointer-events: none; }
+.tl-marks { position: relative; height: 10px; flex: none; }
+.tl-dot { position: absolute; top: 1px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; border: 1.5px solid var(--c); box-sizing: border-box; }
+.tl-dot.is-past { background: var(--c); }
+.tl-rename { position: absolute; top: 1px; width: 7px; height: 7px; margin-left: -3.5px; border: 1.5px solid var(--text); border-radius: 2px; transform: rotate(45deg); background: var(--bar); }
+.tl-axis { position: relative; height: 14px; flex: none; font-size: 0.6875rem; color: var(--muted); }
+.tl-axis span { position: absolute; top: 2px; padding-left: 4px; white-space: nowrap; }
+
+.tl-bubble {
+  position: absolute; top: -26px; transform: translateX(-50%); z-index: 2;
+  padding: 3px 10px; border-radius: 8px; background: var(--slab); border: 1px solid var(--line2);
+  font-weight: 600; font-size: 0.8125rem; white-space: nowrap; pointer-events: none; box-shadow: var(--shadow-2);
+}
+.tl-bubble.is-b { top: -48px; border-color: var(--warn-line); color: var(--warn); }
+.tl-sha { font-family: var(--font-mono), ui-monospace, monospace; font-weight: 500; color: var(--accent); }
+
+/* One or two native range inputs share the strip. Only the thumbs take the pointer, so both handles can be dragged.
+   ponytail: a thumb centre travels from thumb/2 to width - thumb/2. --half (set inline) is half a day cell, so with this
+   left and width the first and last days land on their cell centres, the same place pct() puts the cursor and dots. */
+.tl-scrub {
+  --thumb: 18px;
+  position: absolute; bottom: 10px; height: 22px; margin: 0;
+  left: calc(var(--half, 0%) - var(--thumb) / 2); width: calc(100% - 2 * var(--half, 0%) + var(--thumb));
+  appearance: none; -webkit-appearance: none; background: transparent; pointer-events: none;
+}
+.tl-scrub::-webkit-slider-runnable-track { height: 22px; background: transparent; }
+.tl-scrub::-moz-range-track { background: transparent; }
+.tl-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none; pointer-events: auto; cursor: grab; box-sizing: border-box; width: var(--thumb); height: var(--thumb); margin-top: 2px; border-radius: 50%;
+  background: var(--accent); border: 3px solid color-mix(in oklab, var(--accent) 55%, black); box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.tl-scrub::-moz-range-thumb {
+  pointer-events: auto; cursor: grab; box-sizing: border-box; width: var(--thumb); height: var(--thumb); border-radius: 50%;
+  background: var(--accent); border: 3px solid color-mix(in oklab, var(--accent) 55%, black); box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.tl-scrub.is-b::-webkit-slider-thumb { background: var(--bar); border-color: var(--warn); box-shadow: 0 0 0 4px var(--warn-soft); }
+.tl-scrub.is-b::-moz-range-thumb { background: var(--bar); border-color: var(--warn); box-shadow: 0 0 0 4px var(--warn-soft); }
+.tl-scrub:focus-visible { outline: none; }
+.tl-scrub:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--text); }
+.tl-scrub:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px var(--text); }
+
+@media (max-width: 640px) {
+  .timeline { grid-template-columns: 104px 96px minmax(0, 1fr); }
+  .tl-range { padding: 8px 12px; }
+  .tl-label { font-size: 0.8125rem; }
+  .tl-shift { display: none; }
+  .tl-main { padding: 8px 16px 6px 12px; }
+  .tl-btns .round-btn { width: 32px; height: 32px; }
+  .tl-axis span:nth-child(even) { visibility: hidden; }
+}
+
+/* ---------- history panel (board G10) ---------- */
+
+.tl-hist { display: flex; flex-direction: column; gap: 14px; }
+.tl-hist-head { display: flex; justify-content: space-between; align-items: baseline; }
+.tl-hist-head b { font-size: 1rem; font-weight: 600; }
+.tl-hist-head span { font-size: 0.75rem; color: var(--muted); }
+.tl-hist-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.tl-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); font-size: 0.75rem; color: var(--muted); }
+.tl-chip.is-strong { border-color: var(--line2); color: var(--text); }
+.tl-ev-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tl-ev { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--slab-hi); font-size: 0.8125rem; }
+.tl-ev:last-child { border-bottom: 0; }
+.tl-ev > svg { margin-top: 2px; color: var(--muted); }
+.tl-ev.is-rewrite > svg { color: var(--warn); }
+.tl-ev.is-change > svg { color: var(--up); }
+.tl-ev b { font-weight: 600; }
+.tl-path { font-family: var(--font-mono), ui-monospace, monospace; font-size: 0.75rem; overflow-wrap: anywhere; }
+.tl-meta { margin-top: 3px; font-size: 0.75rem; color: var(--muted); }
+.tl-meta .tl-sha { font-size: 0.75rem; }
+.tl-jump { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.tl-jump:hover { color: var(--text); }

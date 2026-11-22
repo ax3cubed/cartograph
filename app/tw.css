@@ -1,0 +1,29 @@
+/* Tailwind for the vendored components in components/ui only. No preflight: the app keeps its own
+   resets (globals.css, base layer), and utilities are generated only for the files listed below. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@import "tw-animate-css";
+@source "../components/ui/model-picker.tsx";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@custom-variant data-open (&:where([data-state="open"]));
+@custom-variant data-closed (&:where([data-state="closed"]));
+
+/* shadcn token names mapped onto Cartograph's theme tokens, so the picker follows light, dark and contrast. */
+@theme inline {
+  --color-background: var(--panel);
+  --color-foreground: var(--text);
+  --color-popover: var(--panel);
+  --color-popover-foreground: var(--text);
+  --color-muted: var(--slab);
+  --color-muted-foreground: var(--muted);
+  --color-border: var(--line2);
+  --color-ring: var(--accent);
+}
+
+/* The app skips Tailwind's preflight, so give the picker's portalled panel the two resets it relies on. */
+@layer base {
+  [data-slot="popover-content"] input { border: 0; padding: 0; margin: 0; background: transparent; outline: none; }
+  [data-slot="popover-content"] p { margin: 0; }
+}
