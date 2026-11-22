@@ -39,29 +39,61 @@ If you change behaviour in `lib/`, add or update an assertion in `lib/workspace.
 
 ## Branches
 
-Branch from `main` and name the branch after the kind of change:
+Branch from `main`. Never push to `main`: every change lands through a pull request.
 
-| Prefix | Use for |
-| --- | --- |
-| `feat/…` | New behaviour |
-| `fix/…` | Bug fixes |
-| `docs/…` | Documentation only |
-| `chore/…` | Tooling, dependencies, housekeeping |
+Name the branch `<type>/<plan-id>-<description>`, or `<type>/<description>` when the work has no item in the implementation plan (`docs/architecture.html`):
+
+```
+feat/idx-03-store-schema
+fix/timeline-knob-offset
+docs/contributing-commits
+```
+
+- `<type>` is one of the commit types below.
+- `<plan-id>` is the plan item in lowercase, such as `idx-03`, `srv-05` or `fe-02`.
+- The description is a few lowercase words joined by hyphens.
+- At most 60 characters. `dependabot/…` and `release/vX.Y.Z` are named by tools and are allowed as they are.
+
+The `pre-push` hook and CI check the name. To fix one, run `git branch -m <new-name>`.
 
 ## Commits
 
-Write commit messages in the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) format:
+Commit messages follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). The `commit-msg` hook checks each commit, and CI checks every commit in a pull request.
 
 ```
-feat(ask): answer "what changed" for a single file
-fix(graph): keep pinned nodes in place during the morph
-docs: explain the link interval model
+<type>(<scope>): <subject>
+
+<body: what changed and why, wrapped at 100 characters>
+
+Refs: IDX-03
 ```
+
+| Part | Rule |
+| --- | --- |
+| Type | `feat` new behaviour · `fix` a bug fix · `perf` faster, same behaviour · `refactor` neither · `docs` · `test` · `build` dependencies and tooling · `ci` · `chore` housekeeping · `revert` · `style` formatting only |
+| Scope | Optional. When present, one of: `indexer` `store` `git` `parse` `query` `server` `api` `cli` `mcp` `ai` · `ui` `ask` `map` `timeline` `views` `settings` `shell` `design` · `site` `docs` `architecture` `research` `bench` `deps` `ci` `github` `release` `security` |
+| Subject | Imperative and lowercase: "add the store schema", not "Added" or "Adds". No full stop. The whole first line is at most 72 characters |
+| Body | Optional. Says why, not how. A blank line before it |
+| Footer | `Refs: IDX-03` for the plan items the commit works on, `Closes #123` for an issue, and `BREAKING CHANGE: …` (or `!` after the type) for a change that breaks a file format, the API or the CLI |
+
+Examples:
+
+```
+feat(store): add schema v1 with application_id and user_version
+fix(timeline): put the scrubber knob on the cursor line in month view
+perf(query): hold link intervals in memory per index generation
+build(deps): pin oxc_resolver to 11.6
+feat(api)!: move graph slices to snake_case
+```
+
+The hooks are installed by `pnpm install`. If they're missing, run `pnpm run prepare`. Check a branch's commits by hand with `pnpm lint:commits`.
 
 ## Pull requests
 
-- Keep each pull request small and focused on one change. Two unrelated fixes are two pull requests.
-- Fill in the pull request template: what changed, why, and how you checked it.
+- **Squash merge only.** The pull request title becomes the one commit on `main`, so CI checks the title with the same commit rules. Write it as the commit you want in the history.
+- **Base every pull request on `main`.** Don't stack one pull request on another's branch. GitHub only retargets a stacked pull request when its base branch is deleted, so it can merge into the wrong branch. If you need work from an open pull request, branch from that branch and still target `main`. The diff shrinks once the first one merges.
+- Keep each pull request small and focused on one change, ideally one plan item. Two unrelated fixes are two pull requests.
+- Fill in the pull request template: what changed, why, the plan items, and how you checked it.
 - Add screenshots for any change to the UI.
 - Add a line to `CHANGELOG.md` under `## [Unreleased]` for anything a user would notice.
 - For a large change, open an issue first so the approach can be agreed before you write the code.

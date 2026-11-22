@@ -1,6 +1,7 @@
 # pnpm settings (HD-01, HD-12).
 # No dependency runs install scripts unless it is listed here with true.
-allowBuilds: {}
+# lefthook's postinstall would install git hooks on its own; `pnpm install` runs `prepare` instead.
+allowBuilds: { lefthook: false }
 # A new version must be 7 days old (in minutes) before pnpm resolves it.
 minimumReleaseAge: 10080
 # Already in the lockfile when the age gate was added (22 Nov 2026). Exact versions only; delete

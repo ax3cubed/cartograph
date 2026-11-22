@@ -6,11 +6,14 @@ updates:
     directory: /
     schedule: { interval: weekly }
     groups: { cargo: { patterns: ["*"] } }
+    commit-message: { prefix: "build", include: "scope" }
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
     groups: { npm: { patterns: ["*"] } }
+    commit-message: { prefix: "build", include: "scope" }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
     groups: { actions: { patterns: ["*"] } }
+    commit-message: { prefix: "ci", include: "scope" }
