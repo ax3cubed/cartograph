@@ -1,0 +1,2 @@
+# Keep text files LF on every OS, so generated files compare byte for byte on Windows too.
+* text=auto eol=lf

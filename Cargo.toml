@@ -1,0 +1,47 @@
+# The cartograph binary and its crates (IDX-01). Benchmarks and spikes live in a separate
+# workspace under bench/, so their dependencies never reach this lockfile or the shipped binary.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT"
+repository = "https://github.com/ax3cubed/cartograph"
+publish = false
+
+[workspace.dependencies]
+cartograph-core = { path = "crates/cartograph-core" }
+cartograph-api = { path = "crates/cartograph-api" }
+cartograph-discovery = { path = "crates/cartograph-discovery" }
+cartograph-git = { path = "crates/cartograph-git" }
+cartograph-parse = { path = "crates/cartograph-parse" }
+cartograph-facts = { path = "crates/cartograph-facts" }
+cartograph-store = { path = "crates/cartograph-store" }
+cartograph-index = { path = "crates/cartograph-index" }
+cartograph-query = { path = "crates/cartograph-query" }
+
+clap = { version = "4.6.9", features = ["derive"] }
+schemars = "1.2.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+
+insta = "1.49.0"
+proptest = "1.12.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# panic = "abort" waits for IDX-13's crash safety.

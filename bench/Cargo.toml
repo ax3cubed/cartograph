@@ -1,0 +1,10 @@
+# Benchmarks and spikes (phase 0). Never shipped; a separate workspace so their
+# dependencies (git2, genai, criterion) stay out of the product lockfile and cargo deny.
+[workspace]
+resolver = "3"
+members = ["idx-spike", "ai-spike"]
+
+[workspace.package]
+edition = "2024"
+publish = false
+license = "MIT"

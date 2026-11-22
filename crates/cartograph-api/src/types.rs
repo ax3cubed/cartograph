@@ -1,0 +1,1178 @@
+//! Every type that crosses the HTTP wire. snake_case everywhere (ruling R5).
+//!
+//! These replace `lib/model.ts` and the shapes in `lib/workspace.ts`; the TypeScript is generated
+//! from them into `lib/api/types.gen.ts`. Renames from the TypeScript are listed in
+//! docs/research/phase0.md under INT-01.
+
+use std::collections::BTreeMap;
+
+use cartograph_core::{LinkId, NodeId, RepoId};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// A commit sha, a date (`YYYY-MM-DD` or RFC 3339), or `now`.
+pub type At = String;
+/// RFC 3339 timestamp.
+pub type Timestamp = String;
+/// A workspace id: 8 hex characters from the registry.
+pub type WorkspaceId = String;
+
+// ---------------------------------------------------------------- envelope and errors
+
+/// Every JSON read returns this envelope.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Envelope<T> {
+    /// Envelope version. Adding fields is free; removing one bumps it.
+    pub schema: u32,
+    /// The index generation the answer was read from (also in `Cartograph-Generation`).
+    pub generation: u64,
+    pub data: T,
+    pub next_cursor: Option<String>,
+    pub truncated: bool,
+}
+
+/// Every error response, whatever the status code.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ErrorBody {
+    pub schema: u32,
+    pub error: ApiError,
+}
+
+/// E1 on the wire: what, why and what to try.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ApiError {
+    pub code: ErrorCode,
+    pub what: String,
+    pub why: String,
+    #[serde(rename = "try")]
+    pub action: String,
+    pub details: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    /// 400: a malformed parameter or body.
+    BadRequest,
+    /// 401: the bearer token is missing or wrong.
+    Unauthorized,
+    /// 403: the Origin header doesn't match.
+    ForbiddenOrigin,
+    /// 404.
+    NotFound,
+    /// 409: a job of that kind is already running.
+    Conflict,
+    /// 412: `If-Match` failed; the file changed on disk.
+    PreconditionFailed,
+    /// 413: a body over the limit.
+    PayloadTooLarge,
+    /// 415: a write without `Content-Type: application/json`.
+    UnsupportedMediaType,
+    /// 422: valid JSON, invalid request (a correction key that matches nothing).
+    Unprocessable,
+    /// 429: too many concurrent requests or Ask runs.
+    TooManyRequests,
+    /// 503: the index needs a migration or a rebuild.
+    IndexUnavailable,
+    /// 500.
+    Internal,
+}
+
+/// Common read parameters. Every read takes them; each route documents which it honours.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct ReadParams {
+    pub at: Option<At>,
+    /// Default 50, maximum 1,000.
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+    /// Comma-separated optional parts, e.g. `summary,metrics`.
+    pub include: Option<String>,
+}
+
+// ---------------------------------------------------------------- meta and workspaces
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Version {
+    pub version: String,
+}
+
+/// `GET /api/v1/meta` (A4).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Meta {
+    pub version: String,
+    pub format_version: u32,
+    pub now: Timestamp,
+    pub schema: u32,
+}
+
+/// `lib/model.ts` IndexState, with `needs-migrate` spelled `needs_migrate`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexState {
+    None,
+    Current,
+    Behind,
+    Syncing,
+    Rewritten,
+    NeedsMigrate,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceSummary {
+    pub id: WorkspaceId,
+    pub name: String,
+    pub path: String,
+    pub demo: bool,
+    pub repos: u32,
+    pub services: u32,
+    pub modules: u32,
+    pub files: u32,
+    pub commits: u32,
+    pub state: IndexState,
+    pub built_at: Option<Timestamp>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Repo {
+    pub id: RepoId,
+    pub name: String,
+    pub path: String,
+    pub branch: String,
+    pub indexed_commit: Option<String>,
+    pub head: String,
+    /// Commits behind, capped at 1,000.
+    pub behind: u32,
+    /// True when `behind` hit the cap; show it as "1000+".
+    pub behind_capped: bool,
+    /// Computed after the answer and cached; null on a first read (D1).
+    pub dirty: Option<bool>,
+    pub commits: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RepoBehind {
+    pub repo: RepoId,
+    pub name: String,
+    pub behind: u32,
+    pub behind_capped: bool,
+}
+
+/// What every read says about how current the index is (D1).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Freshness {
+    pub state: IndexState,
+    pub format_version: u32,
+    pub built_at: Option<Timestamp>,
+    /// Commits behind, summed over repos.
+    pub behind: u32,
+    pub repos: Vec<RepoBehind>,
+    /// 0 to 1 while syncing.
+    pub progress: Option<f32>,
+    pub error: Option<Problem>,
+}
+
+/// A what, why and try triple inside a payload (not an HTTP error).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Problem {
+    pub what: String,
+    pub why: String,
+    #[serde(rename = "try")]
+    pub action: String,
+}
+
+// ---------------------------------------------------------------- graph
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeKind {
+    Workspace,
+    Service,
+    Module,
+    File,
+    Operation,
+    Channel,
+    Table,
+    Entrypoint,
+    Symbol,
+    Owner,
+    Concept,
+}
+
+/// Link kinds on every wire (ruling R28).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkKind {
+    Imports,
+    Calls,
+    Http,
+    Event,
+    Db,
+}
+
+/// Level of detail of a graph slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Lod {
+    Workspace,
+    Service,
+    Module,
+    File,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfidenceLevel {
+    /// 0.90 to 1.00: both ends anchored.
+    Exact,
+    /// 0.60 to 0.89.
+    Likely,
+    /// 0.30 to 0.59. Under 0.30 is stored but hidden by default.
+    Guessed,
+}
+
+/// `lib/model.ts` Evidence kinds, `name-match` spelled `name_match`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceKind {
+    Parsed,
+    Contract,
+    NameMatch,
+    Env,
+    History,
+    Model,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Evidence {
+    pub kind: EvidenceKind,
+    pub note: String,
+    pub file: Option<String>,
+    /// 1-based.
+    pub line: Option<u32>,
+}
+
+/// The server sends `level`; clients never derive it from `score` (ruling R20).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Confidence {
+    pub level: ConfidenceLevel,
+    pub score: f32,
+    pub evidence: Vec<Evidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Lang {
+    Ts,
+    Js,
+    Go,
+    Py,
+    Php,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Node {
+    pub id: NodeId,
+    pub name: String,
+    pub kind: NodeKind,
+    pub parent: Option<NodeId>,
+    /// Owning service; null for the workspace root.
+    pub service: Option<NodeId>,
+    pub path: String,
+    pub summary: Option<String>,
+    pub lang: Option<Lang>,
+}
+
+/// `lib/workspace.ts` Link: `type` becomes `kind`, and commits are given with their timeline step.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Link {
+    pub id: LinkId,
+    /// `from` depends on `to`.
+    pub from: NodeId,
+    pub to: NodeId,
+    pub kind: LinkKind,
+    pub added: CommitRef,
+    pub removed: Option<CommitRef>,
+    pub confidence: Confidence,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CommitRef {
+    pub sha: String,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Commit {
+    pub sha: String,
+    pub seq: u64,
+    /// Corrected time on the merged timeline.
+    pub date: Timestamp,
+    pub author: String,
+    pub repo: RepoId,
+    pub message: String,
+}
+
+/// `GET …/graph`: one level's nodes and links, columnar so 60k nodes and 200k links stay small.
+/// Column `i` of every node array describes node `i`; links index into the node columns.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GraphSlice {
+    pub lod: Lod,
+    pub scope: Option<NodeId>,
+    pub at: Option<CommitRef>,
+    /// Set for `range=` requests: links live at any step in `[from, to)`.
+    pub range: Option<[CommitRef; 2]>,
+    pub nodes: NodeColumns,
+    pub links: LinkColumns,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct NodeColumns {
+    pub id: Vec<NodeId>,
+    pub kind: Vec<NodeKind>,
+    pub name: Vec<String>,
+    /// Index of the parent node in these columns, or -1.
+    pub parent: Vec<i32>,
+    /// Stored layout position (I2).
+    pub x: Vec<f32>,
+    pub y: Vec<f32>,
+    pub size: Vec<f32>,
+    /// Number of children one level down, for the expand affordance.
+    pub children: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkColumns {
+    pub id: Vec<LinkId>,
+    pub from: Vec<u32>,
+    pub to: Vec<u32>,
+    pub kind: Vec<LinkKind>,
+    pub level: Vec<ConfidenceLevel>,
+    pub score: Vec<f32>,
+    /// How many file-level links this aggregated link stands for.
+    pub weight: Vec<u32>,
+    pub added_seq: Vec<u64>,
+    /// -1 while the link is live.
+    pub removed_seq: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct GraphParams {
+    pub lod: Option<Lod>,
+    pub scope: Option<NodeId>,
+    pub at: Option<At>,
+    /// `from..to`, two `at` values.
+    pub range: Option<String>,
+    pub min_confidence: Option<ConfidenceLevel>,
+    /// Comma-separated link kinds.
+    pub kinds: Option<String>,
+    pub owner: Option<String>,
+    pub repo: Option<RepoId>,
+    pub branch: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Metrics {
+    pub links: u32,
+    pub fan_in: u32,
+    pub fan_out: u32,
+    pub cross: u32,
+    /// Links added or removed in the 90 days before `at`.
+    pub churn: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct NodeDetail {
+    pub node: Node,
+    pub metrics: Metrics,
+    pub owners: Vec<String>,
+    pub added: Option<CommitRef>,
+    pub removed: Option<CommitRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Layer {
+    Base,
+    Config,
+    Contract,
+    Correction,
+    Overlay,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkDetail {
+    pub link: Link,
+    pub layer: Layer,
+    pub interval: Interval,
+    pub replaced_by: Option<LinkId>,
+    pub correction_id: Option<String>,
+}
+
+/// `[from_seq, to_seq)` on the merged first-parent timeline.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Interval {
+    pub from_seq: u64,
+    pub to_seq: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SymbolCalls {
+    pub symbol: Node,
+    pub callers: Vec<FileGroup>,
+    pub callees: Vec<FileGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FileGroup {
+    pub file: NodeId,
+    pub symbols: Vec<NodeId>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchKind {
+    Service,
+    Module,
+    File,
+    Symbol,
+    Concept,
+    Operation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SearchResult {
+    pub id: NodeId,
+    pub kind: SearchKind,
+    pub name: String,
+    pub path: String,
+    pub service: Option<NodeId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CommitImpact {
+    pub commit: Commit,
+    pub prev: Option<String>,
+    pub next: Option<String>,
+    pub added_links: Vec<Link>,
+    pub removed_links: Vec<Link>,
+    /// Node ids that depend, directly or not, on what the commit touched.
+    pub affected: Vec<NodeId>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Bin {
+    Day,
+    Week,
+    Month,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TimelineDensity {
+    pub bin: Bin,
+    pub bins: Vec<DensityBin>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DensityBin {
+    pub start: Timestamp,
+    pub commits: u32,
+    pub links_added: u32,
+    pub links_removed: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TimelineMarker {
+    pub at: CommitRef,
+    pub kind: MarkerKind,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkerKind {
+    Rename,
+    Rewrite,
+}
+
+/// `POST …/impact` carries exactly one of these; it changes nothing.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ImpactRequest {
+    pub paths: Option<Vec<String>>,
+    #[serde(rename = "ref")]
+    pub git_ref: Option<String>,
+    pub working_tree: Option<bool>,
+    pub since: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ImpactResult {
+    pub exact: Vec<NodeId>,
+    pub likely: Vec<NodeId>,
+    pub guessed: Vec<NodeId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PathResult {
+    pub hops: Vec<Link>,
+    /// A path's level is its weakest hop.
+    pub level: ConfidenceLevel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Reach {
+    pub nodes: Vec<NodeId>,
+    pub links: Vec<LinkId>,
+}
+
+// ---------------------------------------------------------------- views (A1-A5, S4, S5)
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Method {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+    Event,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Caller {
+    pub node: NodeId,
+    pub confidence: Confidence,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Operation {
+    pub id: NodeId,
+    pub method: Method,
+    pub path: String,
+    pub handler: Option<NodeId>,
+    pub callers: Vec<Caller>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SpecKind {
+    Openapi,
+    Events,
+}
+
+/// `lib/model.ts` Spec. Served from `…/contracts`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Contract {
+    pub id: String,
+    pub name: String,
+    pub file: String,
+    pub kind: SpecKind,
+    pub service: NodeId,
+    pub operations: Vec<Operation>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EntrypointKind {
+    Http,
+    Event,
+    Job,
+    Cli,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Entrypoint {
+    pub id: String,
+    pub kind: EntrypointKind,
+    pub label: String,
+    pub node: NodeId,
+    pub service: NodeId,
+    pub consumers: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Concept {
+    pub id: String,
+    pub name: String,
+    pub summary: String,
+    pub nodes: Vec<NodeId>,
+    pub domain: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CoverageRow {
+    pub id: String,
+    pub label: String,
+    pub done: u32,
+    pub total: u32,
+    pub target: Option<f32>,
+    pub gap: Option<Problem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Unresolved {
+    pub file: NodeId,
+    pub line: u32,
+    pub text: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OwnerKind {
+    Team,
+    Person,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Owner {
+    pub id: String,
+    pub name: String,
+    pub kind: OwnerKind,
+    pub patterns: Vec<String>,
+    pub nodes: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Rule {
+    pub id: String,
+    pub kind: String,
+    pub description: String,
+    pub violations: u32,
+}
+
+/// Natural keys, as in cartograph.baseline.json.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RuleViolation {
+    pub rule: String,
+    pub kind: LinkKind,
+    pub from: NodeId,
+    pub to: NodeId,
+    pub op: Option<String>,
+    pub baselined: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Service {
+    pub id: NodeId,
+    pub name: String,
+    pub repo: RepoId,
+    pub paths: Vec<String>,
+    pub domain: Option<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Environment {
+    pub name: String,
+    pub values: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Adapter {
+    pub name: String,
+    pub version: String,
+    pub kind: AdapterKind,
+    pub allowed: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AdapterKind {
+    BuiltIn,
+    Query,
+    Subprocess,
+}
+
+// ---------------------------------------------------------------- writes
+
+/// H3's four verbs (ruling R6).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CorrectionAction {
+    Remove,
+    Retarget,
+    Set,
+    Add,
+}
+
+/// A link named by people-readable parts (ruling R28: the nested key object).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkKey {
+    pub kind: LinkKind,
+    pub from: String,
+    pub to: Option<String>,
+    pub op: Option<String>,
+    pub topic: Option<String>,
+    pub table: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Correction {
+    pub id: String,
+    pub action: CorrectionAction,
+    pub key: LinkKey,
+    pub to: Option<String>,
+    pub confidence: Option<ConfidenceLevel>,
+    pub reason: String,
+    pub by: String,
+    pub at: Timestamp,
+    /// The correction no longer matches any link.
+    pub stale: bool,
+}
+
+/// `POST …/corrections`, and MCP `correct`. `reason` is 1 to 500 characters.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CorrectionRequest {
+    pub action: CorrectionAction,
+    pub key: LinkKey,
+    pub to: Option<String>,
+    pub confidence: Option<ConfidenceLevel>,
+    pub reason: String,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// What a write to a committed file did, or would do.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FileDiff {
+    pub file: String,
+    pub diff: String,
+    pub applied: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConceptDecisionKind {
+    KeepSeparate,
+    SameConcept,
+}
+
+/// Pending ruling N7.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ConceptDecision {
+    pub decision: ConceptDecisionKind,
+    pub reason: String,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ConfigFile {
+    /// Compare with `If-Match` on `PUT`.
+    pub etag: String,
+    pub yaml: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ConfigWrite {
+    pub yaml: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoSync {
+    Background,
+    Never,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ExtractorSetting {
+    pub name: String,
+    pub version: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct IndexingSettings {
+    pub extractors: Vec<ExtractorSetting>,
+    pub auto_sync: AutoSync,
+    pub hooks: bool,
+    pub hourly_fetch: bool,
+}
+
+/// A fixed enum: nothing else can be started over HTTP.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobKind {
+    Sync,
+    Rebuild,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct JobRequest {
+    pub kind: JobKind,
+    pub repo: Option<RepoId>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobState {
+    Queued,
+    Running,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Actor {
+    App,
+    Cli,
+    Mcp,
+    Hook,
+    Background,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Job {
+    pub id: String,
+    pub ws: WorkspaceId,
+    pub kind: JobKind,
+    pub by: Actor,
+    pub state: JobState,
+    pub started_at: Timestamp,
+    pub took_ms: Option<u64>,
+    pub error: Option<Problem>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityKind {
+    Index,
+    Sync,
+    Correction,
+    Warning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ActivityItem {
+    pub id: String,
+    pub at: Timestamp,
+    pub kind: ActivityKind,
+    pub text: String,
+    pub unread: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ActivityRead {
+    /// Marks these read; empty marks everything read.
+    pub ids: Vec<String>,
+}
+
+/// `GET /api/v1/fs/list`: names and three flags only (ruling R25).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FsEntry {
+    pub name: String,
+    pub is_repo: bool,
+    pub has_workspace_file: bool,
+    pub has_children: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DiscoverRequest {
+    pub path: String,
+    pub workspace_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FolderResult {
+    Repo,
+    Scope,
+    Skipped,
+}
+
+/// One row of the C1 and C2 resolution table.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DiscoveredFolder {
+    pub folder: String,
+    pub name: String,
+    pub result: FolderResult,
+    pub repo: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Discovery {
+    pub folders: Vec<DiscoveredFolder>,
+    pub services: Vec<Service>,
+    /// From a measured rate, not a guess.
+    pub estimate_s: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateWorkspace {
+    pub path: String,
+    pub workspace_file: Option<String>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreatedWorkspace {
+    pub workspace: WorkspaceSummary,
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Contrast {
+    Standard,
+    More,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Motion {
+    Follow,
+    Reduce,
+    Full,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Hues {
+    Default,
+    Safe,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Density {
+    Comfortable,
+    Compact,
+}
+
+/// `lib/model.ts` AppearanceSettings. `size` is a percentage: 90, 100, 115 or 130.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Appearance {
+    pub theme: Theme,
+    pub contrast: Contrast,
+    pub motion: Motion,
+    pub hues: Hues,
+    pub size: u16,
+    pub density: Density,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AskPlacement {
+    Panel,
+    Page,
+}
+
+/// Preferences moved to the server by ruling R1.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Prefs {
+    pub appearance: Appearance,
+    pub keymap: BTreeMap<String, String>,
+    pub pins: Vec<NodeId>,
+    pub sidebar_open: bool,
+    pub ask_placement: AskPlacement,
+}
+
+// ---------------------------------------------------------------- MCP and agents
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum McpToolName {
+    Status,
+    Find,
+    Describe,
+    Neighbors,
+    Path,
+    Impact,
+    Sync,
+    Correct,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Access {
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct McpTool {
+    pub name: McpToolName,
+    pub summary: String,
+    pub access: Access,
+    /// One of the five Ask registers.
+    pub ask: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentStatus {
+    pub id: String,
+    pub name: String,
+    pub detected: bool,
+    pub installed: bool,
+    pub config_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentInstall {
+    pub agent: String,
+    #[serde(default)]
+    pub shared: bool,
+}
+
+// ---------------------------------------------------------------- Ask and providers
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RunRequest {
+    pub question: String,
+    pub at: Option<At>,
+    pub thread_id: Option<String>,
+    /// Node ids picked with @.
+    pub mentions: Vec<NodeId>,
+    pub ultra: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AskCommand {
+    pub name: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ToolCall {
+    pub call_id: String,
+    pub tool: McpToolName,
+    pub args: Value,
+    pub rows: u32,
+    pub handles: Vec<String>,
+    pub ms: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Citation {
+    pub handle: String,
+    pub node: Option<NodeId>,
+    pub link: Option<LinkId>,
+    pub commit: Option<String>,
+    pub checked: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Sentence {
+    pub p: u32,
+    pub text: String,
+    pub cites: Vec<String>,
+    pub supported: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AskTurn {
+    pub id: String,
+    pub question: String,
+    pub at: Option<At>,
+    pub answer: Vec<Sentence>,
+    pub tool_calls: Vec<ToolCall>,
+    pub citations: Vec<Citation>,
+    pub model: Option<String>,
+    pub fact_hash: String,
+    pub stale: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Thread {
+    pub id: String,
+    pub title: String,
+    pub created_at: Timestamp,
+    pub turns: Vec<AskTurn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ContextBlock {
+    pub label: String,
+    pub tokens: u32,
+    pub cited: bool,
+    pub dropped: bool,
+}
+
+/// The retrieval inspector (board A6).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TurnContext {
+    pub budget_tokens: u32,
+    pub blocks: Vec<ContextBlock>,
+    pub system_prompt: String,
+    pub usage: Option<Usage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub cached_tokens: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    Openai,
+    Anthropic,
+    Gemini,
+    Ollama,
+    OpenaiCompatible,
+}
+
+/// A key is write-only: the browser learns `key_saved` and nothing else (G4).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Provider {
+    pub id: String,
+    pub name: String,
+    pub kind: ProviderKind,
+    pub base_url: Option<String>,
+    pub key_saved: bool,
+    pub models: Vec<String>,
+    pub local: bool,
+}
+
+/// The only request bodies with a `base_url`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderWrite {
+    pub name: String,
+    pub kind: ProviderKind,
+    pub base_url: Option<String>,
+}
+
+/// The only request body with a key.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KeyWrite {
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderTest {
+    pub ok: bool,
+    pub models: Vec<String>,
+    pub ms: u32,
+    pub error: Option<Problem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Selection {
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Privacy {
+    /// Pending ruling N2: refuse every non-loopback provider.
+    pub local_only: bool,
+    pub summaries: bool,
+}

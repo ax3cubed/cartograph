@@ -1,0 +1,10 @@
+# Git hooks, installed by `pnpm install` (the prepare script). See CONTRIBUTING.md.
+commit-msg:
+  commands:
+    conventional-commit:
+      run: pnpm exec commitlint --edit {1}
+
+pre-push:
+  commands:
+    branch-name:
+      run: node scripts/check-branch.mjs

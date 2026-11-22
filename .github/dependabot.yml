@@ -1,0 +1,19 @@
+# Dependency updates by pull request, grouped weekly (HD-12). pnpm's minimumReleaseAge (7 days, in
+# pnpm-workspace.yaml) still applies to whatever these propose.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    groups: { cargo: { patterns: ["*"] } }
+    commit-message: { prefix: "build", include: "scope" }
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups: { npm: { patterns: ["*"] } }
+    commit-message: { prefix: "build", include: "scope" }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups: { actions: { patterns: ["*"] } }
+    commit-message: { prefix: "ci", include: "scope" }
