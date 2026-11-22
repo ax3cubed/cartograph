@@ -85,6 +85,13 @@ fn remotion_specifiers_are_a_superset_of_the_regex() {
     .unwrap();
     let warm_ms = t.elapsed().as_millis();
     println!("cold {cold:?} in {cold_ms} ms; warm {warm:?} in {warm_ms} ms");
+    let mut reasons: BTreeMap<String, usize> = BTreeMap::new();
+    for f in facts.values() {
+        if let BlobFacts::Skipped(r) = f.as_ref() {
+            *reasons.entry(format!("{r:?}")).or_default() += 1;
+        }
+    }
+    println!("skipped by reason: {reasons:?}");
     assert_eq!((warm.parsed, warm.from_cache), (0, warm.blobs));
     assert_eq!(facts, again);
 
