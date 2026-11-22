@@ -217,3 +217,20 @@ jobs:
         with:
           name: sbom
           path: sbom/
+
+  # The one check branch protection requires. Jobs skipped because their files didn't change count as
+  # passing; any failure or cancellation fails it. (Required matrix jobs that are skipped can report
+  # under an unexpanded name and never resolve, which is why main doesn't require them directly.)
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [changes, conventions, lockfiles, rust, web, supply-chain]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          case " $RESULTS " in *" failure "*|*" cancelled "*) exit 1 ;; esac
