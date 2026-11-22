@@ -1,10 +1,18 @@
 name: CI
 
+# Pull requests run on Linux and only the jobs whose files changed. The full Linux, macOS and Windows
+# matrix runs on main, weekly, on demand, and on a PR labelled `ci:full`. Skipped jobs report as
+# skipped, which branch protection treats as passing.
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays: the full matrix, and fresh advisories against unchanged lockfiles
+  workflow_dispatch:
 
+# Read-only token for every job (HD-02). Release jobs get their rights per job.
 permissions:
   contents: read
 
@@ -12,33 +20,169 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+# Every action is pinned to a commit SHA (HD-01); the tag is in the comment.
 jobs:
-  check:
-    name: Type-check, check and build
+  changes:
+    name: What changed
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.f.outputs.rust }}
+      web: ${{ steps.f.outputs.web }}
+      deps: ${{ steps.f.outputs.deps }}
+      bench: ${{ steps.f.outputs.bench }}
+      os: ${{ steps.f.outputs.os }}
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: 11
+          fetch-depth: 0
+      # ponytail: a few greps instead of a paths-filter action, so no extra third-party code runs here.
+      - id: f
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+        run: |
+          if [ "$EVENT" != "pull_request" ] || [ "$FULL_LABEL" = "true" ]; then
+            full=true; files=""
+          else
+            full=false; files=$(git diff --name-only "$BASE"...HEAD)
+          fi
+          echo "$files"
+          hit() { [ "$full" = true ] || printf '%s\n' "$files" | grep -qE "$1"; }
+          ci='^\.github/'
+          hit "^(crates/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|deny\.toml$|\.gitattributes$)|$ci" && echo rust=true >> "$GITHUB_OUTPUT" || echo rust=false >> "$GITHUB_OUTPUT"
+          hit "^(app/|components/|lib/|public/|scripts/|crates/cartograph-api/|package\.json$|pnpm-(lock|workspace)\.yaml$|tsconfig\.json$|next\.config\.ts$|postcss\.config\.mjs$|\.node-version$|\.npmrc$)|$ci" && echo web=true >> "$GITHUB_OUTPUT" || echo web=false >> "$GITHUB_OUTPUT"
+          hit "^(Cargo\.lock|bench/Cargo\.lock|pnpm-lock\.yaml|package\.json|deny\.toml|scripts/check-licenses\.mjs)$|$ci" && echo deps=true >> "$GITHUB_OUTPUT" || echo deps=false >> "$GITHUB_OUTPUT"
+          hit "^bench/|$ci" && echo bench=true >> "$GITHUB_OUTPUT" || echo bench=false >> "$GITHUB_OUTPUT"
+          if [ "$full" = true ]; then
+            echo 'os=["ubuntu-latest","macos-latest","windows-latest"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+  lockfiles:
+    name: One lockfile (HD-01)
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Only pnpm-lock.yaml and Cargo.lock are tracked
+        run: |
+          if git ls-files --error-unmatch package-lock.json yarn.lock npm-shrinkwrap.json 2>/dev/null; then
+            echo "::error::this project uses pnpm; remove the npm or yarn lockfile"; exit 1
+          fi
+          git ls-files --error-unmatch pnpm-lock.yaml Cargo.lock
+      - name: npm install fails and names pnpm
+        run: |
+          if npm install --ignore-scripts > npm.log 2>&1; then echo "::error::npm install succeeded"; exit 1; fi
+          grep -q pnpm npm.log
+
+  rust:
+    name: Rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.bench == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.os) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          node-version: 22
+          # Only main writes the cache, so PRs restore a warm cache without evicting it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: |
+            . -> target
+            bench -> target
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-nextest
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # nextest builds what it tests, so there is no separate `cargo build`. Also checks the generated contract.
+      - run: cargo nextest run --workspace --locked --no-tests=warn
+      - run: cargo test --workspace --locked --doc
+      # The phase 0 spikes stay compiling; they are a separate workspace and never ship.
+      - name: Bench workspace
+        if: runner.os == 'Linux' && needs.changes.outputs.bench == 'true'
+        run: |
+          cargo fmt --manifest-path bench/Cargo.toml --all --check
+          cargo clippy --manifest-path bench/Cargo.toml --all-targets --locked -- -D warnings
+          cargo test --manifest-path bench/Cargo.toml --locked
+
+  web:
+    name: App (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.os) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
           cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Type-check
-        run: pnpm exec tsc --noEmit
-
-      - name: Run checks
-        run: pnpm check
-
-      - name: Build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm check
+      - name: TypeScript wire types match the Rust contract (INT-01)
+        if: runner.os == 'Linux'
+        run: |
+          pnpm gen:types
+          git diff --exit-code -- lib/api/types.gen.ts
+      # One production build is enough; macOS and Windows already type-check and run the checks above.
+      - if: runner.os == 'Linux'
         run: pnpm build
+
+  supply-chain:
+    name: Licences, advisories, SBOM (HD-12)
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-deny,cargo-audit,cargo-cyclonedx
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # GPL, AGPL, PolyForm and every licence not on the allow list fail; so do git2 and forceatlas2.
+      - run: cargo deny --locked check
+      - run: cargo audit --deny warnings
+      - run: pnpm audit --prod
+      - run: node scripts/check-licenses.mjs
+      # Two CycloneDX files: the binary's crates and the app's npm packages. Merging them into one
+      # file per release artefact belongs to the release job (HD-13). Only main keeps them.
+      - name: SBOM
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p sbom
+          cargo cyclonedx --format json --spec-version 1.6 --override-filename sbom-crates
+          mv crates/cartograph-cli/sbom-crates.json sbom/cartograph-crates.cdx.json
+          pnpm sbom --sbom-format cyclonedx --prod > sbom/cartograph-npm.cdx.json
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom/

@@ -1,0 +1,22 @@
+[package]
+name = "cartograph-cli"
+description = "The cartograph command: clap commands, output and exit codes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cartograph"
+path = "src/main.rs"
+
+[dependencies]
+cartograph-core.workspace = true
+cartograph-index.workspace = true
+cartograph-query.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

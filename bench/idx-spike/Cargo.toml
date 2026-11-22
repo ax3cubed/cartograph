@@ -1,0 +1,16 @@
+[package]
+name = "idx-spike"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "IDX-02 spike: gix walk and renames against git and libgit2, oxc_resolver over a virtual file system, the D1 freshness check, SQLite I/O. Never shipped."
+
+[dependencies]
+gix = { version = "=0.90.0", default-features = false, features = ["max-performance", "blob-diff", "revision", "sha1"] }
+# libgit2 is a comparison baseline only (B7 rejects it for the product). No network features.
+git2 = { version = "=0.21.0", default-features = false }
+oxc_resolver = "=11.24.3"
+rusqlite = { version = "=0.43.0", features = ["bundled"] }
+serde_json = "1"
+regex = "1"

@@ -1,0 +1,19 @@
+[package]
+name = "cartograph-index"
+description = "Orchestration: sync, rebuild, overlays, layout and freshness (D1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cartograph-core.workspace = true
+cartograph-discovery.workspace = true
+cartograph-git.workspace = true
+cartograph-facts.workspace = true
+cartograph-store.workspace = true
+
+[lints]
+workspace = true

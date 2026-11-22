@@ -1,0 +1,8 @@
+---
+source: crates/cartograph-core/src/error.rs
+assertion_line: 109
+expression: report.to_string()
+---
+error: the data folder ~/Dropbox/.cartograph is inside a sync client's folder
+  why: sync clients upload SQLite's -wal and -shm files separately, which corrupts the index (B1)
+  try: set CARTOGRAPH_HOME or index_path to a folder outside the synced one

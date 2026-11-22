@@ -1,0 +1,15 @@
+# pnpm settings (HD-01, HD-12).
+# No dependency runs install scripts unless it is listed here with true.
+allowBuilds: {}
+# A new version must be 7 days old (in minutes) before pnpm resolves it.
+minimumReleaseAge: 10080
+# Already in the lockfile when the age gate was added (22 Nov 2026). Exact versions only; delete
+# each line once it is older than 7 days.
+minimumReleaseAgeExclude:
+  - "@assistant-ui/core@0.3.37"
+  - "@assistant-ui/react@0.15.37"
+  - "@assistant-ui/store@0.3.24"
+  - "@babel/runtime@7.29.15"
+  - "assistant-cloud@0.2.13"
+  - "assistant-stream@0.3.58"
+  - "tailwind-merge@3.7.1"
