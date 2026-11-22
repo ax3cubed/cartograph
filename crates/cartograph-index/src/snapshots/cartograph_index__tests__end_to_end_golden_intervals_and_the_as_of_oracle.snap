@@ -1,0 +1,10 @@
+---
+source: crates/cartograph-index/src/tests.rs
+expression: "dump.join(\"\\n\")"
+---
+import src/a.ts -> lib/src/index.ts  opened 1 (add b and lib)  closed 4 (rename the package)
+import src/a.ts -> src/b.ts  opened 2 (a better candidate)  closed 5 (delete b)
+import src/a.ts -> src/b/index.ts  opened 1 (add b and lib)  closed 2 (a better candidate)
+import src/a.ts -> src/b/index.ts  opened 5 (delete b)  closed never
+package src/c.ts -> lib/package.json  opened 4 (rename the package)  closed never
+import src/c.ts -> src/a.ts  opened 4 (rename the package)  closed never
