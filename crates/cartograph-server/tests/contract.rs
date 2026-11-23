@@ -1,0 +1,175 @@
+//! SRV-07's done-when: every route's body validates against the generated schema, and so does
+//! every error body, whatever produced it.
+
+mod common;
+
+use common::*;
+
+/// Every route the server serves, with the table row it implements.
+const SERVED: &[(&str, &str)] = &[
+    ("/api/version", "/api/version"),
+    ("/api/v1/meta", "/api/v1/meta"),
+    ("/api/v1/workspaces", "/api/v1/workspaces"),
+    ("/api/v1/workspaces/{ws}", "/api/v1/workspaces/{ws}"),
+    ("/api/v1/w/{ws}/freshness", "/api/v1/w/{ws}/freshness"),
+    ("/api/v1/w/{ws}/repos", "/api/v1/w/{ws}/repos"),
+    ("/api/v1/w/{ws}/graph", "/api/v1/w/{ws}/graph"),
+    (
+        "/api/v1/w/{ws}/graph?at=now&lod=file&kinds=imports",
+        "/api/v1/w/{ws}/graph",
+    ),
+];
+
+#[test]
+fn every_route_body_validates_against_the_generated_schema() {
+    let api = openapi();
+    let table = cartograph_api::routes::routes();
+    let r = start();
+    for (path, row) in SERVED {
+        assert!(
+            table.iter().any(|t| t.method == "GET" && t.path == *row),
+            "{row} isn't in the route table"
+        );
+        let reply = get(&r, &path.replace("{ws}", &r.ws));
+        assert_eq!(reply.status, 200, "{path}: {}", reply.body);
+        assert_eq!(reply.headers["content-type"], "application/json", "{path}");
+        let schema =
+            &api["paths"][row]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+        assert!(schema.is_object(), "{row} has no 200 schema");
+        validate(&api, schema, &reply.json(), path).unwrap_or_else(|e| panic!("{e}"));
+        if row.contains("/w/{ws}/") {
+            let generation = reply.json()["generation"].as_u64().unwrap();
+            assert_eq!(
+                reply.headers["cartograph-generation"],
+                generation.to_string()
+            );
+            assert_eq!(reply.headers["cartograph-state"], "current");
+        }
+    }
+    let slice = get(&r, &format!("/api/v1/w/{}/graph", r.ws)).json();
+    assert_eq!(slice["data"]["nodes"]["name"].as_array().unwrap().len(), 4);
+    assert_eq!(slice["data"]["links"]["from"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn every_error_body_validates_and_leaks_nothing() {
+    let api = openapi();
+    let error = &api["components"]["schemas"]["ErrorBody"];
+    let r = start();
+    let p = r.info.port;
+    let ws = r.ws.clone();
+    let cases: Vec<(Reply, u16, &str)> = vec![
+        (get(&r, "/api/v1/nope"), 404, "not_found"),
+        (get(&r, "/api/v1/w/nope/graph"), 404, "not_found"),
+        (get(&r, "/api/v1/w/..%2f..%2fetc/graph"), 404, "not_found"),
+        (
+            get(&r, &format!("/api/v1/w/{ws}/graph?lod=service")),
+            400,
+            "bad_request",
+        ),
+        (
+            get(&r, &format!("/api/v1/w/{ws}/graph?lod=galaxy")),
+            400,
+            "bad_request",
+        ),
+        (
+            get(&r, &format!("/api/v1/w/{ws}/graph?at=yesterday")),
+            400,
+            "bad_request",
+        ),
+        (
+            get(&r, &format!("/api/v1/w/{ws}/graph?at=0000000000")),
+            404,
+            "not_found",
+        ),
+        (
+            get(
+                &r,
+                &format!("/api/v1/w/{ws}/graph?at=%27%3B%20DROP%20TABLE%20link%3B--"),
+            ),
+            400,
+            "bad_request",
+        ),
+        (
+            raw(
+                p,
+                &format!("GET /api/v1/meta HTTP/1.1\r\nHost: 127.0.0.1:{p}"),
+            ),
+            401,
+            "unauthorized",
+        ),
+        (
+            raw(p, "GET /api/v1/meta HTTP/1.1\r\nHost: evil.example"),
+            403,
+            "forbidden_host",
+        ),
+        (
+            raw(
+                p,
+                &format!(
+                    "POST /api/v1/meta HTTP/1.1\r\nHost: 127.0.0.1:{p}\r\nOrigin: {}\r\nContent-Type: application/json\r\nAuthorization: Bearer {}\r\nContent-Length: 0",
+                    r.info.origin(),
+                    r.info.token
+                ),
+            ),
+            405,
+            "method_not_allowed",
+        ),
+    ];
+    let home = r.data.parent().unwrap().to_string_lossy().into_owned();
+    for (reply, status, code) in &cases {
+        assert_eq!(
+            (reply.status, reply.code().as_str()),
+            (*status, *code),
+            "{}",
+            reply.body
+        );
+        validate(&api, error, &reply.json(), code).unwrap_or_else(|e| panic!("{e}"));
+        for leak in [
+            "SELECT",
+            "FROM ",
+            "sqlite",
+            "SQLITE",
+            "panicked",
+            "RUST_BACKTRACE",
+            home.as_str(),
+        ] {
+            assert!(!reply.body.contains(leak), "{leak} in {}", reply.body);
+        }
+        assert!(reply.json().get("data").is_none());
+    }
+}
+
+#[test]
+fn a_workspace_is_listed_by_its_own_name_and_root_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(d.path()).unwrap();
+    let acme = root.join("acme");
+    for n in ["api", "web"] {
+        let mut f = cartograph_git::fixture::Fixture::init(&acme.join(n));
+        f.write("src/a.ts", "export const a = 1;\n");
+        f.commit("one");
+    }
+    std::fs::write(
+        acme.join("acme.code-workspace"),
+        r#"{ "folders": [ { "path": "api" }, { "path": "web" } ] }"#,
+    )
+    .unwrap();
+    let data = root.join("data");
+    let ws = register(&data, &acme);
+    let r = start_in(d, data, ws.clone());
+    // Not its first repo's name and folder ("api", acme/api): the workspace's own, from the registry.
+    let list = get(&r, "/api/v1/workspaces").json();
+    let w = list["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == ws.as_str())
+        .cloned()
+        .unwrap();
+    assert_eq!(w["name"], "acme", "{w}");
+    assert_eq!(w["path"], acme.display().to_string(), "{w}");
+    assert_eq!(w["repos"], 2);
+    let one = get(&r, &format!("/api/v1/workspaces/{ws}")).json();
+    assert_eq!(one["data"]["name"], "acme", "{one}");
+}
