@@ -10,6 +10,22 @@ publish.workspace = true
 
 [dependencies]
 cartograph-core.workspace = true
+gix.workspace = true
+json-strip-comments.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+# The layout fixture (HD-03). A dev-only cycle through cartograph-index, which cargo allows.
+cartograph-fixtures = { path = "../../fixtures/gen" }
+jsonschema.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
