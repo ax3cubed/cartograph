@@ -8,6 +8,8 @@ import type { ActivityItem, Freshness } from "@/lib/model";
 import { ACTIVITY_HREF } from "@/lib/demo/shell";
 import { usePopover } from "./usePopover";
 import { ago } from "./ago";
+import { behindText } from "./IndexStatus";
+import { useLive } from "@/lib/api/live";
 import "./activity.css";
 
 const ICON = { index: Hammer, sync: RefreshCw, correction: SlidersHorizontal, warning: AlertTriangle } as const;
@@ -22,13 +24,15 @@ export default function Activity({ freshness }: { freshness?: Freshness }) {
   const [read, setRead] = useState<string[]>([]);
   useEffect(() => { setRead(loadRead()); }, []);
 
-  // the build row takes its time from the same Freshness as the chip; a stale or failed index adds a row of its own
+  // the build row takes its time from the same Freshness as the chip; a stale or failed index adds a row of its own.
+  // Live, only those rows: the demo's corrections and syncs aren't this workspace's (the activity store is FE-14).
+  const live = useLive();
   const items = useMemo<ActivityItem[]>(() => {
-    const base = getActivity().map((a) => (freshness && a.kind === "index" ? { ...a, at: freshness.builtAt } : a));
-    if (freshness?.state === "behind") return [{ id: "live-behind", at: freshness.builtAt, kind: "warning", text: `The index is ${freshness.behind} commits behind HEAD. Run cartograph sync to update it.`, unread: true }, ...base];
-    if (freshness?.state === "failed") return [{ id: "live-failed", at: freshness.builtAt, kind: "warning", text: "The index can't be read. Rebuild it with the CLI.", unread: true }, ...base];
+    const base = live ? [] : getActivity().map((a) => (freshness && a.kind === "index" ? { ...a, at: freshness.builtAt } : a));
+    if (freshness?.state === "behind") return [{ id: "live-behind", at: freshness.builtAt, kind: "warning", text: `The index is ${behindText(freshness)} commits behind HEAD. Run cartograph sync to update it.`, unread: true }, ...base];
+    if (freshness?.state === "failed") return [{ id: "live-failed", at: freshness.builtAt, kind: "warning", text: "The index can't be read. Run cartograph sync; it resumes from the last batch.", unread: true }, ...base];
     return base;
-  }, [freshness]);
+  }, [freshness, live]);
   const isUnread = (a: ActivityItem) => a.unread && !read.includes(a.id);
   const unread = items.filter(isUnread).length;
   const mark = (ids: string[]) => { const next = [...new Set([...read, ...ids])]; setRead(next); saveRead(next); };

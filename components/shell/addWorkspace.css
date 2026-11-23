@@ -20,11 +20,6 @@
 .aw-sub { margin: 0; font-size: 0.8125rem; line-height: 1.55; color: var(--muted); }
 .aw-sub code, .aw-sec code, .aw-tab code { font: 0.75rem var(--font-mono), monospace; color: var(--text); overflow-wrap: anywhere; }
 
-.aw-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.aw-pick button { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 18px; border-radius: 14px; text-align: left; background: var(--accent-soft); outline: 1.5px dashed var(--line2); outline-offset: -1.5px; }
-.aw-pick button:hover { outline-color: var(--accent); }
-.aw-pick svg { color: var(--accent); }
-.aw-pick span { font-size: 0.75rem; color: var(--muted); }
 .aw-err { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 0.8125rem; line-height: 1.5; color: var(--down-text); background: var(--down-bg); box-shadow: inset 0 0 0 1px var(--down-line); }
 .aw-demo { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .aw-demo p { margin: 0; font-size: 0.8125rem; color: var(--muted); }
@@ -47,11 +42,6 @@
 .aw-empty p { margin: 0; font-size: 0.8125rem; line-height: 1.55; color: var(--muted); }
 .aw-how { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; font-size: 0.8125rem; line-height: 1.5; color: var(--body); }
 .aw-how li::marker { color: var(--accent); font-family: var(--font-mono), monospace; }
-.aw-sw { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.aw-switch { flex: none; width: 44px; height: 26px; border-radius: 99px; position: relative; background: var(--line2); }
-.aw-switch[aria-checked="true"] { background: var(--accent); }
-.aw-switch span { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--on-accent); transition: transform 0.2s var(--ease); }
-.aw-switch[aria-checked="true"] span { transform: translateX(18px); }
 .aw-yaml { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); font: 0.71875rem/1.6 var(--font-mono), monospace; color: var(--body); overflow-x: auto; }
 
 .aw-prog { display: flex; flex-direction: column; gap: 8px; font-size: 0.8125rem; color: var(--muted); }
@@ -61,19 +51,26 @@
 .aw-foot { flex: none; min-height: 76px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 32px; background: var(--panel); border-top: 1px solid var(--line); }
 .aw-cancel { min-height: 44px; padding: 0 12px; border-radius: 99px; color: var(--muted); font-weight: 600; font-size: 0.875rem; text-decoration: none; }
 .aw-cancel:hover { color: var(--text); background: var(--slab); }
-.aw-skip { overflow-wrap: anywhere; }
-.aw-preview { flex: none; margin: 0; padding: 10px 32px; font-size: 0.8125rem; line-height: 1.5; background: var(--warn-bg); color: var(--warn-body); border-bottom: 1px solid var(--warn-line); }
-.aw-preview b { color: var(--text); font-weight: 600; }
-.aw-cmd { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-radius: 10px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
-.aw-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font: 0.8125rem var(--font-mono), monospace; }
-.aw-cmd code span { color: var(--faint); }
-.aw-cmd .btn { min-height: 32px; padding: 0 12px; gap: 6px; flex: none; }
 .aw-sum { margin-left: auto; font-size: 0.8125rem; color: var(--muted); }
 .aw-foot .btn:disabled { opacity: 0.4; }
+.aw-fp { display: flex; flex-direction: column; gap: 8px; }
+.aw-fp label { font-size: 0.8125rem; font-weight: 600; }
+.aw-fp-row { display: flex; gap: 8px; }
+.aw-fp-row input { flex: 1; min-width: 0; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 0; background: var(--bg); color: var(--text); box-shadow: inset 0 0 0 1px var(--line2); font: 0.875rem var(--font-mono), monospace; }
+.aw-fp-row input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.aw-fs { border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.aw-fs-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; background: var(--slab); }
+.aw-fs-head code { flex: 1; min-width: 0; }
+.aw-fs-head .btn { min-height: 32px; padding: 0 12px; gap: 6px; }
+.aw-fs ul { list-style: none; margin: 0; padding: 4px; max-height: 280px; overflow: auto; }
+.aw-fs li button { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; border-radius: 8px; text-align: left; font-size: 0.875rem; }
+.aw-fs li button:hover, .aw-fs li button:focus-visible { background: var(--accent-soft); }
+.aw-fs li button svg { flex: none; color: var(--muted); }
+.aw-fs li button > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aw-fs-none { padding: 10px; font-size: 0.8125rem; color: var(--muted); }
 @media (max-width: 900px) {
   .aw-two { grid-template-columns: minmax(0, 1fr); }
-  .aw-pick { grid-template-columns: minmax(0, 1fr); }
-  .aw-main, .aw-top, .aw-foot, .aw-preview { padding-left: 16px; padding-right: 16px; }
+  .aw-main, .aw-top, .aw-foot { padding-left: 16px; padding-right: 16px; }
   .aw-tab { display: block; overflow-x: auto; }
 }
 /* phones: a one-row header with the current step only, and a short footer, so the demo buttons aren't pushed under it */

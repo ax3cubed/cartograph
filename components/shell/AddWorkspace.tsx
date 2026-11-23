@@ -1,47 +1,52 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, FileJson, FolderSearch, FolderX, X } from "lucide-react";
+import { Check, FolderX, X } from "lucide-react";
+import type { CreatedWorkspace, Discovery, Problem, ServerEvent } from "@/lib/api";
 import { getCurrentWorkspace } from "@/lib/source";
 import { SERVICES } from "@/lib/workspace";
-import { FOUND_VIA, NORTHWIND_FILE, NORTHWIND_FOLDERS, NORTHWIND_ID } from "@/lib/demo/shell";
-import type { FolderRow } from "@/lib/model";
-import { copy } from "./IndexStatus";
+import { FOUND_VIA, NORTHWIND_FILE, NORTHWIND_FOLDERS } from "@/lib/demo/shell";
+import { openWorkspace, useLive } from "@/lib/api/live";
 import { queueToast, toast } from "./toast";
 import { takeOrigin } from "./origin";
+import FolderPicker from "./FolderPicker";
+import { RequestError, send } from "@/lib/api/client";
+import { onEvent } from "@/lib/api/events";
+import { say } from "./FolderPicker";
 import Toasts from "./Toasts";
 import "./shell.css";
 import "./addWorkspace.css";
 
-/** Decision D1 / board S01: pick a workspace file or folder, review discovery, review services, build the first index. */
-interface Source { file: string; name: string; rows: FolderRow[]; demo: boolean }
+/** Decision D1 / board S01, item FE-15: pick a folder or workspace file, review discovery, review services, build the first index. */
+interface Row { folder: string; result: "repo" | "scope" | "skipped"; repo?: string; detail: string }
 interface Svc { id: string; name: string; repo: string; via: string; color?: string; lang?: string }
-const STEPS = ["Sources", "Repositories", "Services", "First index"];
-const STEPS_OWN = ["Sources", "Repositories", "Services", "Build command"]; // a real folder gets a command, not a build
-const INDEX_STAGES = ["Find each repository's default branch", "Replay first-parent history", "Parse files and link them", "Write the index"];
+interface Source { path: string; file: string | null; name: string; rows: Row[]; services: Svc[]; estimate?: number | null; demo: boolean }
+interface Job { id: string; ws: string; done: number; total: number; stage: string; repo?: string | null; eta?: number | null }
+const STEPS = ["Source", "Repositories", "Services", "First index"];
+const DEMO_STAGES = ["Find each repository's default branch", "Replay first-parent history", "Parse files and link them", "Write the index"];
+const CANCELLED = "Cancelled. Nothing was added. Files already parsed stay in the cache, so the next try starts where this one stopped.";
+const base = (p: string) => p.replace(/\/$/, "").split("/").pop() || p;
 
-/** Parse a .code-workspace file the way VS Code does: comments and trailing commas are allowed. */
-function parseWorkspace(text: string): string[] | Error {
-  try {
-    const json = text.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_m, s) => s ?? "").replace(/,(\s*[}\]])/g, "$1");
-    const folders = (JSON.parse(json).folders ?? []) as { path?: string; uri?: string }[];
-    return folders.map((f) => f.uri ?? f.path ?? "");
-  } catch (e) { return e as Error; }
-}
-/** Resolve folders as far as a browser can: remote URIs are skipped here, the git check runs when the index is built. */
-const rowsFrom = (folders: string[]): FolderRow[] => folders.filter(Boolean).map((f) =>
-  /^[a-z][\w+.-]*:\/\//i.test(f) && !f.startsWith("file:")
-    ? { folder: f, result: "skipped", detail: "Skipped: not on this machine" }
-    : { folder: f, result: "repo", repo: f.replace(/\/$/, "").split("/").pop(), detail: "Repository. The git check runs when the index is built" });
+const fromDiscovery = (path: string, file: string | null, d: Discovery): Source => ({
+  path, file, name: file ? file.replace(/\.code-workspace$/, "") : base(path), estimate: d.estimate_s, demo: false,
+  rows: d.folders.map((f) => ({
+    folder: f.folder, result: f.result, repo: f.repo ?? undefined,
+    detail: f.reason ?? (f.result === "scope" ? `A scope of ${f.repo}` : "Repository"),
+  })),
+  // Service detection lands with IDX-20; until then /discover names none, and a repo with none is one service.
+  services: d.services.length
+    ? d.services.map((s) => ({ id: s.id, name: s.name, repo: s.repo, via: s.paths.length ? s.paths.join(", ") : "The whole repository" }))
+    : [...new Set(d.folders.filter((f) => f.repo).map((f) => f.repo!))].map((id) => ({ id, name: id, repo: id, via: "No Dockerfile or chart checked yet: one service per repository" })),
+});
 
-const servicesFor = (src: Source): Svc[] => {
-  const ids = [...new Set(src.rows.filter((r) => r.repo).map((r) => r.repo!))];
-  return ids.map((id) => {
-    const s = SERVICES.find((x) => x.id === id);
-    return src.demo && s ? { id, name: s.name, repo: s.name, via: FOUND_VIA[id], color: s.color, lang: s.lang } : { id, name: id, repo: id, via: "No Dockerfile or chart checked yet: one service per repository" };
-  });
+const northwind = (empty: boolean): Source => {
+  const rows: Row[] = empty ? [{ folder: "notes", result: "skipped", detail: "Skipped: not a git repository" }] : NORTHWIND_FOLDERS;
+  const ids = [...new Set(rows.filter((r) => r.repo).map((r) => r.repo!))];
+  return {
+    path: NORTHWIND_FILE, file: null, name: "northwind", rows, demo: true,
+    services: ids.map((id) => { const s = SERVICES.find((x) => x.id === id)!; return { id, name: s.name, repo: s.name, via: FOUND_VIA[id], color: s.color, lang: s.lang }; }),
+  };
 };
 
 export default function AddWorkspace() {
@@ -49,96 +54,139 @@ export default function AddWorkspace() {
   const [step, setStep] = useState(0);
   const [src, setSrc] = useState<Source | null>(null);
   const [err, setErr] = useState("");
-  const [off, setOff] = useState<Set<string>>(new Set());
-  const [manifest, setManifest] = useState(true);
-  const [pct, setPct] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [failed, setFailed] = useState<Problem | null>(null);
+  const [finished, setFinished] = useState(false);
+  const [pct, setPct] = useState(0); // the demo's simulated progress
+  const unsub = useRef<(() => void) | null>(null);
+  // Set by cancel or close before POST /workspaces answers: that request's job is stopped as soon as its id is known.
+  const cancelled = useRef(false);
   const title = useRef<HTMLHeadingElement>(null);
-  const fileIn = useRef<HTMLInputElement>(null);
-  const dirIn = useRef<HTMLInputElement>(null);
   const ws = getCurrentWorkspace();
-  // Cancel and close go back to where the person came from, not always /welcome
-  const leave = () => {
-    const to = takeOrigin();
-    if (to) router.push(to);
-    else if (history.length > 1) router.back();
-    else router.push("/welcome");
-  };
-
-  const svcs = useMemo(() => (src ? servicesFor(src) : []), [src]);
-  const on = svcs.filter((s) => !off.has(s.id));
-  const repoCount = new Set(src?.rows.filter((r) => r.repo).map((r) => r.repo)).size;
-  const skippedRows = src?.rows.filter((r) => r.result === "skipped") ?? [];
-  const skipped = skippedRows.length;
   const demo = !!src?.demo;
-  const steps = demo ? STEPS : STEPS_OWN;
-  const target = src?.file.startsWith("~/") ? src.file : `<path to ${src?.file ?? "the workspace"}>`;
-  const initCmd = `cartograph init ${target}`;
+  const live = useLive();
+
+  const stop = () => { unsub.current?.(); unsub.current = null; };
+  useEffect(() => stop, []);
   useEffect(() => { title.current?.focus(); }, [step]);
-  // step 4 runs the first index; the demo's progress is simulated
   useEffect(() => {
     if (step !== 3 || !demo || pct >= 100) return;
     const t = setTimeout(() => setPct((p) => Math.min(100, p + 4)), 120);
     return () => clearTimeout(t);
   }, [step, pct, demo]);
 
-  const take = (s: Source) => { setErr(""); setOff(new Set()); setSrc(s); setStep(1); };
-  const readFile = async (f?: File) => {
-    if (!f) return;
-    const folders = parseWorkspace(await f.text());
-    if (folders instanceof Error) return setErr(`Couldn't read ${f.name} as a workspace file: ${folders.message}. Check that it is valid JSON, comments allowed, then choose it again.`);
-    take({ file: f.name, name: f.name.replace(/\.code-workspace$/, ""), rows: rowsFrom(folders), demo: false });
-  };
-  const readDir = async (list: FileList | null) => {
-    if (!list?.length) return;
-    const files = [...list];
-    const depth = (f: File) => f.webkitRelativePath.split("/").length;
-    const wsFile = files.filter((f) => f.name.endsWith(".code-workspace") && depth(f) <= 3).sort((a, b) => depth(a) - depth(b))[0];
-    if (wsFile) return readFile(wsFile);
-    const repos = [...new Set(files.filter((f) => /\/\.git\/HEAD$/.test(f.webkitRelativePath) && depth(f) <= 5).map((f) => f.webkitRelativePath.replace(/\/\.git\/HEAD$/, "")))];
-    const root = files[0].webkitRelativePath.split("/")[0];
-    take({ file: `~/${root}`, name: root, rows: rowsFrom(repos.map((r) => r.split("/").slice(1).join("/") || ".")), demo: false });
-  };
-  const northwind = (empty = false) => take({ file: NORTHWIND_FILE, name: "northwind", rows: empty ? [{ folder: "notes", result: "skipped", detail: "Skipped: not a git repository" }] : NORTHWIND_FOLDERS, demo: true });
-  const back = () => { setPct(0); setStep((s) => Math.max(0, s - 1)); };
-
-  const yaml = `workspace: ${src?.name ?? ""}\nrepos:\n${on.map((s) => `  - path: ${s.repo}`).join("\n")}\n`;
-  const building = step === 3 && demo && pct < 100;
-  const done = step === 3 && demo && pct >= 100;
+  const repoCount = new Set(src?.rows.filter((r) => r.repo).map((r) => r.repo)).size;
+  const skipped = src?.rows.filter((r) => r.result === "skipped").length ?? 0;
   const none = step === 1 && repoCount === 0;
-  const stage = INDEX_STAGES[Math.min(INDEX_STAGES.length - 1, Math.floor(pct / 26))];
+  const done = step === 3 && (demo ? pct >= 100 : finished);
+  const building = step === 3 && !done && !failed;
+  const progress = demo ? pct : job?.total ? Math.round((job.done / job.total) * 100) : 0;
+
+  /** Cancel the first index: the server drops the half-built workspace, so nothing is left in the registry (E5). */
+  const cancel = async () => {
+    cancelled.current = true;
+    stop();
+    if (!demo && job) await send("DELETE", `/api/v1/jobs/${job.id}`).catch(() => {});
+    setJob(null); setPct(0); setStep(2); toast(CANCELLED);
+  };
+  // Cancel and close go back to where the person came from, not always /welcome. Closing mid-build cancels the build first.
+  const leave = async () => {
+    if (building && !demo) {
+      cancelled.current = true;
+      if (job) await send("DELETE", `/api/v1/jobs/${job.id}`).catch(() => {});
+    }
+    stop();
+    const to = takeOrigin();
+    if (to) router.push(to);
+    else if (history.length > 1) router.back();
+    else router.push("/welcome");
+  };
+
+  const discover = async (path: string, file: string | null) => {
+    setBusy(true); setErr("");
+    try {
+      const d = await send<Discovery>("POST", "/api/v1/discover", { path, workspace_file: file });
+      setSrc(fromDiscovery(path, file, d)); setStep(1);
+    } catch (e) {
+      if (e instanceof RequestError) setErr(say(e));
+    } finally { setBusy(false); }
+  };
+
+  const build = async () => {
+    cancelled.current = false;
+    setFailed(null); setFinished(false); setPct(0); setJob(null); setStep(3);
+    if (!src || src.demo) return;
+    // Listen before creating, so a small workspace that finishes at once isn't missed.
+    const early = new Map<string, ServerEvent>();
+    let id = "";
+    const finish = (e: Extract<ServerEvent, { event: "job.finished" }>) => {
+      stop();
+      if (e.data.ok) { setJob((j) => j && { ...j, done: j.total }); setFinished(true); }
+      else setFailed(e.data.error ?? { what: "The first index stopped", why: "the server didn't say why", try: "check cartograph doctor, then build again" });
+    };
+    unsub.current = onEvent((e) => {
+      if (e.event !== "job.progress" && e.event !== "job.finished") return;
+      if (!id) { early.set(e.event, e); return; }
+      if (e.data.job_id !== id) return;
+      if (e.event === "job.finished") finish(e);
+      else setJob((j) => j && { ...j, done: e.data.done, total: e.data.total, stage: e.data.stage, repo: e.data.repo, eta: e.data.eta_s });
+    });
+    try {
+      // manifest: the server writes cartograph.yaml beside the workspace file (C7), the file the aside tells you to commit.
+      const c = await send<CreatedWorkspace>("POST", "/api/v1/workspaces", { path: src.path, workspace_file: src.file, name: null, manifest: true });
+      if (cancelled.current) {
+        // Cancelled while the server was still setting up: stop the first index it started, so nothing is added.
+        await send("DELETE", `/api/v1/jobs/${c.job_id}`).catch(() => {});
+        return;
+      }
+      id = c.job_id;
+      setJob({ id, ws: c.workspace.id, done: 0, total: 0, stage: "Starting" });
+      const f = early.get("job.finished");
+      if (f?.event === "job.finished" && f.data.job_id === id) finish(f);
+    } catch (e) {
+      stop();
+      setFailed(e instanceof RequestError ? { what: e.what, why: e.why, try: e.try_ } : { what: "Couldn't start the first index", why: "the request failed", try: "build again" });
+    }
+  };
+
+  const open = () => {
+    queueToast(demo ? `${src?.name} added. It is the demo workspace, built into the app.` : `${src?.name} added.`);
+    // The router's push fires no hashchange, so the map wouldn't read #added: pick the workspace first.
+    if (!demo && job?.ws) openWorkspace(job.ws);
+    router.push(`/#added=${demo ? "northwind" : job?.ws}`);
+  };
+  const back = () => { setErr(""); setStep((s) => Math.max(0, s - 1)); };
+  const stage = demo ? DEMO_STAGES[Math.min(DEMO_STAGES.length - 1, Math.floor(pct / 26))] : `${job?.stage ?? "Starting"}${job?.repo ? ` · ${job.repo}` : ""}`;
+  const eta = !demo && job?.eta ? ` · about ${Math.ceil(job.eta / 60)} min left` : "";
 
   return (
     <div className="aw">
       <header className="aw-top">
         <b>Add a workspace</b>
         <nav aria-label="Steps"><ol>
-          {steps.map((s, i) => (
+          {STEPS.map((s, i) => (
             <li key={s} className={i < step ? "is-done" : i === step ? "is-cur" : undefined} aria-current={i === step ? "step" : undefined}><i>{i < step ? <Check size={14} aria-hidden /> : i + 1}</i><span>{s}</span></li>
           ))}
         </ol></nav>
         <button type="button" className="aw-x" aria-label="Close and go back" onClick={leave}><X size={18} aria-hidden /></button>
       </header>
-      {src && !demo && step > 0 && (
-        <p className="aw-preview" role="note"><b>Preview:</b> this version can&apos;t index real folders yet. You can review what Cartograph finds. The last step gives you the command that builds the index.</p>
-      )}
 
       <main className="aw-main">
         {step === 0 && (
           <section className="aw-sec aw-narrow" aria-labelledby="aw-h">
-            <h1 id="aw-h" ref={title} tabIndex={-1}>Pick a workspace file or folder</h1>
-            <p className="aw-sub">Cartograph reads the folders listed in a <code>.code-workspace</code> file, the same file VS Code and Cursor open. With a folder instead, it looks for the file up to two levels down, then for repositories up to three. Nothing leaves this machine.</p>
-            <input ref={fileIn} type="file" accept=".code-workspace" hidden onChange={(e) => { readFile(e.target.files?.[0]); e.target.value = ""; }} />
-            <input ref={dirIn} type="file" hidden {...{ webkitdirectory: "" }} onChange={(e) => { readDir(e.target.files); e.target.value = ""; }} />
-            <div className="aw-pick">
-              <button type="button" onClick={() => fileIn.current?.click()}><FileJson size={24} aria-hidden /><b>Choose a workspace file</b><span>A <code>.code-workspace</code> file</span></button>
-              <button type="button" onClick={() => dirIn.current?.click()}><FolderSearch size={24} aria-hidden /><b>Choose a folder</b><span>Cartograph finds the repositories under it</span></button>
-            </div>
+            <h1 id="aw-h" ref={title} tabIndex={-1}>Pick a folder or workspace file</h1>
+            <p className="aw-sub">Cartograph reads the folders listed in a <code>.code-workspace</code> file, the same file VS Code and Cursor open. In a folder, it looks for that file up to two levels down, then for repositories up to three. Nothing leaves this machine.</p>
+            <FolderPicker busy={busy} onPick={discover} />
             {err && <p className="aw-err" role="alert">{err}</p>}
-            <div className="aw-demo">
-              <span className="sh-k">Demo</span>
-              <p>Walk through the steps with <code>{NORTHWIND_FILE}</code>.</p>
-              <div><button type="button" className="btn primary" onClick={() => northwind()}>Use the northwind example</button><button type="button" className="btn" onClick={() => northwind(true)}>Try a folder with no repositories</button></div>
-            </div>
+            {/* Served by the binary, the map shows registered workspaces only: the demo walkthrough would end nowhere. */}
+            {!live && (
+              <div className="aw-demo">
+                <span className="sh-k">Demo</span>
+                <p>Walk through the steps with <code>{NORTHWIND_FILE}</code>.</p>
+                <div><button type="button" className="btn" onClick={() => { setSrc(northwind(false)); setStep(1); }}>Use the northwind example</button><button type="button" className="btn" onClick={() => { setSrc(northwind(true)); setStep(1); }}>Try a folder with no repositories</button></div>
+              </div>
+            )}
           </section>
         )}
 
@@ -146,22 +194,17 @@ export default function AddWorkspace() {
           <div className="aw-two">
             <section className="aw-sec" aria-labelledby="aw-h">
               <h1 id="aw-h" ref={title} tabIndex={-1}>{none ? "No repositories found" : `${repoCount} ${repoCount === 1 ? "repository" : "repositories"} found in ${src.rows.length} ${src.rows.length === 1 ? "folder" : "folders"}`}</h1>
-              <p className="aw-sub">From <code>{src.file}</code>.</p>
-              {skipped > 0 && (
-                <p className="aw-sub aw-skip">{skipped === 1 ? "Skipped: " : `${skipped} folders skipped: `}
-                  {skippedRows.map((r, i) => <span key={r.folder}>{i > 0 && "; "}<code>{r.folder}</code> ({r.detail.replace(/^Skipped: /, "")})</span>)}.</p>
-              )}
-              {none ? (
+              <p className="aw-sub">From <code>{src.file ? `${src.path}/${src.file}` : src.path}</code>{skipped > 0 && `. ${skipped} skipped, each with the reason`}.</p>
+              {none && (
                 <div className="aw-empty" role="status">
                   <FolderX size={28} aria-hidden />
                   <b>Cartograph found nothing to index</b>
-                  <p>It checked the folders in the workspace file, and when there is none, every folder up to three levels down. Each folder has to be inside a git work tree. Folders on another machine are skipped too.</p>
-                  <p>Check that the path is right and that the folder has a <code>.git</code> inside it, then choose again. You can also look at northwind, which has repositories to find.</p>
-                  <div><button type="button" className="btn primary" onClick={back}>Choose another file or folder</button><Link href="/" className="btn">Try the demo</Link></div>
+                  <p>Each folder has to be inside a git work tree. {src.rows.length ? "The reason for each folder is below." : "There were no folders to check: no workspace file, and no repository up to three levels down."} Check the path, then choose again.</p>
                 </div>
-              ) : (
+              )}
+              {src.rows.length > 0 && (
                 <table className="aw-tab">
-                  <caption className="sr-only">How each folder in the workspace file was resolved</caption>
+                  <caption className="sr-only">How each folder was resolved</caption>
                   <thead><tr><th scope="col">Folder</th><th scope="col">Result</th><th scope="col">Detail</th></tr></thead>
                   <tbody>
                     {src.rows.map((r) => (
@@ -191,15 +234,14 @@ export default function AddWorkspace() {
         {step === 2 && src && (
           <div className="aw-two">
             <section className="aw-sec" aria-labelledby="aw-h">
-              <h1 id="aw-h" ref={title} tabIndex={-1}>{svcs.length} {svcs.length === 1 ? "service" : "services"} found</h1>
-              <p className="aw-sub">{on.length} selected. A package with a Dockerfile, a Kubernetes Deployment or a Procfile counts as a service. A repo with none is one service.</p>
+              <h1 id="aw-h" ref={title} tabIndex={-1}>{src.services.length} {src.services.length === 1 ? "service" : "services"} found</h1>
+              <p className="aw-sub">A package with a Dockerfile, a Kubernetes Deployment or a Procfile counts as a service. A repo with none is one service. You can merge or split services later in Settings.</p>
               <table className="aw-tab">
                 <caption className="sr-only">Services found in the repositories</caption>
-                <thead><tr><th scope="col"><span className="sr-only">Include</span></th><th scope="col">Service</th><th scope="col">Repository</th><th scope="col">Found from</th></tr></thead>
+                <thead><tr><th scope="col">Service</th><th scope="col">Repository</th><th scope="col">Found from</th></tr></thead>
                 <tbody>
-                  {svcs.map((s) => (
-                    <tr key={s.id} className={off.has(s.id) ? "is-skip" : undefined}>
-                      <td><input type="checkbox" checked={!off.has(s.id)} aria-label={`Include ${s.name}`} onChange={() => setOff((o) => { const n = new Set(o); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n; })} /></td>
+                  {src.services.map((s) => (
+                    <tr key={s.id}>
                       <td><span className="aw-dot" style={s.color ? ({ "--c": s.color } as React.CSSProperties) : undefined} aria-hidden /><b>{s.name}</b>{s.lang && <span className="aw-lang">{s.lang}</span>}</td>
                       <td><code>{s.repo}</code></td>
                       <td>{s.via}</td>
@@ -209,35 +251,25 @@ export default function AddWorkspace() {
               </table>
             </section>
             <aside className="aw-sec" aria-labelledby="aw-mf">
-              <div className="aw-sw"><h2 id="aw-mf">Save as a manifest</h2>
-                <button type="button" role="switch" aria-checked={manifest} aria-labelledby="aw-mf" className="aw-switch" onClick={() => setManifest(!manifest)}><span /></button></div>
-              <p className="aw-sub">Commit <code>cartograph.yaml</code> to a repository so teammates and CI index the same set.</p>
-              {manifest && <pre className="aw-yaml">{yaml}</pre>}
+              <h2 id="aw-mf">Share the set with your team</h2>
+              {/* The server writes the manifest itself (CreateWorkspace.manifest, C7), so it is the one cartograph init reads. */}
+              <p className="aw-sub">Building the first index writes <code>cartograph.yaml</code> beside {src.file ? <code>{src.file}</code> : "the folder you picked"}, listing these repositories; one that is already there is kept. Commit it, so teammates and CI index the same set.</p>
             </aside>
           </div>
         )}
 
-        {step === 3 && src && demo && (
+        {step === 3 && src && (
           <section className="aw-sec aw-narrow" aria-labelledby="aw-h">
-            <h1 id="aw-h" ref={title} tabIndex={-1}>{done ? `${src.name} is indexed` : `Building the first index of ${src.name}`}</h1>
-            <p className="aw-sub">The index is written outside your repositories, to <code>~/.cartograph/workspaces/{NORTHWIND_ID}/index.cartograph</code>.</p>
-            <div className="aw-prog" aria-live="polite">
-              <div role="progressbar" aria-label="First index" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><span style={{ width: `${pct}%` }} /></div>
-              <span>{done ? `${on.length} services${ws ? `, ${ws.commits} commits` : ""}` : `${stage} · ${pct}%`}</span>
-            </div>
-            {done
-              ? <div className="aw-act"><button type="button" className="btn primary" onClick={() => { queueToast(`${src.name} added. It is the demo workspace, built into the app.`); router.push("/#added=northwind"); }}>Open the map</button></div>
-              : <p className="aw-sub">Cancel stops the build and writes nothing. You can start it again from the services step.</p>}
-          </section>
-        )}
-
-        {step === 3 && src && !demo && (
-          <section className="aw-sec aw-narrow" aria-labelledby="aw-h">
-            <h1 id="aw-h" ref={title} tabIndex={-1}>Build the index from your terminal</h1>
-            <p className="aw-sub">Nothing has been built or saved. Run this command in a terminal to index {src.name}. {initCmd.includes("<") && "Replace the part in angle brackets with the full path on your machine."}</p>
-            <div className="aw-cmd"><code><span aria-hidden>$ </span>{initCmd}</code><button type="button" className="btn" aria-label="Copy command" onClick={() => copy(initCmd)}><Copy size={14} aria-hidden />Copy</button></div>
-            <p className="aw-sub">When it finishes, open the index with <code>cartograph open &lt;file&gt;</code>. This version of Cartograph can&apos;t read index files yet, so the map still shows the demo.</p>
-            <div className="aw-act"><button type="button" className="btn" onClick={leave}>Close</button><Link href="/" className="btn">Explore the demo</Link></div>
+            <h1 id="aw-h" ref={title} tabIndex={-1}>{failed ? `The first index of ${src.name} stopped` : done ? `${src.name} is indexed` : `Building the first index of ${src.name}`}</h1>
+            <p className="aw-sub">The index is written outside your repositories, under <code>~/.cartograph/workspaces/</code>.{building && !demo && src.estimate ? ` It should take about ${Math.ceil(src.estimate / 60)} min.` : ""}</p>
+            {failed ? <p className="aw-err" role="alert">{say(failed)}</p> : (
+              <div className="aw-prog" aria-live="polite">
+                <div role="progressbar" aria-label="First index" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div>
+                <span>{done ? `${src.services.length} services${demo && ws ? `, ${ws.commits} commits` : ""}` : `${stage} · ${progress}%${eta}`}</span>
+              </div>
+            )}
+            {done && <div className="aw-act"><button type="button" className="btn primary" onClick={open}>Open the map</button></div>}
+            {building && <p className="aw-sub">Cancel stops the build. Nothing is added to your workspaces, and files already parsed stay in the cache, so the next try starts where this one stopped.</p>}
           </section>
         )}
       </main>
@@ -247,12 +279,13 @@ export default function AddWorkspace() {
         {!building && !done && <button type="button" className="aw-cancel" onClick={leave}>Cancel</button>}
         <span className="aw-sum" aria-live="polite">
           {step === 1 && !none && `${repoCount} ${repoCount === 1 ? "repository" : "repositories"}${demo && ws ? ` · ${ws.commits} commits` : ""}`}
-          {step === 2 && `${on.length} of ${svcs.length} services selected`}
+          {step === 2 && `${src?.services.length ?? 0} services`}
         </span>
         {step === 1 && !none && <button type="button" className="btn primary" onClick={() => setStep(2)}>Continue to services</button>}
-        {step === 2 && <button type="button" className="btn primary" disabled={!on.length} onClick={() => { setPct(0); setStep(3); }}>{demo ? "Build the first index" : "Show the build command"}</button>}
-        {building && <button type="button" className="btn" onClick={() => { setPct(0); setStep(2); toast("Cancelled. Nothing was written."); }}>Cancel the build</button>}
-        {step === 2 && manifest && <button type="button" className="btn" onClick={() => copy(yaml)}>Copy cartograph.yaml</button>}
+        {step === 1 && none && <button type="button" className="btn primary" onClick={back}>Choose another folder</button>}
+        {step === 2 && <button type="button" className="btn primary" onClick={build}>Build the first index</button>}
+        {failed && <button type="button" className="btn primary" onClick={build}>Build again</button>}
+        {building && <button type="button" className="btn" onClick={cancel}>Cancel the build</button>}
       </footer>
       <Toasts />
     </div>

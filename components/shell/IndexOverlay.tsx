@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Check, Copy, X } from "lucide-react";
 import { getCurrentWorkspace } from "@/lib/source";
 import type { Freshness } from "@/lib/model";
-import { copy } from "./IndexStatus";
+import { behindText, copy } from "./IndexStatus";
 import { toast } from "./toast";
 import { ago } from "./ago";
 import type { DemoIndexState } from "./useIndexState";
@@ -104,8 +104,8 @@ export function IndexBand({ state, freshness, onClose }: { state: DemoIndexState
     <div className="io-stale" role="status">
       <AlertTriangle size={18} aria-hidden className="io-stale-ic" />
       <p className="io-stale-t">
-        <b>{freshness.behind} commits behind HEAD</b>
-        <span> · {behind.map((r) => `${r.name} ${r.behind}`).join(", ")} · built {ago(freshness.builtAt)}. Links added since then aren&apos;t on the map. Search and Ask use the older index.</span>
+        <b>{behindText(freshness)} commits behind HEAD</b>
+        <span> · {behind.map((r) => `${r.name} ${r.behind}${r.capped ? "+" : ""}`).join(", ")} · built {ago(freshness.builtAt)}. Links added since then aren&apos;t on the map. Search and Ask use the older index.</span>
       </p>
       <div className="io-stale-cmd">
         <code><span aria-hidden>$ </span>{cmd}</code>
