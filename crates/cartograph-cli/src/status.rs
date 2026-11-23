@@ -7,6 +7,7 @@ use std::path::Path;
 
 use cartograph_core::{ExitCode, Report};
 use cartograph_discovery::setup;
+use cartograph_index::derive::{CoverageReport, coverage_report};
 use cartograph_index::freshness::{FreshnessReport, RepoFreshness, State, freshness};
 use serde_json::{Value, json};
 
@@ -15,7 +16,7 @@ use crate::output::Out;
 
 const NO_WORKSPACE: &str = "cartograph: no workspace here; run `cartograph init`";
 
-pub fn run(out: &Out, dir: &Path, check: bool, line: bool) -> Result<(), Report> {
+pub fn run(out: &Out, dir: &Path, check: bool, line: bool, unresolved: bool) -> Result<(), Report> {
     let report = match data_dir().and_then(|data| find(&data, dir)) {
         Ok(r) => r,
         // The hook runs in every session, in any folder: it never fails.
@@ -29,7 +30,7 @@ pub fn run(out: &Out, dir: &Path, check: bool, line: bool) -> Result<(), Report>
         out.print(&one_line(&report.0), json!({ "line": one_line(&report.0) }));
         return Ok(());
     }
-    let (report, not_added) = report;
+    let (report, not_added, cov) = report;
     let mut text = human(&report);
     if !not_added.is_empty() {
         text += &format!(
@@ -39,6 +40,32 @@ pub fn run(out: &Out, dir: &Path, check: bool, line: bool) -> Result<(), Report>
     }
     let mut j = to_json(&report);
     j["not_added"] = json!(not_added);
+    if let Some(c) = &cov {
+        text += &format!("\n{}", coverage_line(c));
+        if unresolved {
+            for (path, line, spec) in &c.unresolved {
+                text += &format!("\n  {path}:{line}  {spec}");
+            }
+            if c.dropped > 0 {
+                text += &format!("\n  and {} more, not kept", c.dropped);
+            }
+        }
+        j["coverage"] = json!({
+            "files_total": c.files_total,
+            "files_parsed": c.files_parsed,
+            "imports_total": c.imports_total,
+            "imports_resolved": c.imports_resolved,
+            "unresolved_count": c.unresolved.len() as i64 + c.dropped,
+        });
+        if unresolved {
+            // The specifier is repository text: untrusted (F8).
+            j["coverage"]["unresolved"] = c
+                .unresolved
+                .iter()
+                .map(|(path, line, spec)| json!({ "path": path, "line": line, "untrusted_text": spec }))
+                .collect();
+        }
+    }
     out.print(&text, j);
     if check && report.behind() {
         let n = report
@@ -56,8 +83,25 @@ pub fn run(out: &Out, dir: &Path, check: bool, line: bool) -> Result<(), Report>
     Ok(())
 }
 
-/// The report, and the manifest repos left out of sync because they aren't registered (F8).
-fn find(data: &Path, dir: &Path) -> Result<(FreshnessReport, Vec<String>), Report> {
+/// "files parsed x / y, imports resolved z%" (IDX-22).
+fn coverage_line(c: &CoverageReport) -> String {
+    let pct = if c.imports_total == 0 {
+        100.0
+    } else {
+        c.imports_resolved as f64 * 100.0 / c.imports_total as f64
+    };
+    format!(
+        "files parsed {} / {}, imports resolved {pct:.1}% ({} of {})",
+        c.files_parsed, c.files_total, c.imports_resolved, c.imports_total
+    )
+}
+
+/// The report, the manifest repos left out of sync because they aren't registered (F8), and the
+/// index's coverage when it has one.
+fn find(
+    data: &Path,
+    dir: &Path,
+) -> Result<(FreshnessReport, Vec<String>, Option<CoverageReport>), Report> {
     let applied = setup::locate(data, dir)
         .map_err(|e| Report::from_error(&e))?
         .ok_or_else(|| Report {
@@ -73,7 +117,10 @@ fn find(data: &Path, dir: &Path) -> Result<(FreshnessReport, Vec<String>), Repor
             action: p.action,
             exit_code: ExitCode::Error,
         })?;
-    Ok((freshness(&ws), not_added))
+    let cov = cartograph_store::Index::open_read(&ws.index_path())
+        .ok()
+        .and_then(|ix| coverage_report(&ix.conn).ok().flatten());
+    Ok((freshness(&ws), not_added, cov))
 }
 
 fn behind(r: &RepoFreshness) -> String {

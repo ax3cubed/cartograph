@@ -211,3 +211,168 @@ fn perf_ten_concurrent_syncs_give_one_writer() {
         "nine syncs should exit within 50 ms while one writes: {took:?}"
     );
 }
+
+/// Phase 3's read gates on I1's fixture (62 services, 60k files, 200k links) with ten years of
+/// weekly-ish commits across four repos added: the file-level slice cold and cached, search p95,
+/// ten years of weekly density, a service's metrics, impact over 10k dependents, and the graph's
+/// build. Counts hold everywhere; wall clock gates only in an optimised build.
+#[test]
+fn perf_reads_on_60k_files_and_200k_links() {
+    use cartograph_api::types::{Bin, GraphParams};
+    use cartograph_query::{At, GraphQuery, ImpactInput, Limits, SearchQuery, Store};
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("scale.cartograph");
+    let ix = cartograph_fixtures::scale::indexed(&path);
+    // 17,207 commits (the acme example) over ten years, round-robin over four repos.
+    const COMMITS: i64 = 17_207;
+    let start = 1_420_070_400; // 2015-01-01
+    let step = 10 * 365 * 86_400 / COMMITS;
+    ix.conn
+        .execute_batch(
+            "BEGIN; INSERT INTO repo (id, name, path, shallow) VALUES (2, 'b', '/b', 0),
+               (3, 'c', '/c', 0), (4, 'd', '/d', 0);
+             UPDATE commits SET time = 1420070400, corrected_time = 1420070400;",
+        )
+        .unwrap();
+    for s in 1..COMMITS {
+        let t = start + s * step;
+        ix.conn
+            .execute(
+                "INSERT INTO commits VALUES (?1, ?2, ?3, ?4, ?4, 'a', 's')",
+                cartograph_store::rusqlite::params![s, 1 + s % 4, s.to_be_bytes().to_vec(), t],
+            )
+            .unwrap();
+    }
+    ix.conn
+        .execute_batch("COMMIT; PRAGMA wal_checkpoint(TRUNCATE);")
+        .unwrap();
+    drop(ix);
+    let fast = optimised();
+    let ms = |t: Instant| t.elapsed().as_secs_f64() * 1e3;
+
+    // The file-level slice at the first commit, where every file and link is live.
+    let store = Store::open_path(&path).unwrap();
+    let q = GraphQuery::from_params(&GraphParams {
+        at: Some("2015-01-01".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let t = Instant::now();
+    let slice = store
+        .snapshot(Limits::default())
+        .unwrap()
+        .graph(&q)
+        .unwrap();
+    let cold = ms(t);
+    assert_eq!(slice.nodes.id.len(), 60_000);
+    assert!(slice.links.id.len() > 190_000, "{}", slice.links.id.len());
+    let mut cached = f64::MAX;
+    for _ in 0..5 {
+        let t = Instant::now();
+        let again = store
+            .snapshot(Limits::default())
+            .unwrap()
+            .graph(&q)
+            .unwrap();
+        cached = cached.min(ms(t));
+        assert_eq!(again.links.id.len(), slice.links.id.len());
+    }
+    record("graph_file_slice_cold_ms", cold, 500.0, "ms");
+    record("graph_file_slice_cached_ms", cached, 50.0, "ms");
+
+    let snap = store.snapshot(Limits::default()).unwrap();
+    // The in-memory graph, built once per generation (SRV-11: under 300 ms).
+    let t = Instant::now();
+    let m = snap.metrics("n1", &At::Now).unwrap();
+    let build = ms(t);
+    record("adjacency_build_ms", build, 300.0, "ms");
+    assert!(m.links > 0);
+
+    // Search p95 over 40 queries, ranked FTS then substring hits.
+    let mut times = Vec::new();
+    for q in [
+        "invoice repo",
+        "order",
+        "PaymentClient",
+        "voice",
+        "svc52/m300",
+        "Ledger store",
+    ] {
+        for _ in 0..7 {
+            let sq = SearchQuery::from_params(Some(q), None, None, None, Some(20)).unwrap();
+            let t = Instant::now();
+            let r = snap.search(&sq).unwrap();
+            times.push(ms(t));
+            assert!(!r.results.is_empty(), "{q}");
+        }
+    }
+    times.sort_by(f64::total_cmp);
+    let p95 = times[times.len() * 95 / 100];
+    record("search_p95_ms", p95, 30.0, "ms");
+    let top = snap
+        .search(&SearchQuery::from_params(Some("invoice repo"), None, None, None, Some(3)).unwrap())
+        .unwrap();
+    assert!(
+        top.results.iter().any(|r| r.name == "InvoiceRepo.ts"),
+        "{top:?}"
+    );
+
+    // Ten years of weekly bins, stacked by repo.
+    let mut density = f64::MAX;
+    for _ in 0..5 {
+        let t = Instant::now();
+        let dn = snap.density(None, None, Bin::Week).unwrap();
+        density = density.min(ms(t));
+        assert!(dn.bins.len() >= 520, "{}", dn.bins.len());
+        assert_eq!(
+            dn.bins.iter().map(|b| b.commits as i64).sum::<i64>(),
+            COMMITS
+        );
+        assert_eq!(dn.repos.len(), 4);
+    }
+    record("density_10y_weekly_ms", density, 30.0, "ms");
+
+    // A service's metrics (about 1,000 files; the scan covers every link whatever the size).
+    let mut metrics = f64::MAX;
+    for _ in 0..5 {
+        let t = Instant::now();
+        snap.metrics("n7", &At::Now).unwrap();
+        metrics = metrics.min(ms(t));
+    }
+    record("metrics_service_ms", metrics, 30.0, "ms");
+
+    // Impact from one service reaches well over 10k dependents.
+    let mut impact = f64::MAX;
+    let mut reached = 0;
+    for _ in 0..5 {
+        let t = Instant::now();
+        let r = snap
+            .impact(&ImpactInput::Nodes(vec!["n1".into()]), &At::Now)
+            .unwrap();
+        impact = impact.min(ms(t));
+        reached = r.exact.len();
+    }
+    assert!(reached >= 10_000, "{reached} dependents");
+    record("impact_10k_dependents_ms", impact, 20.0, "ms");
+
+    if !fast {
+        eprintln!("wall-clock gates skipped in a debug build; CI's perf job runs them");
+        return;
+    }
+    assert!(cold < 500.0, "a cold file-level slice took {cold:.1} ms");
+    assert!(
+        cached < 50.0,
+        "a cached file-level slice took {cached:.1} ms"
+    );
+    assert!(build < 300.0, "the graph took {build:.1} ms to build");
+    assert!(p95 < 30.0, "search p95 {p95:.1} ms");
+    assert!(
+        density < 30.0,
+        "ten years of weekly density took {density:.1} ms"
+    );
+    assert!(metrics < 30.0, "a service's metrics took {metrics:.1} ms");
+    assert!(
+        impact < 20.0,
+        "impact over {reached} dependents took {impact:.1} ms"
+    );
+}

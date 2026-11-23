@@ -4,9 +4,14 @@
 //! command resolves the data folder, starts logging or opens an index only once it runs. There is
 //! no async runtime here; `serve`, `open` and `mcp --http` bring their own when they land.
 
+mod agents;
 mod app;
+mod doctor;
+mod hooks;
 mod init;
+mod mcp;
 mod output;
+mod schedule;
 mod status;
 mod sync;
 mod verify;
@@ -136,6 +141,13 @@ enum Command {
         /// Run in the background and return at once.
         #[arg(long)]
         background: bool,
+        /// Every registered workspace, one after another (what the hourly schedule runs).
+        #[arg(long, conflicts_with_all = ["background", "dir"])]
+        all_workspaces: bool,
+        /// The git hook's arguments (IDX-26): a file checkout or a rebase in progress starts
+        /// nothing.
+        #[arg(long, hide = true, requires = "background", value_name = "ARGS")]
+        hook_args: Option<String>,
     },
     /// Each repo's indexed commit, its HEAD and how far behind it is.
     Status {
@@ -147,6 +159,9 @@ enum Command {
         /// One line with counts and fixed words only, for a session-start hook.
         #[arg(long)]
         line: bool,
+        /// List every import that didn't resolve, with its file and line.
+        #[arg(long, conflicts_with = "line")]
+        unresolved: bool,
     },
     /// Index one repository's history (temporary single-repo form, IDX-07).
     Index {
@@ -203,8 +218,11 @@ enum Command {
     Tool {
         /// The tool's name.
         name: String,
-        /// The tool's arguments, as JSON.
+        /// The tool's arguments, as JSON [default: read from stdin].
         args: Option<String>,
+        /// Print the structured JSON, or the Markdown an agent reads.
+        #[arg(long, value_enum, default_value = "json")]
+        format: Format,
         #[command(flatten)]
         dir: Dir,
     },
@@ -345,8 +363,13 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
                 }),
             );
         }
-        Command::Status { dir, check, line } => {
-            status::run(out, &named(&g, dir.or_cwd()), check, line)?;
+        Command::Status {
+            dir,
+            check,
+            line,
+            unresolved,
+        } => {
+            status::run(out, &named(&g, dir.or_cwd()), check, line, unresolved)?;
         }
         Command::Index {
             dir,
@@ -380,6 +403,8 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
             fetch,
             wait,
             background,
+            all_workspaces,
+            hook_args,
         } => sync::run(
             out,
             &named(&g, dir.or_cwd()),
@@ -387,9 +412,54 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
                 fetch,
                 wait,
                 background,
+                all_workspaces,
+                hook_args,
             },
             &g,
         )?,
+        Command::Hooks { action, dir } => hooks::run(out, &named(&g, dir.or_cwd()), action)?,
+        Command::Schedule { action } => schedule::run(out, action)?,
+        Command::Mcp {
+            list: true,
+            http: false,
+            ..
+        } => mcp::list(out),
+        Command::Mcp {
+            dir,
+            http: false,
+            list: false,
+        } => mcp::serve(&dir.or_cwd(), g.verbose)?,
+        Command::Tool {
+            name,
+            args,
+            format,
+            dir,
+        } => mcp::tool(&name, args, format, &dir.or_cwd())?,
+        Command::Impact {
+            reference,
+            working_tree,
+            wait: _,
+            format,
+            dir,
+        } => mcp::impact(reference.as_deref(), working_tree, format, &dir.or_cwd())?,
+        Command::Agents {
+            action,
+            project,
+            per_repo,
+            shared,
+            dir,
+        } => agents::run(
+            out,
+            &named(&g, dir.or_cwd()),
+            action,
+            cartograph_server::agents::Scope {
+                project,
+                per_repo,
+                shared,
+            },
+            g.yes,
+        )?,
+        Command::Doctor { dir, fix } => doctor::run(out, &named(&g, dir.or_cwd()), fix)?,
         _ => return Err(not_built(name)),
     }
     Ok(())

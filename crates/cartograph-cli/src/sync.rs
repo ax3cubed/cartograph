@@ -18,6 +18,8 @@ pub struct Flags {
     pub fetch: bool,
     pub wait: bool,
     pub background: bool,
+    pub all_workspaces: bool,
+    pub hook_args: Option<String>,
 }
 
 /// The registered workspace covering `dir` (IDX-11): the registry is the allow-list, so only its
@@ -41,6 +43,20 @@ fn workspace(data: &Path, dir: &Path) -> Result<Workspace, Report> {
 
 pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
     let data = data_dir()?;
+    if f.all_workspaces {
+        return all(out, &data, &f, g);
+    }
+    // A git hook (IDX-26): a file checkout or a rebase in progress starts nothing, not even the
+    // lock try.
+    if let Some(args) = &f.hook_args
+        && crate::hooks::skip(dir, args)
+    {
+        out.print(
+            "skipped: a file checkout or a rebase in progress",
+            json!({ "background": "skipped" }),
+        );
+        return Ok(());
+    }
     let ws = workspace(&data, dir)?;
     let explain = |e: &dyn cartograph_core::Explain| Report::from_error(e);
     if f.background {
@@ -103,6 +119,18 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
     if s.dirty_left {
         human += "\nmore commits arrived than one run takes; the next sync continues";
     }
+    let (files_total, files_parsed, imports_total, imports_resolved) = s.coverage;
+    if s.steps > 0 {
+        let pct = if imports_total == 0 {
+            100.0
+        } else {
+            imports_resolved as f64 * 100.0 / imports_total as f64
+        };
+        human += &format!(
+            "\nfiles parsed {files_parsed} / {files_total}, imports resolved {pct:.1}% \
+             (`cartograph status --unresolved` lists the rest)"
+        );
+    }
     out.print(
         &human,
         json!({
@@ -117,9 +145,57 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
             "duplicate_packages": s.duplicate_packages,
             "fetch_failed": s.fetch_failed,
             "dirty_left": s.dirty_left,
+            "coverage": { "files_total": files_total, "files_parsed": files_parsed,
+                          "imports_total": imports_total, "imports_resolved": imports_resolved },
+            "derived_rebuilt": s.derived.rebuilt(),
             "ms": { "total": s.total_ms, "rehydrate": s.rehydrate_ms, "walk": s.walk_ms,
                     "replay": s.replay_ms },
         }),
     );
+    Ok(())
+}
+
+/// `sync --all-workspaces` (IDX-27): every registered workspace, one after another. One that fails
+/// or whose writer is busy doesn't stop the rest; a busy one has its dirty flag set, so its running
+/// sync does one more round.
+fn all(out: &Out, data: &Path, f: &Flags, g: &Global) -> Result<(), Report> {
+    let _guard = logging::init(&data.join("logs"), g.verbose).ok();
+    let cache_path = paths::facts_cache(data);
+    let mut cache = FactCache::open(&cache_path).map_err(|e| Report {
+        what: format!("can't open the fact cache at {}", cache_path.display()),
+        why: e.to_string(),
+        action: format!("delete {}; it is only a cache", cache_path.display()),
+        exit_code: ExitCode::Error,
+    })?;
+    let opts = SyncOptions {
+        fetch: f.fetch,
+        wait: false,
+        ..SyncOptions::default()
+    };
+    let mut lines = Vec::new();
+    let mut rows = Vec::new();
+    for id in cartograph_server::workspace_ids(data) {
+        let (word, detail) = match cartograph_server::workspace(data, &id) {
+            Err(p) => ("failed", p.what),
+            Ok(ws) => match sync(&ws, &opts, &mut cache) {
+                Ok(SyncOutcome::AlreadyRunning) => ("busy", String::new()),
+                Ok(SyncOutcome::Synced(s)) if s.fetch_failed.is_empty() => {
+                    ("synced", format!("{} commits", s.steps))
+                }
+                Ok(SyncOutcome::Synced(s)) => (
+                    "synced",
+                    format!(
+                        "{} commits; fetch failed: {}",
+                        s.steps,
+                        s.fetch_failed.join(", ")
+                    ),
+                ),
+                Err(e) => ("failed", cartograph_core::Explain::what(&e)),
+            },
+        };
+        lines.push(format!("{id}: {word} {detail}").trim_end().to_owned());
+        rows.push(json!({ "workspace": id, "outcome": word, "detail": detail }));
+    }
+    out.print(&lines.join("\n"), json!({ "workspaces": rows }));
     Ok(())
 }
