@@ -94,12 +94,35 @@ fn a_commit_starts_one_background_sync_and_remove_restores_the_hooks() {
     let text = ok(&cartograph(&data, &["hooks", "install", dir]));
     assert!(text.contains("app: installed"), "{text}");
     ok(&cartograph(&data, &["hooks", "install", dir]));
+    // Git 2.54+ (CI's runner) takes config-based hooks and leaves the hook files alone.
+    let config_hooks = {
+        let v = f.git(&["--version"]);
+        let mut n = v
+            .trim_start_matches("git version ")
+            .split('.')
+            .map(|p| p.parse::<u32>().unwrap_or(0));
+        (n.next().unwrap_or(0), n.next().unwrap_or(0)) >= (2, 54)
+    };
     let merge = std::fs::read_to_string(f.dir.join(".git/hooks/post-merge")).unwrap();
-    assert_eq!(
-        merge.matches("# cartograph:start").count(),
-        1,
-        "installing twice is one block"
-    );
+    if config_hooks {
+        assert_eq!(merge, own, "a config install leaves hook files alone");
+        let events = f.git(&["config", "--local", "--get-all", "hook.cartograph.event"]);
+        let mut seen: Vec<_> = events.lines().collect();
+        let all = seen.len();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(
+            seen.len(),
+            all,
+            "installing twice adds no event twice: {events}"
+        );
+    } else {
+        assert_eq!(
+            merge.matches("# cartograph:start").count(),
+            1,
+            "installing twice is one block"
+        );
+    }
     assert!(ok(&cartograph(&data, &["hooks", "status", dir])).contains("app: installed"));
 
     let before = indexed_commits(&data, &ws);
