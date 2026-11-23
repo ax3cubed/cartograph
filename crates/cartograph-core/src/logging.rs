@@ -14,7 +14,15 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Installs the global subscriber. Keep the guard alive until exit, or buffered lines are lost.
 pub fn init(log_dir: &Path, verbose: u8) -> std::io::Result<WorkerGuard> {
-    std::fs::create_dir_all(log_dir)?;
+    // The first command to run (often `open` or `index`, before any `init`) creates the data
+    // folder here. Both folders are user-only (B1), including ones an earlier version created under
+    // the default umask: a folder other users can't enter keeps the log files private whatever
+    // mode the appender gives them.
+    crate::paths::create_private_dir(log_dir)?;
+    crate::paths::restrict_dir(log_dir)?;
+    if let Some(parent) = log_dir.parent().filter(|p| !p.as_os_str().is_empty()) {
+        crate::paths::restrict_dir(parent)?;
+    }
     let file = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_prefix("cartograph")
@@ -44,4 +52,29 @@ pub fn init(log_dir: &Path, verbose: u8) -> std::io::Result<WorkerGuard> {
     // A second init (tests, embedded use) keeps the first subscriber.
     let _ = registry.try_init();
     Ok(guard)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn the_data_and_log_folders_are_user_only_even_when_they_existed() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let root =
+            std::env::temp_dir().join(format!("cartograph-log-{}-{nanos}", std::process::id()));
+        let data = root.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        // As an earlier `cartograph open` under umask 022 left it.
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let guard = super::init(&data.join("logs"), 0).unwrap();
+        for dir in [data.clone(), data.join("logs")] {
+            let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "{}", dir.display());
+        }
+        drop(guard);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
