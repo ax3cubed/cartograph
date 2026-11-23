@@ -97,14 +97,19 @@ export type ErrorCode =
   | "bad_request"
   | "unauthorized"
   | "forbidden_origin"
+  | "forbidden_host"
   | "not_found"
+  | "method_not_allowed"
+  | "ambiguous"
   | "conflict"
   | "precondition_failed"
   | "payload_too_large"
   | "unsupported_media_type"
   | "unprocessable"
+  | "too_large"
   | "too_many_requests"
   | "index_unavailable"
+  | "timeout"
   | "internal";
 /**
  * Level of detail of a graph slice.
@@ -755,6 +760,10 @@ export interface Problem {
  * via the `definition` "CreateWorkspace".
  */
 export interface CreateWorkspace {
+  /**
+   * Also write `cartograph.yaml` in the workspace folder (C7); never overwrites one.
+   */
+  manifest?: boolean;
   name?: string | null;
   path: string;
   workspace_file?: string | null;
@@ -917,15 +926,17 @@ export interface RepoBehind {
   repo: RepoId;
 }
 /**
- * `GET /api/v1/fs/list`: names and three flags only (ruling R25).
+ * `GET /api/v1/fs/list`: names and three flags only (ruling R25). The list reads only the folder
+ * asked for, never inside a child, so listing home can't raise macOS privacy prompts for Desktop,
+ * Documents or Downloads; the flags are null (unknown) and a folder is read when it is opened.
  *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "FsEntry".
  */
 export interface FsEntry {
-  has_children: boolean;
-  has_workspace_file: boolean;
-  is_repo: boolean;
+  has_children?: boolean | null;
+  has_workspace_file?: boolean | null;
+  is_repo?: boolean | null;
   name: string;
 }
 /**
