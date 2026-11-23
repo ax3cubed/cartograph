@@ -5,6 +5,7 @@ import { ChevronLeft } from "lucide-react";
 import type { Answer, Handle } from "@/lib/ask";
 import { fmtDay } from "./format";
 import "./ask.css";
+import { fmtNum } from "@/lib/date";
 
 const WHY: Record<string, string> = {
   impact: "the question asks what breaks if something changes",
@@ -52,7 +53,7 @@ export default function Inspector({ answer, onClose }: { answer: Answer; onClose
             <div className="ask-step"><span>1</span><span><b>Plan.</b> Classed as {answer.plan ?? "none"}, because {WHY[answer.plan ?? "none"]}.</span></div>
             <div className="ask-step"><span>2</span><span><b>Seed.</b> {ctx.seeds.length ? `${ctx.seeds.length} named in the question, matched by exact name.` : "Nothing in the question matched a name."}</span></div>
             <div className="ask-step"><span>3</span><span><b>Expand.</b> {ctx.tools.length ? ctx.tools.map((t) => t.tool).join(", ") : "No tools ran"}. Found {nodes} nodes and {links} links.</span></div>
-            <div className="ask-step"><span>4</span><span><b>Assemble.</b> Sent {ctx.tokens.toLocaleString("en-GB")} of {ctx.budget.toLocaleString("en-GB")} tokens. {ctx.leftOut} nodes left out.</span></div>
+            <div className="ask-step"><span>4</span><span><b>Assemble.</b> Sent {fmtNum(ctx.tokens)} of {fmtNum(ctx.budget)} tokens. {ctx.leftOut} nodes left out.</span></div>
             <div className="ask-step"><span>5</span><span><b>Check.</b> {st ? `${st.kept} citations kept, ${st.dropped} dropped, ${st.unsupported} of ${st.sentences} sentences with no checked source.` : "Not run. This is the map's own wording."}</span></div>
           </section>
 
@@ -76,8 +77,8 @@ export default function Inspector({ answer, onClose }: { answer: Answer; onClose
               {ctx.blocks.map((b, i) => <span key={b.name} className={`ask-b${i}`} style={{ width: `${(b.tokens / ctx.budget) * 100}%` }} />)}
             </div>
             <ul className="ask-legend">
-              {ctx.blocks.map((b, i) => <li key={b.name}><span className={`ask-sw ask-b${i}`} />{b.name} {b.tokens.toLocaleString("en-GB")}</li>)}
-              <li>{ctx.tokens.toLocaleString("en-GB")} of {ctx.budget.toLocaleString("en-GB")} tokens</li>
+              {ctx.blocks.map((b, i) => <li key={b.name}><span className={`ask-sw ask-b${i}`} />{b.name} {fmtNum(b.tokens)}</li>)}
+              <li>{fmtNum(ctx.tokens)} of {fmtNum(ctx.budget)} tokens</li>
             </ul>
             <details>
               <summary>System prompt</summary>

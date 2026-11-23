@@ -35,7 +35,7 @@ assert.ok(buildMessages(ask("hello", now), now, true)[1].content.length > msgs[1
 console.log("ai ok");
 
 // demo data reconciles
-import { getContracts, getCoverage, getEntrypoints, getFreshness, getOwners, getRepos, getWorkspaces, getCommitImpact, search } from "./source.ts";
+import { getContracts, getCoverage, getEntrypoints, getFreshness, getOwners, getRepos, getWorkspaces, search } from "./source.ts";
 import { NODES, COMMITS } from "./workspace.ts";
 import { chipText, levelOf } from "./model.ts";
 const ws = getWorkspaces()[0];
@@ -52,7 +52,6 @@ for (const o of ops) for (const c of o.callers) assert.equal(c.confidence.level,
 for (const r of getCoverage()) assert.ok(r.done <= r.total, `${r.id} done <= total`);
 assert.equal(chipText({ level: "likely", score: 0.62, evidence: [] }), "Likely · 0.62");
 assert.ok(LINKS.some((l) => l.confidence), "some links carry a confidence");
-assert.equal(getCommitImpact("3e0d7a2")!.removedLinks.length, 1, "3e0d7a2 removed the createInvoice to tax link");
 assert.ok(search("checkout").length > 0 && search("zzzz").length === 0);
 console.log("demo ok");
 

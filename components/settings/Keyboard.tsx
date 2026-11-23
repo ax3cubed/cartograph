@@ -56,7 +56,7 @@ export default function Keyboard() {
           <span className="set-kb-warn">{conflicts.length} conflict{conflicts.length > 1 ? "s" : ""}: {conflicts[0].keys.map((k) => <kbd key={k}>{k}</kbd>)} is also a browser shortcut for {conflictOf(conflicts[0].keys)}</span>
           <button type="button" className="set-btn is-sm is-line set-kb-warn-btn" aria-label={`Resolve conflict: change shortcut for ${conflicts[0].what}`} onClick={() => start(conflicts[0].id)}>Change shortcut</button>
         </>}
-        <button type="button" className="set-btn is-sm is-line" aria-label="Reset all shortcuts to defaults" onClick={() => { commit(DEFAULT_SHORTCUTS); setRec(null); setMsg("All shortcuts are back to their defaults."); }}>Reset to defaults</button>
+        <button type="button" className="set-btn is-sm is-line" aria-label="Reset to defaults: all shortcuts" onClick={() => { commit(DEFAULT_SHORTCUTS); setRec(null); setMsg("All shortcuts are back to their defaults."); }}>Reset to defaults</button>
       </>}
     >
       <p className="set-status" role="status" aria-live="polite">{msg}</p>

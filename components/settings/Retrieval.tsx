@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CHUNKS, SECRET_HITS } from "@/lib/demo/settings";
 import { Advanced, Chip, SettingsPage, Switch, useFileDraft } from "./ui";
 import "./retrieval.css";
+import { fmtNum } from "@/lib/date";
 
 const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 interface Prefs { on: string[]; scan: boolean; embed: "nomic" | "none" }
@@ -42,13 +43,13 @@ export default function Retrieval() {
             ))}
           </div>
           <div className="set-ret-sum">
-            <span>{entries.toLocaleString("en")} entries. {embeds ? `A full build takes about ${mins} ${mins === 1 ? "minute" : "minutes"}. After that, only changed files are processed.` : "Nothing is embedded, so a rebuild is quick."}</span>
+            <span>{fmtNum(entries)} entries. {embeds ? `A full build takes about ${mins} ${mins === 1 ? "minute" : "minutes"}. After that, only changed files are processed.` : "Nothing is embedded, so a rebuild is quick."}</span>
             <button type="button" className="set-btn" aria-expanded={confirm} aria-controls="set-ret-confirm" onClick={() => setConfirm(!confirm)}>Rebuild</button>
           </div>
           {confirm && (
             <div id="set-ret-confirm" className="set-confirm" role="alertdialog" aria-labelledby="set-ret-ct" aria-describedby="set-ret-cd">
               <b id="set-ret-ct">Rebuild search?</b>
-              <p id="set-ret-cd">This processes all {entries.toLocaleString("en")} entries again{embeds ? ` and takes about ${mins} ${mins === 1 ? "minute" : "minutes"}` : ""}. Rebuild uses your saved choices, so save first if you changed any.</p>
+              <p id="set-ret-cd">This processes all {fmtNum(entries)} entries again{embeds ? ` and takes about ${mins} ${mins === 1 ? "minute" : "minutes"}` : ""}. Rebuild uses your saved choices, so save first if you changed any.</p>
               <div className="set-actions">
                 <button type="button" className="set-btn is-primary" onClick={() => { setConfirm(false); setMsg("Rebuild confirmed. In this demo nothing is rebuilt until the local server runs it."); }}>Rebuild search</button>
                 <button type="button" className="set-btn" onClick={() => setConfirm(false)}>Keep current search</button>

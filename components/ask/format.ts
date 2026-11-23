@@ -1,7 +1,8 @@
 import type { Part } from "@/lib/ask";
 import { byId, commitBySha } from "@/lib/workspace";
+import { fmtDate } from "@/lib/date";
 
-export const fmtDay = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+export const fmtDay = (ms: number) => fmtDate(ms, "dmy");
 export const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 /** Plain text of engine parts. */

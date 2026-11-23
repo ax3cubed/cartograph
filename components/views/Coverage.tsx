@@ -8,6 +8,7 @@ import { UNRESOLVED } from "@/lib/demo/views-extra";
 import { AsideTop, Cell, Chip, KeyHint, NodeLink, Page, ViewSplit, mapHref, pathOf, useHashState, useRoving } from "./shared";
 import { specRisk } from "./risk";
 import "./coverage.css";
+import { fmtNum } from "@/lib/date";
 
 const BACK = "/coverage";
 /** Each fix button is named for the place it opens. */
@@ -58,7 +59,7 @@ export default function Coverage() {
                   <span className="cov-label">{r.label}</span>
                   <b>{fmt(p)}</b>
                   <div className="cov-bar" role="progressbar" aria-label={r.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(p)}><i style={{ width: `${p}%` }} data-miss={miss || undefined} /></div>
-                  <span className="view-muted cov-small">{r.done.toLocaleString()} of {r.total.toLocaleString()}{r.target !== undefined ? ` · target ${r.target}%` : ""}</span>
+                  <span className="view-muted cov-small">{fmtNum(r.done)} of {fmtNum(r.total)}{r.target !== undefined ? ` · target ${r.target}%` : ""}</span>
                   <span className={`cov-small cov-status ${r.target === undefined ? "view-muted" : miss ? "view-warn" : "cov-ok"}`}>{r.target === undefined ? "No target set" : miss ? "Below target" : "Meets target"}</span>
                 </li>
               );
@@ -94,7 +95,7 @@ export default function Coverage() {
                   <div key={g.id} className="cov-gap view-row" {...rv.row(g.id)}>
                     <Cell className="view-mono cov-n">{g.total - g.done}</Cell>
                     <Cell className="cov-what"><b>{sentence(g.gap!.what)}</b><span className="view-muted view-cell">{g.gap!.why}</span></Cell>
-                    <Link className="btn view-btn" tabIndex={-1} href={FIX[g.id]?.href ?? "/settings/indexing"}>{FIX[g.id]?.label ?? "Open indexing settings"}</Link>
+                    <span role="gridcell"><Link className="btn view-btn" tabIndex={-1} href={FIX[g.id]?.href ?? "/settings/indexing"}>{FIX[g.id]?.label ?? "Open indexing settings"}</Link></span>
                   </div>
                 ))}
               </div>

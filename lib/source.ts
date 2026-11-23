@@ -2,7 +2,7 @@
 // Decision A1: these become fetches to the local Rust API, so callers should treat them as async-shaped
 // (read once, keep in state) and never call them in render loops.
 import type {
-  ActivityItem, AskTurn, Commit, CommitImpact, Concept, Correction, CoverageRow, Entrypoint,
+  ActivityItem, AskTurn, Commit, Concept, Correction, CoverageRow, Entrypoint,
   Freshness, McpTool, Owner, Provider, Repo, SearchResult, Spec, WorkspaceSummary,
 } from "./model.ts";
 import { COMMITS, NODES, WORKSPACE } from "./workspace.ts";
@@ -10,7 +10,6 @@ import { ACTIVITY, CORRECTIONS, FRESHNESS, NOW, OWNERS, REPOS, WORKSPACES } from
 import { SPECS } from "./demo/contracts.ts";
 import { CONCEPTS, COVERAGE, ENTRYPOINTS } from "./demo/views.ts";
 import { ASK_HISTORY, MCP_TOOLS, PROVIDERS } from "./demo/ai.ts";
-import { commitImpact } from "./demo/impact.ts";
 
 /** Demo switches. `noWorkspace` makes the app behave as on first run (D2): no indexes, so /welcome is shown. */
 export const demo = { noWorkspace: false };
@@ -28,7 +27,6 @@ export const getCorrections = (): Correction[] => CORRECTIONS;
 export const getOwners = (): Owner[] => OWNERS;
 export const getActivity = (): ActivityItem[] => ACTIVITY;
 export const getCommits = (): Commit[] => COMMITS;
-export const getCommitImpact = (sha: string): CommitImpact | undefined => commitImpact(sha);
 export const getMcpTools = (): McpTool[] => MCP_TOOLS;
 export const getProviders = (): Provider[] => PROVIDERS;
 export const getAskHistory = (): AskTurn[] => ASK_HISTORY;

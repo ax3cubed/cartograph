@@ -4,19 +4,20 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useRouter } from "next/navigation";
 import { usePath } from "./usePath";
 import { ArrowRight, Clock, Search } from "lucide-react";
-import { search } from "@/lib/source";
-import type { SearchResult } from "@/lib/model";
-import { serviceColor } from "@/lib/workspace";
+import type { Node, SearchResult } from "@/lib/api";
+import { load } from "@/lib/api/cache";
+import { nodeRoute, useLoaded, useSearch, useStructure, useWorkspaces } from "@/lib/api/live";
 import "./searchPalette.css";
 
+// FE-10: …/search on the index, grouped by kind, with board G05's "did you mean" when nothing matched.
 type Kind = SearchResult["kind"];
 const GROUPS: { kind: Kind; label: string }[] = [
   { kind: "service", label: "Services" }, { kind: "module", label: "Modules" }, { kind: "file", label: "Files" },
-  { kind: "concept", label: "Concepts" }, { kind: "operation", label: "Operations" },
+  { kind: "symbol", label: "Symbols" }, { kind: "concept", label: "Concepts" }, { kind: "operation", label: "Operations" },
 ];
-const PER_GROUP = 5; // the All scope shows the top rows of each kind; a kind scope shows them all
-const KEY = "cartograph.recent-search";
-const loadRecent = (): SearchResult[] => { try { return JSON.parse(localStorage.getItem(KEY) ?? "[]"); } catch { return []; } };
+const PER_GROUP = 12; // the All scope shows the top rows of each kind; a kind scope shows them all
+const KEY = "cartograph.recent-search"; // ids only (FE-10): names are read back from the index
+const loadRecent = (): string[] => { try { const v = JSON.parse(localStorage.getItem(KEY) ?? "[]"); return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []; } catch { return []; } };
 
 const Hit = ({ text, q }: { text: string; q: string }) => {
   const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
@@ -34,7 +35,13 @@ export default function SearchPalette({ open, onClose, onPick }: { open: boolean
   const [q, setQ] = useState("");
   const [scope, setScope] = useState<"all" | Kind>("all");
   const [cur, setCur] = useState(0);
-  const [recent, setRecent] = useState<SearchResult[]>([]);
+  const [recentIds, setRecent] = useState<string[]>([]);
+  const ws = useWorkspaces().current?.id;
+  const recent = useLoaded(ws, open && recentIds.length ? `recent:${recentIds.join(",")}` : null, async () => {
+    const got = await Promise.all(recentIds.map((id) => load<{ node: Node }>(ws!, nodeRoute(ws, id)!).then((d) => d.node, () => null)));
+    return got.filter((n): n is Node => !!n).map((n): SearchResult => ({ id: n.id, kind: n.kind === "workspace" ? "service" : (n.kind as Kind), name: n.name, path: n.path, service: n.service }));
+  }).data ?? [];
+  const svc = useStructure(open ? ws : undefined).data?.services;
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
@@ -42,7 +49,8 @@ export default function SearchPalette({ open, onClose, onPick }: { open: boolean
   }, [open]);
 
   const term = q.trim();
-  const all = useMemo(() => search(q, 200), [q]);
+  const found = useSearch(ws, q);
+  const all = useMemo(() => found.data?.results ?? [], [found.data]);
   const counts = useMemo(() => Object.fromEntries(GROUPS.map((g) => [g.kind, all.filter((h) => h.kind === g.kind).length])) as Record<Kind, number>, [all]);
   // flat list in display order: this is what the arrow keys walk
   const rows = useMemo(() => {
@@ -55,7 +63,7 @@ export default function SearchPalette({ open, onClose, onPick }: { open: boolean
   useEffect(() => { document.getElementById(`sp-${cur}`)?.scrollIntoView({ block: "nearest" }); }, [cur]);
 
   const pick = (h: SearchResult) => {
-    try { localStorage.setItem(KEY, JSON.stringify([h, ...loadRecent().filter((r) => r.id !== h.id)].slice(0, 5))); } catch { /* storage can be blocked */ }
+    try { localStorage.setItem(KEY, JSON.stringify([h.id, ...loadRecent().filter((r) => r !== h.id)].slice(0, 5))); } catch { /* storage can be blocked */ }
     onPick?.(h.id, h.kind);
     onClose();
   };
@@ -77,7 +85,8 @@ export default function SearchPalette({ open, onClose, onPick }: { open: boolean
       setScope(tabs[(i + (e.shiftKey ? -1 : 1) + tabs.length) % tabs.length].kind);
     }
   };
-  const near = term && !rows.length ? search(term.split(/\s+/)[0].slice(0, 5), 1)[0] : undefined; // "did you mean": a prefix match on the first word
+  const near = term && !rows.length && !found.loading ? found.data?.near ?? undefined : undefined;
+  const hue = (h: SearchResult) => { const k = svc?.findIndex((x) => x.id === h.service) ?? -1; return k >= 0 && k < 6 ? `var(--hue-${k + 1})` : "var(--steel)"; };
 
   let lastGroup = "";
   return (
@@ -86,18 +95,18 @@ export default function SearchPalette({ open, onClose, onPick }: { open: boolean
         <Search size={18} aria-hidden />
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={key} placeholder="Search services, files, concepts or operations" aria-label="Search"
           role="combobox" aria-expanded="true" aria-controls="sp-list" aria-activedescendant={rows.length ? `sp-${cur}` : undefined} autoComplete="off" spellCheck={false} />
-        {term && <span className="sh-sp-n" aria-live="polite">{all.length} {all.length === 1 ? "match" : "matches"}</span>}
+        {term && <span className="sh-sp-n" aria-live="polite">{found.loading && !found.data ? "Searching…" : `${all.length} ${all.length === 1 ? "match" : "matches"}`}</span>}
       </div>
       {term && all.length > 0 && (
         <div className="sh-sp-tabs" role="tablist" aria-label="Result kind">
           {tabs.map((t) => <button key={t.kind} type="button" role="tab" tabIndex={-1} aria-selected={scope === t.kind} onClick={() => setScope(t.kind)}>{t.label} {t.n}</button>)}
         </div>
       )}
-      {term && !rows.length ? (
+      {term && !rows.length && !found.loading ? (
         <div className="sh-sp-none">
           <b>No match for “{term}”</b>
           <span>Search covers names and paths in the open index, not what's inside files. Ask can look further.</span>
-          {near && <><span className="sh-k">Did you mean</span><button type="button" className="sh-sp-row" onClick={() => pick(near)}><Dot h={near} /><span className="sh-sp-t"><span>{near.name}</span><span className="sh-sp-p">{near.path}</span></span><span /></button></>}
+          {near && <><span className="sh-k">Did you mean</span><button type="button" className="sh-sp-row" onClick={() => pick(near)}><Dot h={near} c={hue(near)} /><span className="sh-sp-t"><span>{near.name}</span><span className="sh-sp-p">{near.path}</span></span><span /></button></>}
           <button type="button" className="sh-sp-ask" onClick={askAbout}><ArrowRight size={16} aria-hidden />Ask “Where is {term}?”</button>
         </div>
       ) : (
@@ -109,7 +118,7 @@ export default function SearchPalette({ open, onClose, onPick }: { open: boolean
               <li key={h.id} role="presentation">
                 {head && <div className="sh-k sh-sp-grp">{!term && <Clock size={12} aria-hidden />}{head}</div>}
                 <div id={`sp-${i}`} role="option" aria-selected={i === cur} className="sh-sp-row" onMouseMove={() => setCur(i)} onClick={() => pick(h)}>
-                  <Dot h={h} />
+                  <Dot h={h} c={hue(h)} />
                   <span className="sh-sp-t"><span><Hit text={h.name} q={term} /></span><span className="sh-sp-p">{h.path}</span></span>
                   <span className="sh-sp-kind">{h.kind}</span>
                 </div>
@@ -126,8 +135,7 @@ export default function SearchPalette({ open, onClose, onPick }: { open: boolean
   );
 }
 
-/** Domain hue comes from data (the service colour); files get a ring, as on the map. */
-const Dot = ({ h }: { h: SearchResult }) => {
-  const c = h.service ? serviceColor(h.service) : "var(--accent)";
+/** The service's hue, as on the map; files get a ring. */
+const Dot = ({ h, c }: { h: SearchResult; c: string }) => {
   return <span className={`sh-sp-dot ${h.kind === "file" ? "is-ring" : ""}`} style={{ "--c": c } as React.CSSProperties} aria-hidden />;
 };

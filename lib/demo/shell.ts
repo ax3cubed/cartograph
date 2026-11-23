@@ -38,8 +38,3 @@ export const freshnessFor = (state: "stale" | "failed"): Freshness => {
     error: { what: "northwind index can't be read", action: "Rebuild the index with the command below." },
   };
 };
-
-/** Where each Activity row leads. Rows not listed here lead nowhere, so they render as plain text. */
-export const ACTIVITY_HREF: Record<string, string> = {
-  a1: "/settings/indexing", a2: "/#focus=billing", a3: "/settings/repositories", a4: "/contracts",
-};
