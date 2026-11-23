@@ -1,5 +1,5 @@
-import Atlas from "@/components/Atlas";
+import MapRoute from "@/components/map/LiveMap";
 
 export default function Page() {
-  return <Atlas />;
+  return <MapRoute />;
 }

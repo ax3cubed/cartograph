@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { THEME_BOOT } from "@/lib/theme";
 import { AskFloatHost } from "@/components/ask/Float"; // the floating chat on every route; the map mounts its own
+import SessionGate from "@/components/shell/Session"; // FE-03: the session token, and the "open from the CLI" screen
 import "./tw.css"; // first, so its layer order is declared before globals.css uses @layer base
 import "./globals.css";
 
@@ -19,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${sora.variable} ${mono.variable}`} data-theme="dark" suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} /></head>
-      <body>{children}<AskFloatHost /></body>
+      <body><SessionGate>{children}<AskFloatHost /></SessionGate></body>
     </html>
   );
 }
