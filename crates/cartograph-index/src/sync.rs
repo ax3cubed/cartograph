@@ -908,9 +908,23 @@ fn put_snapshot(ws: &Workspace, fact_hash: &str, seq: i64, replay: &Replay) {
     }
     let mut bytes = snapshot_header(fact_hash, seq).into_bytes();
     bytes.extend(replay.snapshot());
-    if let Err(e) = cartograph_core::paths::write_private(&ws.snapshot_path(), &bytes) {
+    // No fsync: the snapshot is a cache. A torn file fails its decode or the tree check in
+    // `Replay::restore`, and the sync then resolves the tree again.
+    if let Err(e) = write_cache(&ws.snapshot_path(), &bytes) {
         tracing::warn!(error = %e, "can't write the replay snapshot; the next sync resolves the tree again");
     }
+}
+
+/// Writes `bytes` user-only through a temp file and a rename, without fsync.
+fn write_cache(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(&tmp)?.write_all(bytes)?;
+    std::fs::rename(&tmp, path)
 }
 
 /// The synthetic step that closed a removed folder's files ([`Rows::removal`]): it is not a

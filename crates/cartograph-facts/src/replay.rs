@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use cartograph_parse::manifest::{is_package_json, resolution_json};
 use cartograph_parse::{BlobFacts, Fact, extractor_for};
 use oxc_resolver::{ResolveError, ResolveOptions, ResolverGeneric, TsconfigDiscovery};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::fs::{FsState, ReplayFs, to_abs, to_rel};
@@ -106,13 +106,13 @@ pub struct Replay {
     tree: HashMap<String, Arc<BlobFacts>>,
     refs: Vec<Option<Ref>>,
     free: Vec<usize>,
-    by_file: HashMap<String, Vec<usize>>,
+    by_file: FxHashMap<String, Vec<usize>>,
     /// The reverse index: key -> references waiting on it.
-    waiting: HashMap<Arc<str>, FxHashSet<usize>>,
+    waiting: FxHashMap<Arc<str>, FxHashSet<usize>>,
     /// Package name -> the package.json paths declaring it.
-    pkgs: HashMap<String, BTreeSet<String>>,
-    counts: HashMap<Link, u32>,
-    open_at: HashMap<Link, u64>,
+    pkgs: FxHashMap<String, BTreeSet<String>>,
+    counts: FxHashMap<Link, u32>,
+    open_at: FxHashMap<Link, u64>,
     touched: HashMap<Link, bool>,
     /// Intervals closed so far; the writer drains them.
     pub closed: Vec<Interval>,
@@ -139,11 +139,11 @@ impl Replay {
             tree: HashMap::new(),
             refs: Vec::new(),
             free: Vec::new(),
-            by_file: HashMap::new(),
-            waiting: HashMap::new(),
-            pkgs: HashMap::new(),
-            counts: HashMap::new(),
-            open_at: HashMap::new(),
+            by_file: FxHashMap::default(),
+            waiting: FxHashMap::default(),
+            pkgs: FxHashMap::default(),
+            counts: FxHashMap::default(),
+            open_at: FxHashMap::default(),
             touched: HashMap::new(),
             closed: Vec::new(),
             stats: Stats::default(),
@@ -358,7 +358,8 @@ impl Replay {
     pub fn restore(tree: &[Change], at: u64, snapshot: &[u8]) -> Option<Self> {
         let snap: Snapshot = postcard::from_bytes(snapshot).ok()?;
         let s = |i: u32| snap.strings.get(i as usize).map(String::as_str);
-        let mut saved: HashMap<(&str, &str), usize> = HashMap::with_capacity(snap.refs.len());
+        let mut saved: FxHashMap<(&str, &str), usize> =
+            FxHashMap::with_capacity_and_hasher(snap.refs.len(), Default::default());
         for (p, r) in snap.refs.iter().enumerate() {
             saved.insert((s(r.from)?, s(r.spec)?), p);
         }
@@ -386,6 +387,15 @@ impl Replay {
                 replay.bump(l.clone(), 1);
             }
             replay.refs[id].as_mut()?.outcome = outcome;
+        }
+        let mut per_ref = vec![0usize; snap.refs.len()];
+        for (_, ps) in &snap.waiting {
+            for p in ps {
+                *per_ref.get_mut(*p as usize)? += 1;
+            }
+        }
+        for (p, n) in per_ref.into_iter().enumerate() {
+            replay.refs[id_of[p]].as_mut()?.keys.reserve_exact(n);
         }
         replay.waiting.reserve(snap.waiting.len());
         for (k, ps) in &snap.waiting {
@@ -643,7 +653,7 @@ fn outcome(
     from: &str,
     spec: &str,
     res: Result<oxc_resolver::Resolution, ResolveError>,
-    pkgs: &HashMap<String, BTreeSet<String>>,
+    pkgs: &FxHashMap<String, BTreeSet<String>>,
     keys: &mut Vec<String>,
 ) -> Outcome {
     match res {
@@ -669,7 +679,7 @@ fn outcome(
 /// the file system and the resolution rule with the replay, and none of its incremental state.
 pub fn from_scratch(tree: &HashMap<String, Arc<BlobFacts>>) -> BTreeSet<Link> {
     let mut st = FsState::default();
-    let mut pkgs: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let mut pkgs: FxHashMap<String, BTreeSet<String>> = FxHashMap::default();
     let mut scratch = Vec::new();
     for (path, f) in tree {
         let Some((_, kind)) = extractor_for(path) else {
