@@ -15,7 +15,7 @@ use crate::branch::valid_branch;
 
 pub const FILE_NAME: &str = "cartograph.yaml";
 pub const SCHEMA_FILE_NAME: &str = "cartograph.schema.json";
-/// The input cap, which with serde_yaml_ng's own alias limit bounds an alias bomb.
+/// The input cap, which with serde_norway's own alias limit bounds an alias bomb.
 pub const MAX_MANIFEST: usize = 1024 * 1024;
 pub const VERSION: u32 = 1;
 
@@ -150,7 +150,7 @@ pub fn parse(text: &str) -> Result<Parsed, Invalid> {
             "remove what isn't needed; cartograph.yaml lists repos and services, not data",
         ));
     }
-    let located = |e: serde_yaml_ng::Error, fix: &str| {
+    let located = |e: serde_norway::Error, fix: &str| {
         let (line, column) = e.location().map_or((0, 0), |l| (l.line(), l.column()));
         Invalid {
             line,
@@ -159,7 +159,7 @@ pub fn parse(text: &str) -> Result<Parsed, Invalid> {
             fix: fix.into(),
         }
     };
-    let value: serde_json::Value = serde_yaml_ng::from_str(text)
+    let value: serde_json::Value = serde_norway::from_str(text)
         .map_err(|e| located(e, "fix the YAML syntax at that place"))?;
     match value.get("version").and_then(serde_json::Value::as_u64) {
         Some(1) => {}
@@ -176,7 +176,7 @@ pub fn parse(text: &str) -> Result<Parsed, Invalid> {
             ));
         }
     }
-    let manifest: Manifest = serde_yaml_ng::from_str(text)
+    let manifest: Manifest = serde_norway::from_str(text)
         .map_err(|e| located(e, "compare the key with cartograph.schema.json"))?;
     validate(&manifest)?;
     let mut warnings = Vec::new();
@@ -340,7 +340,7 @@ fn validate(m: &Manifest) -> Result<(), Invalid> {
 pub fn to_yaml(m: &Manifest) -> String {
     let mut out = String::new();
     out.push_str("# Written by `cartograph init`. Commit it, so teammates index the same repos.\n");
-    out.push_str(&serde_yaml_ng::to_string(m).expect("a manifest serialises"));
+    out.push_str(&serde_norway::to_string(m).expect("a manifest serialises"));
     out
 }
 
@@ -560,7 +560,7 @@ services:
         let validator = jsonschema::validator_for(&schema).unwrap();
         let m = parse(GOOD).unwrap().manifest;
         let yaml = to_yaml(&m);
-        let as_json: serde_json::Value = serde_yaml_ng::from_str(&yaml).unwrap();
+        let as_json: serde_json::Value = serde_norway::from_str(&yaml).unwrap();
         let errors: Vec<String> = validator
             .iter_errors(&as_json)
             .map(|e| e.to_string())
