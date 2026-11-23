@@ -1,0 +1,179 @@
+---
+source: fixtures/gen/tests/golden.rs
+expression: text
+---
+sha256:a784dd7fb60cfaa8a30f3041c2a2d58e870c90addadb6db547799496e62850e2
+
+extractor manifest-js/package 1.0.0
+extractor ts-imports/ts 1.0.0
+commit 8d678bc77ab1862ab17c7b3ebda988e553a4b7b2 Maya Okafor: gateway: initial routes and auth guard
+commit fda302c012cb587288c0ef9f7c76a76d388160c0 Jon Reyes: auth: token issuance and JWT signer
+commit 63a072c36673e35e1843ea369078afbc8afbe2c1 Priya Natarajan: catalog: products API over Postgres
+commit 8f3068b62d1e906280291898e6f0a0f83d813692 Maya Okafor: gateway: proxy product routes to catalog
+commit 02b9441b26ff4985c9194a3b67ecae73ce4a10c5 Tom Ellery: billing: invoice creation and Stripe adapter
+commit 345cfdec7658d340e02496976614ebc3404fb0b3 Sade Bello: shared: event bus and schemas
+commit f1fb1eff79fa20b56354d8f2bcc6e174410b3020 Tom Ellery: billing: publish payment events
+commit 4796dcc66514a47c09d759c287d6befdd7f19bcb Sade Bello: notifications: receipts on payment events
+commit 25eb1bb08f965b8bbb1f5e7c9ad7860bbee02375 Priya Natarajan: catalog: pricing rules with regional tax
+commit d11095ec59587ec2d1432d7a380d30a72111b2bb Maya Okafor: gateway: checkout route calls billing
+commit 29ae30f2c6196b5ee0b4d5a9a2daa8c691e0d383 Sade Bello: shared: money/currency helpers
+commit f5a70a7dec5e62c8fb9af55f45570c4eae110f49 Tom Ellery: billing: refunds
+commit 73043b9895178d3849bffd99b18d9180929034ef Jon Reyes: auth: move session store to Redis
+commit 7a5d15a08aa8e84e579bae9cffc5bae5e42d27ff Maya Okafor: gateway: per-token rate limiting
+commit 1fc17c8a82cef67dcfda5534c7db828d632c061e Priya Natarajan: catalog: search endpoint
+commit 892e8032d1adc7aac2d526add97f78d3c853fa4b Tom Ellery: billing: render invoice PDFs
+commit 348b7e0e32b257439f7ab4e916ae8892663c3339 Sade Bello: notifications: SMS channel and user events
+commit 16cc0c399d40553b436416d169f33a7d2b8bac43 Maya Okafor: gateway: drop direct read of catalog DB
+commit f31fe1da3147156dd03f9faada6cb32cea78d0c2 Tom Ellery: billing: charge uses shared money type
+commit 334ff090de3de9805a4a30b1b4d5d68fb4a5a779 Priya Natarajan: catalog: tax reads currency rules from shared
+commit 4d01489399343b7e95e97f1543164ec1b8fba8e6 Jon Reyes: auth: emit user.created event
+commit e28b948c5abccb0dfe7419554a242c64f0f20ad7 Tom Ellery: billing: invoices price via catalog API, not its tables
+path api-gateway/package.json 8d678bc77ab1 -
+path api-gateway/src/clients/authClient.ts 8d678bc77ab1 -
+path api-gateway/src/clients/billingClient.ts d11095ec5958 -
+path api-gateway/src/clients/catalogClient.ts 8f3068b62d1e -
+path api-gateway/src/middleware/authGuard.ts 8d678bc77ab1 -
+path api-gateway/src/middleware/rateLimit.ts 7a5d15a08aa8 -
+path api-gateway/src/routes/checkout.ts d11095ec5958 -
+path api-gateway/src/routes/orders.ts 8d678bc77ab1 -
+path api-gateway/src/routes/products.ts 8f3068b62d1e -
+path billing-service/package.json 02b9441b26ff -
+path billing-service/src/events/publisher.ts f1fb1eff79fa -
+path billing-service/src/invoices/createInvoice.ts 02b9441b26ff -
+path billing-service/src/invoices/pdf.ts 892e8032d1ad -
+path billing-service/src/payments/charge.ts 02b9441b26ff -
+path billing-service/src/payments/refund.ts f5a70a7dec5e -
+path billing-service/src/payments/stripeAdapter.ts 02b9441b26ff -
+path notifications/package.json 4796dcc66514 -
+path notifications/src/channels/email.ts 4796dcc66514 -
+path notifications/src/channels/sms.ts 348b7e0e32b2 -
+path notifications/src/consumers/paymentEvents.ts 4796dcc66514 -
+path notifications/src/consumers/userEvents.ts 348b7e0e32b2 -
+path package.json 8d678bc77ab1 -
+path shared-libs/package.json 8d678bc77ab1 -
+path shared-libs/src/events/bus.ts 345cfdec7658 -
+path shared-libs/src/events/schema.ts 345cfdec7658 -
+path shared-libs/src/logger/index.ts 8d678bc77ab1 -
+path shared-libs/src/money/currency.ts 29ae30f2c619 -
+version api-gateway/package.json 951428d3d169 8d678bc77ab1 -
+version api-gateway/src/clients/authClient.ts 636e23c8dff9 fda302c012cb -
+version api-gateway/src/clients/authClient.ts e1be6e7ef928 8d678bc77ab1 fda302c012cb
+version api-gateway/src/clients/billingClient.ts 7d8d80562a54 d11095ec5958 -
+version api-gateway/src/clients/catalogClient.ts 9c5666b6be72 8f3068b62d1e 1fc17c8a82ce
+version api-gateway/src/clients/catalogClient.ts ea12badebbc3 1fc17c8a82ce -
+version api-gateway/src/middleware/authGuard.ts cff5fc790459 8d678bc77ab1 -
+version api-gateway/src/middleware/rateLimit.ts 338c83612e6e 7a5d15a08aa8 -
+version api-gateway/src/routes/checkout.ts 2eef7de46b74 d11095ec5958 -
+version api-gateway/src/routes/orders.ts 25bc740c61cb 8d678bc77ab1 d11095ec5958
+version api-gateway/src/routes/orders.ts dc598196b0f7 d11095ec5958 -
+version api-gateway/src/routes/products.ts ca0bfd38ad5f 8f3068b62d1e 16cc0c399d40
+version api-gateway/src/routes/products.ts fd07311001ed 16cc0c399d40 -
+version billing-service/package.json 1d751ab32cda 02b9441b26ff -
+version billing-service/src/events/publisher.ts ef7897dd7c40 f1fb1eff79fa -
+version billing-service/src/invoices/createInvoice.ts 0f1ddcf53a3e 02b9441b26ff 29ae30f2c619
+version billing-service/src/invoices/createInvoice.ts 435fe45000c6 892e8032d1ad e28b948c5abc
+version billing-service/src/invoices/createInvoice.ts 8727117715ee e28b948c5abc -
+version billing-service/src/invoices/createInvoice.ts a58672869a8e 29ae30f2c619 892e8032d1ad
+version billing-service/src/invoices/pdf.ts 8c857930f980 892e8032d1ad -
+version billing-service/src/payments/charge.ts 37b212340d4a f1fb1eff79fa f31fe1da3147
+version billing-service/src/payments/charge.ts ee04e5c38cb0 f31fe1da3147 -
+version billing-service/src/payments/charge.ts f8971a6e5641 02b9441b26ff f1fb1eff79fa
+version billing-service/src/payments/refund.ts ff4f04dc3818 f5a70a7dec5e -
+version billing-service/src/payments/stripeAdapter.ts 6d86d9fb202b 02b9441b26ff -
+version notifications/package.json d53249d4694e 4796dcc66514 -
+version notifications/src/channels/email.ts 252d519a9c8b 4796dcc66514 -
+version notifications/src/channels/sms.ts 80728fc68eb3 348b7e0e32b2 -
+version notifications/src/consumers/paymentEvents.ts 87c7e68df3fa 4796dcc66514 -
+version notifications/src/consumers/userEvents.ts 9bae0c70e8f3 348b7e0e32b2 -
+version package.json 6bbc0be7dbd0 8d678bc77ab1 -
+version shared-libs/package.json c69bbabd0c33 8d678bc77ab1 -
+version shared-libs/src/events/bus.ts 3b672c7b0077 345cfdec7658 -
+version shared-libs/src/events/schema.ts 10b99235997e 345cfdec7658 -
+version shared-libs/src/logger/index.ts cd1b28e0326e 8d678bc77ab1 -
+version shared-libs/src/money/currency.ts 164ec5132535 29ae30f2c619 -
+fact 0f1ddcf53a3e ts-imports/ts import Esm "../payments/charge" 1:0-1:45
+fact 10b99235997e ts-imports/ts none
+fact 164ec5132535 ts-imports/ts none
+fact 1d751ab32cda manifest-js/package manifest exports = {"./*":"./src/*.ts"}
+fact 1d751ab32cda manifest-js/package manifest name = "@northwind/billing-service"
+fact 252d519a9c8b ts-imports/ts import Esm "@northwind/shared-libs/logger/index" 1:0-1:61
+fact 25bc740c61cb ts-imports/ts import Esm "../middleware/authGuard" 1:0-1:53
+fact 2eef7de46b74 ts-imports/ts import Esm "../clients/billingClient" 2:0-2:58
+fact 2eef7de46b74 ts-imports/ts import Esm "../middleware/authGuard" 1:0-1:53
+fact 338c83612e6e ts-imports/ts import Esm "./authGuard" 1:0-1:41
+fact 37b212340d4a ts-imports/ts import Esm "../events/publisher" 2:0-2:49
+fact 37b212340d4a ts-imports/ts import Esm "./stripeAdapter" 1:0-1:49
+fact 3b672c7b0077 ts-imports/ts import Esm "../logger/index" 2:0-2:41
+fact 3b672c7b0077 ts-imports/ts import Esm "./schema" 1:0-1:35
+fact 435fe45000c6 ts-imports/ts import Esm "../payments/charge" 1:0-1:45
+fact 435fe45000c6 ts-imports/ts import Esm "./pdf" 4:0-4:29
+fact 435fe45000c6 ts-imports/ts import Esm "@northwind/shared-libs/money/currency" 3:0-3:66
+fact 636e23c8dff9 ts-imports/ts none
+fact 6bbc0be7dbd0 manifest-js/package manifest name = "northwind"
+fact 6d86d9fb202b ts-imports/ts none
+fact 7d8d80562a54 ts-imports/ts none
+fact 80728fc68eb3 ts-imports/ts none
+fact 8727117715ee ts-imports/ts import Esm "../payments/charge" 1:0-1:45
+fact 8727117715ee ts-imports/ts import Esm "./pdf" 3:0-3:29
+fact 8727117715ee ts-imports/ts import Esm "@northwind/shared-libs/money/currency" 2:0-2:66
+fact 87c7e68df3fa ts-imports/ts import Esm "../channels/email" 3:0-3:43
+fact 87c7e68df3fa ts-imports/ts import Esm "@northwind/shared-libs/events/bus" 1:0-1:57
+fact 87c7e68df3fa ts-imports/ts import Esm "@northwind/shared-libs/events/schema" 2:0-2:63
+fact 8c857930f980 ts-imports/ts none
+fact 951428d3d169 manifest-js/package manifest exports = {"./*":"./src/*.ts"}
+fact 951428d3d169 manifest-js/package manifest name = "@northwind/api-gateway"
+fact 9bae0c70e8f3 ts-imports/ts import Esm "../channels/email" 3:0-3:43
+fact 9bae0c70e8f3 ts-imports/ts import Esm "../channels/sms" 2:0-2:39
+fact 9bae0c70e8f3 ts-imports/ts import Esm "@northwind/shared-libs/events/bus" 1:0-1:57
+fact 9c5666b6be72 ts-imports/ts import Esm "@northwind/shared-libs/logger/index" 2:0-2:61
+fact a58672869a8e ts-imports/ts import Esm "../payments/charge" 1:0-1:45
+fact a58672869a8e ts-imports/ts import Esm "@northwind/shared-libs/money/currency" 3:0-3:66
+fact c69bbabd0c33 manifest-js/package manifest exports = {"./*":"./src/*.ts"}
+fact c69bbabd0c33 manifest-js/package manifest name = "@northwind/shared-libs"
+fact ca0bfd38ad5f ts-imports/ts import Esm "../clients/catalogClient" 1:0-1:58
+fact cd1b28e0326e ts-imports/ts none
+fact cff5fc790459 ts-imports/ts import Esm "../clients/authClient" 1:0-1:52
+fact cff5fc790459 ts-imports/ts import Esm "@northwind/shared-libs/logger/index" 2:0-2:61
+fact d53249d4694e manifest-js/package manifest exports = {"./*":"./src/*.ts"}
+fact d53249d4694e manifest-js/package manifest name = "@northwind/notifications"
+fact dc598196b0f7 ts-imports/ts import Esm "../clients/billingClient" 2:0-2:58
+fact dc598196b0f7 ts-imports/ts import Esm "../middleware/authGuard" 1:0-1:53
+fact e1be6e7ef928 ts-imports/ts none
+fact ea12badebbc3 ts-imports/ts import Esm "@northwind/shared-libs/logger/index" 2:0-2:61
+fact ee04e5c38cb0 ts-imports/ts import Esm "../events/publisher" 2:0-2:49
+fact ee04e5c38cb0 ts-imports/ts import Esm "./stripeAdapter" 1:0-1:49
+fact ee04e5c38cb0 ts-imports/ts import Esm "@northwind/shared-libs/money/currency" 3:0-3:66
+fact ef7897dd7c40 ts-imports/ts import Esm "@northwind/shared-libs/events/bus" 1:0-1:57
+fact ef7897dd7c40 ts-imports/ts import Esm "@northwind/shared-libs/events/schema" 2:0-2:63
+fact f8971a6e5641 ts-imports/ts import Esm "./stripeAdapter" 1:0-1:49
+fact fd07311001ed ts-imports/ts import Esm "../clients/catalogClient" 1:0-1:58
+fact ff4f04dc3818 ts-imports/ts import Esm "../events/publisher" 2:0-2:49
+fact ff4f04dc3818 ts-imports/ts import Esm "./stripeAdapter" 1:0-1:49
+link import api-gateway/src/clients/catalogClient.ts -> shared-libs/src/logger/index.ts 8f3068b62d1e -
+link import api-gateway/src/middleware/authGuard.ts -> api-gateway/src/clients/authClient.ts 8d678bc77ab1 -
+link import api-gateway/src/middleware/authGuard.ts -> shared-libs/src/logger/index.ts 8d678bc77ab1 -
+link import api-gateway/src/middleware/rateLimit.ts -> api-gateway/src/middleware/authGuard.ts 7a5d15a08aa8 -
+link import api-gateway/src/routes/checkout.ts -> api-gateway/src/clients/billingClient.ts d11095ec5958 -
+link import api-gateway/src/routes/checkout.ts -> api-gateway/src/middleware/authGuard.ts d11095ec5958 -
+link import api-gateway/src/routes/orders.ts -> api-gateway/src/clients/billingClient.ts d11095ec5958 -
+link import api-gateway/src/routes/orders.ts -> api-gateway/src/middleware/authGuard.ts 8d678bc77ab1 -
+link import api-gateway/src/routes/products.ts -> api-gateway/src/clients/catalogClient.ts 8f3068b62d1e -
+link import billing-service/src/events/publisher.ts -> shared-libs/src/events/bus.ts f1fb1eff79fa -
+link import billing-service/src/events/publisher.ts -> shared-libs/src/events/schema.ts f1fb1eff79fa -
+link import billing-service/src/invoices/createInvoice.ts -> billing-service/src/invoices/pdf.ts 892e8032d1ad -
+link import billing-service/src/invoices/createInvoice.ts -> billing-service/src/payments/charge.ts 02b9441b26ff -
+link import billing-service/src/invoices/createInvoice.ts -> shared-libs/src/money/currency.ts 29ae30f2c619 -
+link import billing-service/src/payments/charge.ts -> billing-service/src/events/publisher.ts f1fb1eff79fa -
+link import billing-service/src/payments/charge.ts -> billing-service/src/payments/stripeAdapter.ts 02b9441b26ff -
+link import billing-service/src/payments/charge.ts -> shared-libs/src/money/currency.ts f31fe1da3147 -
+link import billing-service/src/payments/refund.ts -> billing-service/src/events/publisher.ts f5a70a7dec5e -
+link import billing-service/src/payments/refund.ts -> billing-service/src/payments/stripeAdapter.ts f5a70a7dec5e -
+link import notifications/src/channels/email.ts -> shared-libs/src/logger/index.ts 4796dcc66514 -
+link import notifications/src/consumers/paymentEvents.ts -> notifications/src/channels/email.ts 4796dcc66514 -
+link import notifications/src/consumers/paymentEvents.ts -> shared-libs/src/events/bus.ts 4796dcc66514 -
+link import notifications/src/consumers/paymentEvents.ts -> shared-libs/src/events/schema.ts 4796dcc66514 -
+link import notifications/src/consumers/userEvents.ts -> notifications/src/channels/email.ts 348b7e0e32b2 -
+link import notifications/src/consumers/userEvents.ts -> notifications/src/channels/sms.ts 348b7e0e32b2 -
+link import notifications/src/consumers/userEvents.ts -> shared-libs/src/events/bus.ts 348b7e0e32b2 -
+link import shared-libs/src/events/bus.ts -> shared-libs/src/events/schema.ts 345cfdec7658 -
+link import shared-libs/src/events/bus.ts -> shared-libs/src/logger/index.ts 345cfdec7658 -
