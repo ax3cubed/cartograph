@@ -1,0 +1,32 @@
+/* lm-: the map on real data (FE-06), SVG path. Tokens from globals.css. */
+.lm { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.lm-bar { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.lm-at { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--muted); }
+.lm-at input { height: 34px; padding: 0 10px; border-radius: 8px; background: var(--slab); color: var(--text); border: 1px solid var(--line); color-scheme: dark light; }
+.lm-note { font-size: 0.8125rem; color: var(--muted); }
+.lm-note code { font-family: var(--font-mono), monospace; color: var(--text); }
+.lm-main { flex: 1; min-height: 0; display: flex; }
+.lm-canvas { flex: 1; min-width: 0; position: relative; display: flex; }
+.lm-svg { flex: 1; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.lm-msg { margin: auto; max-width: 460px; padding: 24px; text-align: center; color: var(--muted); font-size: 0.875rem; }
+.lm-msg b { color: var(--text); font-size: 1rem; }
+.lm-msg p { margin: 8px 0 0; line-height: 1.55; }
+.lm-group { fill: var(--slab); fill-opacity: 0.35; stroke: var(--line); vector-effect: non-scaling-stroke; }
+.lm-glabel { fill: var(--muted); text-anchor: middle; pointer-events: none; }
+.lm-link { stroke: var(--edge); stroke-opacity: 0.3; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.lm-dim .lm-link { stroke-opacity: 0.07; }
+.lm-dim .lm-link.is-on { stroke: var(--accent); stroke-opacity: 0.95; stroke-width: 1.4; }
+.lm-node { cursor: pointer; stroke: var(--canvas); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.lm-node.is-sel { stroke: var(--text); stroke-width: 2; }
+.lm-label { fill: var(--text); paint-order: stroke; stroke: var(--canvas); pointer-events: none; }
+.lm-panel { flex: none; width: 320px; max-width: 45vw; overflow: auto; padding: 16px 18px; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; gap: 12px; }
+.lm-panel h2 { margin: 0; font-size: 1.0625rem; overflow-wrap: anywhere; }
+.lm-path { margin: 0; color: var(--muted); font: 0.75rem var(--font-mono), monospace; overflow-wrap: anywhere; }
+.lm-panel h3 { margin: 0 0 6px; font-size: 0.8125rem; font-weight: 600; }
+.lm-panel h3 span { color: var(--muted); font-weight: 400; }
+.lm-panel ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.lm-panel li button { width: 100%; text-align: left; padding: 4px 6px; border-radius: 6px; font: 0.75rem var(--font-mono), monospace; color: var(--body); overflow-wrap: anywhere; }
+.lm-panel li button:hover, .lm-panel li button:focus-visible { background: var(--accent-soft); color: var(--text); }
+.lm-none { margin: 0; color: var(--muted); font-size: 0.75rem; }
+.lm-panel > .btn { align-self: flex-start; }
+@media (max-width: 700px) { .lm-main { flex-direction: column; } .lm-panel { width: auto; max-width: none; max-height: 45%; border-left: 0; border-top: 1px solid var(--line); } }
