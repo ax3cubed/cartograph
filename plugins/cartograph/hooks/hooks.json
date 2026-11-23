@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v cartograph >/dev/null 2>&1 && cartograph status --line 2>/dev/null; exit 0",
+            "timeout": 2
+          }
+        ]
+      }
+    ]
+  }
+}
