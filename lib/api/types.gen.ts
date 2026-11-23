@@ -158,6 +158,16 @@ export type JobKind = "sync" | "rebuild";
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "LineageVia".
+ */
+export type LineageVia = "add" | "rename_exact" | "rename_similar";
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "Change".
+ */
+export type Change = "added" | "removed";
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Layer".
  */
 export type Layer = "base" | "config" | "contract" | "correction" | "overlay";
@@ -181,6 +191,11 @@ export type Lang = "ts" | "js" | "go" | "py" | "php" | "other";
  * via the `definition` "OwnerKind".
  */
 export type OwnerKind = "team" | "person";
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "PathDirection".
+ */
+export type PathDirection = "forward" | "backward" | "mixed";
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Contrast".
@@ -442,7 +457,9 @@ export interface CartographApi {
   Job: Job;
   JobRequest: JobRequest;
   KeyWrite: KeyWrite;
+  Lineage: Lineage;
   Link: Link;
+  LinkChange: LinkChange;
   LinkDetail: LinkDetail;
   McpTool: McpTool;
   Meta: Meta;
@@ -455,6 +472,7 @@ export interface CartographApi {
   Provider: Provider;
   ProviderTest: ProviderTest;
   ProviderWrite: ProviderWrite;
+  RankedNode: RankedNode;
   Reach: Reach;
   ReadParams: ReadParams;
   Repo: Repo;
@@ -463,6 +481,7 @@ export interface CartographApi {
   RunEvent: RunEvent;
   RunRequest: RunRequest;
   SearchResult: SearchResult;
+  SearchResults: SearchResults;
   Selection: Selection;
   ServerEvent: ServerEvent;
   Service: Service;
@@ -1038,13 +1057,28 @@ export interface ImpactRequest {
   working_tree?: boolean | null;
 }
 /**
+ * What depends on the changed nodes, directly or not. A node's level is the weakest link on its
+ * strongest path from a changed node.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "ImpactResult".
  */
 export interface ImpactResult {
+  /**
+   * The nodes the input named or changed.
+   */
+  changed: NodeId[];
   exact: NodeId[];
   guessed: NodeId[];
   likely: NodeId[];
+  /**
+   * The services the affected nodes belong to.
+   */
+  services: NodeId[];
+  /**
+   * A resource cap (50k visited nodes, depth 12, 5 s) stopped the walk.
+   */
+  truncated: boolean;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -1095,6 +1129,36 @@ export interface JobRequest {
  */
 export interface KeyWrite {
   key: string;
+}
+/**
+ * One row of `…/nodes/{id}/history` (board G10): a path the node had, and how it got it.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "Lineage".
+ */
+export interface Lineage {
+  from: CommitRef;
+  path: string;
+  /**
+   * Percent of content kept, for `rename_similar`.
+   */
+  similarity?: number | null;
+  /**
+   * Null while the node still has this path.
+   */
+  to?: CommitRef | null;
+  via: LineageVia;
+}
+/**
+ * One row of `…/nodes/{id}/changes`: a commit that added or removed a link touching the scope.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "LinkChange".
+ */
+export interface LinkChange {
+  change: Change;
+  commit: Commit;
+  link: Link;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -1200,6 +1264,7 @@ export interface Owner {
  * via the `definition` "PathResult".
  */
 export interface PathResult {
+  direction: PathDirection;
   hops: Link[];
   /**
    * A path's level is its weakest hop.
@@ -1283,12 +1348,38 @@ export interface ProviderWrite {
   name: string;
 }
 /**
+ * One row of `…/nodes/{id}/ranking`: a file in the scope and how much depends on it (blast
+ * radius), as `lib/workspace.ts` `ranking` computes it.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "RankedNode".
+ */
+export interface RankedNode {
+  /**
+   * `used_by` now minus `used_by` 90 days before `at`.
+   */
+  delta: number;
+  node: Node;
+  /**
+   * Live links into the file at `at`.
+   */
+  used_by: number;
+  /**
+   * Live links out of it at `at`.
+   */
+  uses: number;
+}
+/**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Reach".
  */
 export interface Reach {
   links: LinkId[];
   nodes: NodeId[];
+  /**
+   * A resource cap stopped the walk.
+   */
+  truncated: boolean;
 }
 /**
  * Common read parameters. Every read takes them; each route documents which it honours.
@@ -1402,6 +1493,17 @@ export interface SearchResult {
   service?: NodeId | null;
 }
 /**
+ * `GET …/search`: the hits best first (bm25, then fan-in, then shorter paths), and when nothing
+ * matched, the nearest name (board G05's "did you mean").
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "SearchResults".
+ */
+export interface SearchResults {
+  near?: SearchResult | null;
+  results: SearchResult[];
+}
+/**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Selection".
  */
@@ -1481,12 +1583,20 @@ export interface ToolCall {
 export interface TimelineDensity {
   bin: Bin;
   bins: DensityBin[];
+  /**
+   * The repos `by_repo` counts, in that order (board G04 stacks by repo).
+   */
+  repos: RepoId[];
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "DensityBin".
  */
 export interface DensityBin {
+  /**
+   * Commits per repo, in the order of `TimelineDensity.repos`; empty in a node's series.
+   */
+  by_repo: number[];
   commits: number;
   links_added: number;
   links_removed: number;

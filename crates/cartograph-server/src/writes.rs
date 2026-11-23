@@ -251,7 +251,7 @@ fn discovery_error(e: &DiscoveryError) -> Response {
     bad(ErrorCode::Unprocessable, &e.what(), &e.why(), &e.action())
 }
 
-fn rows(plan: &setup::Plan) -> Vec<DiscoveredFolder> {
+pub(crate) fn rows(plan: &setup::Plan) -> Vec<DiscoveredFolder> {
     let mut out = Vec::new();
     for (r, m) in plan.resolution.repos.iter().zip(&plan.manifest.repos) {
         if r.scopes.is_empty() {

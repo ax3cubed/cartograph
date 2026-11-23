@@ -6,7 +6,7 @@
 //! becomes `index.changed`, a changed freshness becomes `freshness`, and a workspace that is behind
 //! gets a background sync (`ensure_fresh`, D1). With no stream open nothing polls.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -52,20 +52,13 @@ struct Jobs {
     spawned: HashMap<String, Instant>,
     /// What the ticker last saw per workspace: generation and freshness.
     seen: HashMap<String, (u64, String)>,
-    /// Per workspace, the (repo, tip) pairs of rewritten history a background sync was started
-    /// for: one automatic attempt per tip. Cleared once nothing is rewritten.
-    tried: HashMap<String, HashSet<(String, String)>>,
 }
 
-impl Jobs {
-    /// Records a background sync for these rewritten repos' tips; false when every one of them
-    /// already had its attempt (it is left for "Sync now" or `cartograph sync`).
-    fn first_try(&mut self, ws: &str, tips: Vec<(String, String)>) -> bool {
-        let tried = self.tried.entry(ws.to_owned()).or_default();
-        let before = tried.len();
-        tried.extend(tips);
-        tried.len() > before
-    }
+/// D1: the states a background sync brings current. Rewritten history is one of them: a sync
+/// replays from the merge base (IDX-19), so it ends current like any other. A repo force-pushed in
+/// a loop is bounded by the spawn rate, the dirty-round cap (IDX-15) and the fact cache.
+fn wants_sync(state: IndexState) -> bool {
+    matches!(state, IndexState::Behind | IndexState::Rewritten)
 }
 
 struct Entry {
@@ -311,23 +304,12 @@ impl App {
         self.ensure_fresh(ws, &fresh);
     }
 
-    /// D1: a workspace that is behind, with `auto_sync = background` and no job running, gets a
-    /// sync, at most one start per 2 s. So does rewritten history, once per tip a repo was
-    /// rewritten to: a repo still rewritten at that tip after its sync isn't retried every 2 s.
+    /// D1: a workspace that is behind or rewritten, with `auto_sync = background` and no job
+    /// running, gets a sync, at most one start per 2 s.
     pub(crate) fn ensure_fresh(self: &Arc<Self>, ws: &str, fresh: &Freshness) {
-        let rewritten = fresh.state == IndexState::Rewritten;
-        if matches!(fresh.state, IndexState::Current | IndexState::Behind) {
-            // Nothing is rewritten now: a later rewrite to a tip seen before is a new one.
-            self.live.jobs().tried.remove(ws);
-        }
-        if !(rewritten || fresh.state == IndexState::Behind) || !sync::auto_sync(&self.data_dir) {
+        if !wants_sync(fresh.state) || !sync::auto_sync(&self.data_dir) {
             return;
         }
-        let tips = if rewritten {
-            sync::rewritten_tips(&self.data_dir, ws)
-        } else {
-            Vec::new()
-        };
         {
             let mut jobs = self.live.jobs();
             if jobs.running.contains_key(ws)
@@ -335,7 +317,6 @@ impl App {
                     .spawned
                     .get(ws)
                     .is_some_and(|t| t.elapsed() < SPAWN_EVERY)
-                || (rewritten && !jobs.first_try(ws, tips))
             {
                 return;
             }
@@ -658,32 +639,12 @@ mod tests {
     }
 
     #[test]
-    fn rewritten_history_gets_one_background_sync_per_tip() {
-        let d = tempfile::tempdir().unwrap();
-        let app = Arc::new(app(d.path()));
-        let tip = |sha: &str| vec![("api".to_owned(), sha.to_owned())];
-        {
-            let mut jobs = app.live.jobs();
-            assert!(jobs.first_try("w", tip("a1")));
-            assert!(
-                !jobs.first_try("w", tip("a1")),
-                "still rewritten at that tip after its sync: left for Sync now"
-            );
-            assert!(jobs.first_try("w", tip("a2")), "rewritten again, elsewhere");
-            assert!(jobs.first_try("v", tip("a1")), "per workspace");
-            assert!(!jobs.first_try("w", Vec::new()));
-        }
-        // Once synced, a later rewrite back to a tip seen before is a new rewrite.
-        let current = Freshness {
-            state: IndexState::Current,
-            format_version: 1,
-            built_at: None,
-            behind: 0,
-            repos: Vec::new(),
-            progress: None,
-            error: None,
-        };
-        app.ensure_fresh("w", &current);
-        assert!(app.live.jobs().first_try("w", tip("a1")));
+    fn rewritten_history_gets_a_background_sync_like_behind() {
+        assert!(super::wants_sync(IndexState::Behind));
+        assert!(
+            super::wants_sync(IndexState::Rewritten),
+            "replayed from the merge base, not left for Sync now"
+        );
+        assert!(!super::wants_sync(IndexState::Current));
     }
 }

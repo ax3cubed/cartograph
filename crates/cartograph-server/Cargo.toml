@@ -13,6 +13,8 @@ cartograph-api.workspace = true
 cartograph-core.workspace = true
 cartograph-discovery.workspace = true
 cartograph-facts.workspace = true
+# SRV-08's /source reads one blob the index names.
+cartograph-git.workspace = true
 cartograph-index.workspace = true
 cartograph-query.workspace = true
 cartograph-store.workspace = true
@@ -22,10 +24,13 @@ futures-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 getrandom.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
 
 [build-dependencies]
@@ -34,7 +39,9 @@ brotli.workspace = true
 [dev-dependencies]
 # HD-04: golden API responses over the northwind fixture.
 cartograph-fixtures = { path = "../../fixtures/gen" }
-cartograph-git.workspace = true
+# SRV-15: every MCP result validates against its tool's outputSchema in a validator we didn't write.
+jsonschema.workspace = true
+proptest.workspace = true
 tempfile.workspace = true
 
 [lints]

@@ -200,6 +200,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/v1/w/{ws}/freshness", get(freshness))
         .route("/api/v1/w/{ws}/repos", get(repos))
         .route("/api/v1/w/{ws}/graph", get(graph))
+        .merge(crate::reads::router())
         .route("/api/v1/events", get(live::events))
         .route("/api/v1/w/{ws}/jobs", post(live::post_job))
         .route(
@@ -270,12 +271,46 @@ pub(crate) fn body<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, Re
     })
 }
 
+/// What a paged read answers: the rows, the cursor of the next page, and whether rows were left
+/// out for another reason (a cap).
+pub(crate) struct Answer<T> {
+    pub data: T,
+    pub next_cursor: Option<String>,
+    pub truncated: bool,
+}
+
+impl<T> From<cartograph_query::Paged<T>> for Answer<Vec<T>> {
+    fn from(p: cartograph_query::Paged<T>) -> Self {
+        Self {
+            data: p.rows,
+            next_cursor: p.next_cursor,
+            truncated: false,
+        }
+    }
+}
+
 /// Runs `f` on one snapshot of workspace `ws`, off the async threads, and answers with the
 /// envelope and the `Cartograph-Generation` and `Cartograph-State` headers.
-async fn read<T, F>(app: Arc<App>, ws: String, f: F) -> Response
+pub(crate) async fn read<T, F>(app: Arc<App>, ws: String, f: F) -> Response
 where
     T: Serialize + Send + 'static,
     F: FnOnce(&Snapshot<'_>) -> Result<T, QueryError> + Send + 'static,
+{
+    read_page(app, ws, move |s| {
+        f(s).map(|data| Answer {
+            data,
+            next_cursor: None,
+            truncated: false,
+        })
+    })
+    .await
+}
+
+/// [`read`] for an answer that may hold one page of several.
+pub(crate) async fn read_page<T, F>(app: Arc<App>, ws: String, f: F) -> Response
+where
+    T: Serialize + Send + 'static,
+    F: FnOnce(&Snapshot<'_>) -> Result<Answer<T>, QueryError> + Send + 'static,
 {
     let done = tokio::task::spawn_blocking(move || {
         let store = app.store(&ws)?;
@@ -291,7 +326,10 @@ where
     .await;
     match done {
         Ok(Ok((generation, state, data))) => {
-            let mut res = ok(generation, data);
+            let mut env = Envelope::new(generation, data.data);
+            env.next_cursor = data.next_cursor;
+            env.truncated = data.truncated;
+            let mut res = json(StatusCode::OK, &env);
             let h = res.headers_mut();
             h.insert("cartograph-generation", HeaderValue::from(generation));
             let state = serde_json::to_value(state)

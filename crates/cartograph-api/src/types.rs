@@ -501,6 +501,57 @@ pub struct LinkDetail {
     pub correction_id: Option<String>,
 }
 
+/// One row of `…/nodes/{id}/ranking`: a file in the scope and how much depends on it (blast
+/// radius), as `lib/workspace.ts` `ranking` computes it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RankedNode {
+    pub node: Node,
+    /// Live links into the file at `at`.
+    pub used_by: u32,
+    /// Live links out of it at `at`.
+    pub uses: u32,
+    /// `used_by` now minus `used_by` 90 days before `at`.
+    pub delta: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Change {
+    Added,
+    Removed,
+}
+
+/// One row of `…/nodes/{id}/changes`: a commit that added or removed a link touching the scope.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkChange {
+    pub commit: Commit,
+    pub link: Link,
+    pub change: Change,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LineageVia {
+    /// The path first appeared, or a structure node's span began.
+    Add,
+    /// Moved with the same blob.
+    RenameExact,
+    /// Moved with similar content; `similarity` says how similar.
+    RenameSimilar,
+}
+
+/// One row of `…/nodes/{id}/history` (board G10): a path the node had, and how it got it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Lineage {
+    pub path: String,
+    pub from: CommitRef,
+    /// Null while the node still has this path.
+    pub to: Option<CommitRef>,
+    pub via: LineageVia,
+    /// Percent of content kept, for `rename_similar`.
+    pub similarity: Option<u8>,
+}
+
 /// `[from_seq, to_seq)` on the merged first-parent timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Interval {
@@ -541,6 +592,14 @@ pub struct SearchResult {
     pub service: Option<NodeId>,
 }
 
+/// `GET …/search`: the hits best first (bm25, then fan-in, then shorter paths), and when nothing
+/// matched, the nearest name (board G05's "did you mean").
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SearchResults {
+    pub results: Vec<SearchResult>,
+    pub near: Option<SearchResult>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CommitImpact {
     pub commit: Commit,
@@ -563,6 +622,8 @@ pub enum Bin {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TimelineDensity {
     pub bin: Bin,
+    /// The repos `by_repo` counts, in that order (board G04 stacks by repo).
+    pub repos: Vec<RepoId>,
     pub bins: Vec<DensityBin>,
 }
 
@@ -572,6 +633,8 @@ pub struct DensityBin {
     pub commits: u32,
     pub links_added: u32,
     pub links_removed: u32,
+    /// Commits per repo, in the order of `TimelineDensity.repos`; empty in a node's series.
+    pub by_repo: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -599,11 +662,30 @@ pub struct ImpactRequest {
     pub since: Option<String>,
 }
 
+/// What depends on the changed nodes, directly or not. A node's level is the weakest link on its
+/// strongest path from a changed node.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ImpactResult {
+    /// The nodes the input named or changed.
+    pub changed: Vec<NodeId>,
     pub exact: Vec<NodeId>,
     pub likely: Vec<NodeId>,
     pub guessed: Vec<NodeId>,
+    /// The services the affected nodes belong to.
+    pub services: Vec<NodeId>,
+    /// A resource cap (50k visited nodes, depth 12, 5 s) stopped the walk.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PathDirection {
+    /// Each hop goes from a node to what it depends on.
+    Forward,
+    /// Each hop goes from a node to what depends on it.
+    Backward,
+    /// Hops in both directions.
+    Mixed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -611,12 +693,15 @@ pub struct PathResult {
     pub hops: Vec<Link>,
     /// A path's level is its weakest hop.
     pub level: ConfidenceLevel,
+    pub direction: PathDirection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Reach {
     pub nodes: Vec<NodeId>,
     pub links: Vec<LinkId>,
+    /// A resource cap stopped the walk.
+    pub truncated: bool,
 }
 
 // ---------------------------------------------------------------- views (A1-A5, S4, S5)
