@@ -24,10 +24,7 @@
 .fr-primary h2 { font-size: 1.375rem; }
 .fr-primary p { font-size: 0.875rem; }
 .fr-primary .sh-k { color: var(--accent-text, var(--accent)); }
-/* secondary: panel colour and a dashed edge, so body text keeps its contrast and the primary card stays the loudest */
-.fr-drop { border: 0; box-shadow: none; background: var(--panel); outline: 1.5px dashed var(--line2); outline-offset: -1.5px; }
-.fr-drop > svg, .fr-card:not(.fr-primary) > svg { color: var(--muted); }
-.fr-drop.is-over { outline-color: var(--accent); background: var(--accent-soft); }
+.fr-card:not(.fr-primary) > svg { color: var(--muted); }
 .fr-btn {
   display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border-radius: 99px;
   background: var(--slab); color: var(--text); font-weight: 600; font-size: 0.875rem; text-decoration: none;
@@ -39,3 +36,8 @@
 .fr-code code { flex: 1; } .fr-code code span { color: var(--faint); }
 .fr-code button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 8px; background: var(--slab); font-size: 0.75rem; }
 @media (max-width: 900px) { .fr-grid { grid-template-columns: minmax(0, 1fr); } .fr-primary { padding: 24px; } .fr-head h1 { font-size: 1.625rem; } }
+.fr-list { list-style: none; margin: 0; padding: 0; width: 100%; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.fr-list a { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; color: var(--text); text-decoration: none; }
+.fr-list a:hover, .fr-list a:focus-visible { background: var(--accent-soft); }
+.fr-list b { font-size: 0.875rem; font-weight: 600; }
+.fr-list span { font-size: 0.75rem; color: var(--muted); overflow-wrap: anywhere; }

@@ -7,6 +7,7 @@ import { getCurrentWorkspace, getWorkspaces } from "@/lib/source";
 import { usePopover } from "./usePopover";
 import { toast } from "./toast";
 import { rememberOrigin } from "./origin";
+import { pickWorkspace, useLive, useWorkspaces } from "@/lib/api/live";
 import "./workspaceSwitcher.css";
 
 const KEY = "cartograph.recent-indexes";
@@ -17,7 +18,9 @@ const initials = (n: string) => n.replace(/\.cartograph$/, "").split(/[-_ ]/).ma
 
 /** Decision I9 / board G01: the workspace menu. Recent indexes, open an index file, add a workspace, the demo workspace. */
 export default function WorkspaceSwitcher() {
-  const ws = getCurrentWorkspace();
+  const live = useLive();
+  const reg = useWorkspaces(); // FE-04: with the binary, the registry (C4) is the list, not localStorage
+  const ws = live ? reg.current : getCurrentWorkspace();
   const { open, setOpen, ref } = usePopover();
   const [recents, setRecents] = useState<Recent[]>([]);
   const menu = useRef<HTMLDivElement>(null);
@@ -44,12 +47,24 @@ export default function WorkspaceSwitcher() {
   return (
     <div className="sh-pop-wrap sh-ws-wrap" ref={ref}>
       <button type="button" className="sh-ws" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="sh-ws-text"><span>Workspace</span><b>{ws ? `${ws.name} · ${ws.repos} repos` : "No workspace"}</b></span>
+        <span className="sh-ws-text"><span>Workspace</span><b>{ws ? `${ws.name} · ${ws.repos} repos` : live && reg.loading ? "Loading…" : "No workspace"}</b></span>
         {ws?.demo && <span className="sh-chip sh-chip-demo">Demo data</span>}
         <ChevronDown size={14} aria-hidden className={open ? "sh-flip" : undefined} />
       </button>
       {open && (
         <div className="sh-pop sh-wsm" role="menu" aria-label="Workspaces" ref={menu} onKeyDown={nav}>
+          {live ? <>
+            <span className="sh-k">Workspaces</span>
+            {reg.error && <p className="sh-pop-note">{reg.error.what}. {reg.error.try_}</p>}
+            {/* ponytail: a plain list; virtualise past 50 when registries get that big (FE-04 Scale) */}
+            {reg.data?.map((w) => (
+              <button key={w.id} type="button" role="menuitem" className="sh-wsm-item" aria-current={w.id === ws?.id ? "true" : undefined} onClick={() => { pickWorkspace(w.id); setOpen(false); }}>
+                <span className="sh-wsm-badge">{initials(w.name)}</span>
+                <span className="sh-wsm-t"><b>{w.name}</b><small>{w.repos} repos · {w.path}</small></span>
+              </button>
+            ))}
+            <Link href="/welcome/add" role="menuitem" className="sh-wsm-act" onClick={() => { rememberOrigin(); setOpen(false); }}><FolderPlus size={17} aria-hidden />Add workspace…</Link>
+          </> : <>
           <span className="sh-k">Recent indexes</span>
           {recents.length === 0 && <p className="sh-pop-note">None yet. Indexes you open will be listed here.</p>}
           {recents.map((r) => (
@@ -74,6 +89,7 @@ export default function WorkspaceSwitcher() {
               <span className="sh-chip sh-chip-demo">Demo data</span>
             </Link>
           ))}
+          </>}
         </div>
       )}
     </div>

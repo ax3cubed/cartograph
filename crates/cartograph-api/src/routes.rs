@@ -158,7 +158,7 @@ pub fn routes() -> Vec<Route> {
         r("DELETE", "/api/v1/jobs/{id}", W, &[], None, Json(s::<Job>), "SRV-13", "Cancel a job (E5)"),
         r("GET", "/api/v1/activity", R, READ, None, Json(s::<Vec<ActivityItem>>), "SRV-13", "Activity list"),
         r("POST", "/api/v1/activity/read", W, &[], Some(s::<ActivityRead>), Empty, "SRV-13", "Mark activity read"),
-        r("GET", "/api/v1/fs/list", R, &["path"], None, Json(s::<Vec<FsEntry>>), "SRV-14", "Folder names and three flags (R25)"),
+        r("GET", "/api/v1/fs/list", R, &["path"], None, Json(s::<Vec<FsEntry>>), "SRV-14", "Folder names; the flags are unknown, children are never read (R25)"),
         r("POST", "/api/v1/discover", R, &[], Some(s::<DiscoverRequest>), Json(s::<Discovery>), "SRV-14", "The C1 and C2 resolution table. Changes nothing"),
         r("POST", "/api/v1/workspaces", W, &[], Some(s::<CreateWorkspace>), Json(s::<CreatedWorkspace>), "SRV-14", "Register a workspace and start its first index"),
         r("GET", "/api/v1/prefs", R, &[], None, Json(s::<Prefs>), "SRV-14", "Preferences (R1)"),

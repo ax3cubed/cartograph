@@ -7,8 +7,14 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 const OUT = "out";
-// style-src needs 'unsafe-inline': React writes style="" attributes (CSS variables, sizes) into the HTML.
-// ponytail: a style attribute can't run script; hashing each one ('unsafe-hashes') isn't worth it yet.
+// style-src keeps 'unsafe-inline' (checked in the phase 2 review). Hashes can't replace it cleanly:
+// - React writes style="" attributes into the export (664 on index.html, CSS variables and sizes).
+//   Attributes are only hashable with 'unsafe-hashes', one hash per distinct value.
+// - A client-side navigation keeps the first page's header, so every page's list would be the union.
+// - <style> elements inserted at run time (Radix's Select and ScrollArea, React 19 hoisted styles)
+//   aren't in out/ at build time, so they would be blocked with nothing but a console error.
+// What it allows is CSS, never script; CSS can't send data out because img-src and font-src are
+// 'self' and connect-src is 'self'.
 const POLICY =
   "default-src 'self'; script-src 'self' {hashes}; style-src 'self' 'unsafe-inline'; connect-src 'self'; " +
   "img-src 'self' data: blob:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";

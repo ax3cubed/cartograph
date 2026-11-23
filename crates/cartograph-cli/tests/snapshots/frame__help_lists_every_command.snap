@@ -1,0 +1,39 @@
+---
+source: crates/cartograph-cli/tests/frame.rs
+expression: text(&o.stdout)
+---
+A codebase map with history.
+
+Usage: cartograph [OPTIONS] <COMMAND>
+
+Commands:
+  init      Find the workspace, write cartograph.yaml, build the first index
+  sync      Index the commits added since the last run
+  status    Each repo's indexed commit, its HEAD and how far behind it is
+  index     Index one repository's history (temporary single-repo form, IDX-07)
+  verify    Compare fact hashes with another index or the manifest
+  hooks     Install, remove or show the git hooks that sync after each commit
+  schedule  Sync every workspace hourly, or stop doing so
+  open      Serve the app on 127.0.0.1 and open it in the browser
+  mcp       Run the MCP server over stdio
+  tool      Run one MCP tool and print its JSON result
+  impact    What a branch, a commit range or your uncommitted changes would affect
+  check     Fail on stale corrections or broken architecture rules
+  ask       Ask the map a question
+  agents    Write MCP config for the coding agents on this machine
+  doctor    Check the setup and print the command that fixes each problem
+  report    Write a report of the last failure, with paths and code removed. Nothing is sent
+  clean     Delete the cache, or with --all the index too
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --workspace <FILE>  The .code-workspace file to use instead of finding one
+      --json              Print one JSON object, {"schema":1,…}, on stdout
+  -q, --quiet             Print nothing but errors
+      --no-color          No colour, as NO_COLOR does
+  -y, --yes               Answer yes to every question; needed for destructive commands without a terminal
+  -v, --verbose...        More output on stderr: -v info, -vv debug, -vvv trace
+  -h, --help              Print help
+  -V, --version           Print version
+
+Every command takes [dir], the current folder by default. Exit codes: 0 done, 1 failed, 2 bad arguments or no workspace, 3 `status --check` found a repo behind.

@@ -407,3 +407,72 @@ proptest! {
         prop_assert!(r.stats.resolutions <= ablation.stats.resolutions);
     }
 }
+
+/// The tree as changes, for a restore.
+fn tree_changes(r: &Replay) -> Vec<Change> {
+    r.tree()
+        .iter()
+        .map(|(p, f)| (p.clone(), Some(Arc::clone(f))))
+        .collect()
+}
+
+#[test]
+fn a_snapshot_that_does_not_match_the_tree_is_refused() {
+    let mut r = Replay::default();
+    r.apply(&[put("src/a.ts", "import './b'"), put("src/b.ts", "")], 0);
+    let snap = r.snapshot();
+    let mut tree = tree_changes(&r);
+    assert!(Replay::restore(&tree, 0, &snap).is_some());
+    tree.push(put("src/c.ts", "import './a'"));
+    assert!(
+        Replay::restore(&tree, 0, &snap).is_none(),
+        "a reference it lacks"
+    );
+    assert!(Replay::restore(&tree_changes(&r), 0, b"garbage").is_none());
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(96))]
+    /// A replay restored from a snapshot at any step continues exactly as the one that never
+    /// stopped: same links, intervals closing at the same steps, no resolution at restore.
+    #[test]
+    fn restore_continues_like_the_replay_that_never_stopped(
+        steps in proptest::collection::vec(proptest::collection::vec(op(), 1..4), 2..30),
+        split in any::<prop::sample::Index>(),
+    ) {
+        let changes: Vec<Vec<Change>> = steps.iter().map(|ops| {
+            let mut by_path: HashMap<String, Change> = HashMap::new();
+            for o in ops {
+                let c = change(o);
+                by_path.insert(c.0.clone(), c);
+            }
+            by_path.into_values().collect()
+        }).collect();
+        let at = split.index(changes.len() - 1);
+        let mut whole = Replay::default();
+        let mut first = Replay::default();
+        for (seq, c) in changes.iter().enumerate() {
+            whole.apply(c, seq as u64);
+            if seq <= at {
+                first.apply(c, seq as u64);
+            }
+        }
+        let mut restored = Replay::restore(&tree_changes(&first), at as u64, &first.snapshot())
+            .expect("a snapshot of the same tree restores");
+        prop_assert_eq!(restored.stats.resolutions, 0);
+        prop_assert_eq!(restored.links(), first.links());
+        for (seq, c) in changes.iter().enumerate().skip(at + 1) {
+            restored.apply(c, seq as u64);
+            first.apply(c, seq as u64);
+        }
+        prop_assert_eq!(restored.links(), whole.links());
+        // Intervals that closed after the split, and links still open, agree; a restored link's
+        // start is the split, where the index already holds its open row.
+        let after = |r: &Replay| -> Vec<(Link, u64)> {
+            let mut v: Vec<_> = r.closed.iter().filter(|i| i.to > at as u64).map(|i| (i.link.clone(), i.to)).collect();
+            v.sort();
+            v
+        };
+        prop_assert_eq!(after(&restored), after(&first));
+    }
+}

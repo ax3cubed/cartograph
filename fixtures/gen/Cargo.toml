@@ -1,0 +1,26 @@
+[package]
+name = "cartograph-fixtures"
+description = "Generated fixture repositories and their golden indexes (HD-03). Test support only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cartograph-facts.workspace = true
+cartograph-git.workspace = true
+cartograph-index.workspace = true
+cartograph-parse.workspace = true
+cartograph-store.workspace = true
+regex.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

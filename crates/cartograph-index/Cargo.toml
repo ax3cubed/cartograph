@@ -17,8 +17,12 @@ cartograph-store.workspace = true
 cartograph-parse.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
+# A dev-dependency cycle (the fixtures build indexes with this crate); integration tests only.
+cartograph-fixtures = { path = "../../fixtures/gen" }
+proptest.workspace = true
 insta.workspace = true
 regex.workspace = true
 tempfile.workspace = true

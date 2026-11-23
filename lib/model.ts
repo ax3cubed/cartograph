@@ -70,7 +70,8 @@ export interface Freshness {
   state: IndexState;
   indexVersion: number; builtAt: string; // ISO
   behind: number; // commits behind HEAD, summed over repos
-  repos?: { name: string; behind: number }[]; // per repo; behind above is their sum
+  behindCapped?: boolean; // a count stopped at its cap or time budget: show "N+", as `cartograph status` does
+  repos?: { name: string; behind: number; capped?: boolean }[]; // per repo; behind above is their sum
   progress?: number; // 0-1 while syncing
   error?: { what: string; action: string };
 }

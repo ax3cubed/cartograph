@@ -14,6 +14,7 @@ import Activity from "./Activity";
 import IndexOverlay, { IndexBand } from "./IndexOverlay";
 import Toasts from "./Toasts";
 import { useIndexState } from "./useIndexState";
+import { useLive, useWorkspaces } from "@/lib/api/live";
 import "./shell.css";
 
 export const VIEW_TABS = [
@@ -39,8 +40,11 @@ export default function AppShell({ onPick, extra }: { onPick?: (id: string, kind
   const [searching, setSearching] = useState(false);
   const idx = useIndexState();
   const active = path;
+  const live = useLive();
+  const listed = useWorkspaces().data;
 
-  useEffect(() => { if (!getWorkspaces().length) router.replace("/welcome"); }, [router]);
+  // first run (D2): no workspace yet, so the welcome screen. With the binary, the registry decides.
+  useEffect(() => { if (live ? listed?.length === 0 : !getWorkspaces().length) router.replace("/welcome"); }, [router, live, listed]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearching(true); }
@@ -79,7 +83,7 @@ export default function AppShell({ onPick, extra }: { onPick?: (id: string, kind
         <Search size={16} aria-hidden /><span>Search services, files, concepts or operations</span><kbd>⌘K</kbd>
       </button>
       <div className="sh-right">
-        <IndexStatus freshness={idx.freshness} loading={idx.state === "loading"} />
+        <IndexStatus freshness={idx.freshness} loading={idx.loading} offline={idx.offline} />
         {extra}
         <button type="button" className="sh-ask" onClick={ask} aria-label="Ask" aria-keyshortcuts="/" aria-current={path === "/ask" ? "page" : undefined}><AiMark size={16} style={{ "--aimark-accent": "currentColor" } as CSSProperties} /><span>Ask</span></button>
         <Activity freshness={idx.freshness} />

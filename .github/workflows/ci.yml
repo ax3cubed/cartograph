@@ -58,7 +58,8 @@ jobs:
           echo "$files"
           hit() { [ "$full" = true ] || printf '%s\n' "$files" | grep -qE "$1"; }
           ci='^\.github/'
-          hit "^(crates/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|deny\.toml$|\.gitattributes$)|$ci" && echo rust=true >> "$GITHUB_OUTPUT" || echo rust=false >> "$GITHUB_OUTPUT"
+          # fixtures/ and the demo data that northwind is generated from feed the Rust goldens (HD-03).
+          hit "^(crates/|fixtures/|scripts/egress\.sh$|lib/workspace\.ts$|Cargo\.(toml|lock)$|rust-toolchain\.toml$|deny\.toml$|\.gitattributes$)|$ci" && echo rust=true >> "$GITHUB_OUTPUT" || echo rust=false >> "$GITHUB_OUTPUT"
           hit "^(app/|components/|lib/|public/|scripts/|crates/cartograph-api/|package\.json$|pnpm-(lock|workspace)\.yaml$|tsconfig\.json$|next\.config\.ts$|postcss\.config\.mjs$|\.node-version$|\.npmrc$)|$ci" && echo web=true >> "$GITHUB_OUTPUT" || echo web=false >> "$GITHUB_OUTPUT"
           hit "^(Cargo\.lock|bench/Cargo\.lock|pnpm-lock\.yaml|package\.json|deny\.toml|scripts/check-licenses\.mjs)$|$ci" && echo deps=true >> "$GITHUB_OUTPUT" || echo deps=false >> "$GITHUB_OUTPUT"
           hit "^bench/|$ci" && echo bench=true >> "$GITHUB_OUTPUT" || echo bench=false >> "$GITHUB_OUTPUT"
@@ -128,6 +129,12 @@ jobs:
         os: ${{ fromJSON(needs.changes.outputs.os) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    # Kill loops and property cases are a sample on pull requests (about 6 minutes saved); main and
+    # the full matrix run the phase 2 gate's 100 kill points, and the nightly runs 10,000 cases.
+    env:
+      PROPTEST_CASES: ${{ github.event_name == 'pull_request' && '32' || '256' }}
+      CARTOGRAPH_KILL_POINTS: ${{ github.event_name == 'pull_request' && '10' || '100' }}
+      CARTOGRAPH_KILLS: ${{ github.event_name == 'pull_request' && '10' || '100' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain from rust-toolchain.toml
@@ -145,7 +152,19 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # nextest builds what it tests, so there is no separate `cargo build`. Also checks the generated contract.
-      - run: cargo nextest run --workspace --locked --no-tests=warn
+      # On Linux the binary's black-box suite runs in the next step instead, under the egress check.
+      - run: cargo nextest run --workspace --locked --no-tests=warn ${{ runner.os == 'Linux' && '--exclude cartograph-cli' || '' }}
+      # HD-11: every connect() the black-box suite (the binary, git, the tests) makes must be loopback.
+      # The check first has to catch a deliberate violation, so a broken check can't pass quietly.
+      - name: Black-box suite under the egress check (HD-11)
+        if: runner.os == 'Linux'
+        run: |
+          command -v strace > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq strace; }
+          if scripts/egress.sh python3 -c 'import socket; socket.socket().connect_ex(("198.51.100.1", 9))'; then
+            echo "::error::the egress check missed a deliberate violation"; exit 1
+          fi
+          cargo test --locked -p cartograph-cli --no-run
+          scripts/egress.sh cargo nextest run --locked --offline -p cartograph-cli --no-tests=warn
       - run: cargo test --workspace --locked --doc
       # The phase 0 spikes stay compiling; they are a separate workspace and never ship.
       - name: Bench workspace
@@ -154,6 +173,36 @@ jobs:
           cargo fmt --manifest-path bench/Cargo.toml --all --check
           cargo clippy --manifest-path bench/Cargo.toml --all-targets --locked -- -D warnings
           cargo test --manifest-path bench/Cargo.toml --locked
+
+  # HD-09: the performance gates, on every pull request that touches Rust. Counts gate exactly; wall
+  # clock gates take the best of several interleaved runs, so a noisy runner doesn't fail a PR.
+  perf:
+    name: Performance gates (HD-09)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: perf
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-nextest
+      - name: Gates
+        env:
+          CARTOGRAPH_PERF_CSV: ${{ github.workspace }}/perf.csv
+        run: cargo nextest run --locked --cargo-profile perf -p cartograph-fixtures -p cartograph-cli -E 'test(/^perf_/)' --no-tests=warn
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perf
+          path: perf.csv
+          if-no-files-found: ignore
 
   web:
     name: App (${{ matrix.os }})
@@ -175,11 +224,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tsc --noEmit
       - run: pnpm check
-      - name: TypeScript wire types match the Rust contract (INT-01)
+      # HD-04: regenerated from the Rust types, not only from the checked-in schema, so a Rust field
+      # change without regenerated files fails here as well as in the Rust job.
+      - name: TypeScript wire types match the Rust contract (INT-01, HD-04)
         if: runner.os == 'Linux'
         run: |
+          rustup show active-toolchain > /dev/null || rustup toolchain install
+          cargo run --locked -q -p cartograph-api --bin gen-contract
           pnpm gen:types
-          git diff --exit-code -- lib/api/types.gen.ts
+          git diff --exit-code -- crates/cartograph-api/openapi.json crates/cartograph-api/schema.json lib/api/types.gen.ts
       # One production build is enough; macOS and Windows already type-check and run the checks above.
       - if: runner.os == 'Linux'
         run: pnpm build
@@ -230,7 +283,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: always() && github.event.action != 'closed'
-    needs: [changes, conventions, lockfiles, rust, web, supply-chain]
+    needs: [changes, conventions, lockfiles, rust, perf, web, supply-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

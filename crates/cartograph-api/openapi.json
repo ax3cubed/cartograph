@@ -65,6 +65,7 @@
         "type": "string"
       },
       "ActivityRead": {
+        "additionalProperties": false,
         "properties": {
           "ids": {
             "description": "Marks these read; empty marks everything read.",
@@ -121,6 +122,7 @@
         "type": "string"
       },
       "AgentInstall": {
+        "additionalProperties": false,
         "properties": {
           "agent": {
             "type": "string"
@@ -190,6 +192,7 @@
         "type": "object"
       },
       "Appearance": {
+        "additionalProperties": false,
         "description": "`lib/model.ts` AppearanceSettings. `size` is a percentage: 90, 100, 115 or 130.",
         "properties": {
           "contrast": {
@@ -500,6 +503,7 @@
         "type": "object"
       },
       "ConceptDecision": {
+        "additionalProperties": false,
         "description": "Pending ruling N7.",
         "properties": {
           "decision": {
@@ -586,6 +590,7 @@
         "type": "object"
       },
       "ConfigWrite": {
+        "additionalProperties": false,
         "properties": {
           "yaml": {
             "type": "string"
@@ -726,6 +731,7 @@
         "type": "string"
       },
       "CorrectionRequest": {
+        "additionalProperties": false,
         "description": "`POST …/corrections`, and MCP `correct`. `reason` is 1 to 500 characters.",
         "properties": {
           "action": {
@@ -810,7 +816,13 @@
         "type": "object"
       },
       "CreateWorkspace": {
+        "additionalProperties": false,
         "properties": {
+          "manifest": {
+            "default": false,
+            "description": "Also write `cartograph.yaml` in the workspace folder (C7); never overwrites one.",
+            "type": "boolean"
+          },
           "name": {
             "type": [
               "string",
@@ -884,6 +896,7 @@
         "type": "object"
       },
       "DiscoverRequest": {
+        "additionalProperties": false,
         "properties": {
           "path": {
             "type": "string"
@@ -1054,12 +1067,27 @@
           },
           {
             "const": "forbidden_origin",
-            "description": "403: the Origin header doesn't match.",
+            "description": "403: the Origin header doesn't match, or `Sec-Fetch-Site` is `cross-site`.",
+            "type": "string"
+          },
+          {
+            "const": "forbidden_host",
+            "description": "403: the Host header isn't on the allow list (DNS rebinding).",
             "type": "string"
           },
           {
             "const": "not_found",
             "description": "404.",
+            "type": "string"
+          },
+          {
+            "const": "method_not_allowed",
+            "description": "405: OPTIONS, or a method the route doesn't take. There is no CORS.",
+            "type": "string"
+          },
+          {
+            "const": "ambiguous",
+            "description": "400: a node reference matches more than one node; `details.candidates` lists them.",
             "type": "string"
           },
           {
@@ -1088,6 +1116,11 @@
             "type": "string"
           },
           {
+            "const": "too_large",
+            "description": "422: the answer is over the response cap; `try` names a narrower scope.",
+            "type": "string"
+          },
+          {
             "const": "too_many_requests",
             "description": "429: too many concurrent requests or Ask runs.",
             "type": "string"
@@ -1098,8 +1131,13 @@
             "type": "string"
           },
           {
+            "const": "timeout",
+            "description": "503: the query ran past its deadline.",
+            "type": "string"
+          },
+          {
             "const": "internal",
-            "description": "500.",
+            "description": "500. The body never carries SQL, a path outside the workspace or a stack trace.",
             "type": "string"
           }
         ]
@@ -1147,6 +1185,7 @@
         "type": "string"
       },
       "ExtractorSetting": {
+        "additionalProperties": false,
         "properties": {
           "enabled": {
             "type": "boolean"
@@ -1268,26 +1307,32 @@
         "type": "object"
       },
       "FsEntry": {
-        "description": "`GET /api/v1/fs/list`: names and three flags only (ruling R25).",
+        "description": "`GET /api/v1/fs/list`: names and three flags only (ruling R25). The list reads only the folder\nasked for, never inside a child, so listing home can't raise macOS privacy prompts for Desktop,\nDocuments or Downloads; the flags are null (unknown) and a folder is read when it is opened.",
         "properties": {
           "has_children": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "has_workspace_file": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "is_repo": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "name": {
             "type": "string"
           }
         },
         "required": [
-          "name",
-          "is_repo",
-          "has_workspace_file",
-          "has_children"
+          "name"
         ],
         "type": "object"
       },
@@ -1351,6 +1396,7 @@
         "type": "string"
       },
       "ImpactRequest": {
+        "additionalProperties": false,
         "description": "`POST …/impact` carries exactly one of these; it changes nothing.",
         "properties": {
           "paths": {
@@ -1425,6 +1471,7 @@
         "type": "string"
       },
       "IndexingSettings": {
+        "additionalProperties": false,
         "properties": {
           "auto_sync": {
             "$ref": "#/components/schemas/AutoSync"
@@ -1530,6 +1577,7 @@
         "type": "string"
       },
       "JobRequest": {
+        "additionalProperties": false,
         "properties": {
           "kind": {
             "$ref": "#/components/schemas/JobKind"
@@ -1561,6 +1609,7 @@
         "type": "string"
       },
       "KeyWrite": {
+        "additionalProperties": false,
         "description": "The only request body with a key.",
         "properties": {
           "key": {
@@ -2236,6 +2285,7 @@
         "type": "object"
       },
       "Prefs": {
+        "additionalProperties": false,
         "description": "Preferences moved to the server by ruling R1.",
         "properties": {
           "appearance": {
@@ -2270,6 +2320,7 @@
         "type": "object"
       },
       "Privacy": {
+        "additionalProperties": false,
         "properties": {
           "local_only": {
             "description": "Pending ruling N2: refuse every non-loopback provider.",
@@ -2391,6 +2442,7 @@
         "type": "object"
       },
       "ProviderWrite": {
+        "additionalProperties": false,
         "description": "The only request bodies with a `base_url`.",
         "properties": {
           "base_url": {
@@ -2965,6 +3017,7 @@
         ]
       },
       "RunRequest": {
+        "additionalProperties": false,
         "properties": {
           "at": {
             "type": [
@@ -3061,6 +3114,7 @@
         "type": "object"
       },
       "Selection": {
+        "additionalProperties": false,
         "properties": {
           "model": {
             "type": "string"
@@ -4999,7 +5053,7 @@
             "description": "Error"
           }
         },
-        "summary": "Folder names and three flags (R25)",
+        "summary": "Folder names; the flags are unknown, children are never read (R25)",
         "tags": [
           "SRV-14"
         ],

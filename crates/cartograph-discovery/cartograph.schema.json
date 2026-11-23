@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cartograph.yaml",
+  "description": "The Cartograph workspace manifest.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "The manifest format. This build reads version 1.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "workspace": {
+      "$ref": "#/$defs/Workspace"
+    },
+    "repos": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Repo"
+      }
+    },
+    "options": {
+      "$ref": "#/$defs/Options"
+    },
+    "services": {
+      "description": "Services and their paths (shape only here; detection is IDX-20).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Service"
+      }
+    },
+    "rules": {
+      "description": "Architecture rules, passed through to the rules owner (H6).",
+      "type": "array",
+      "items": true
+    },
+    "baseline": {
+      "description": "The baseline file of known rule violations, relative to the manifest.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "version",
+    "workspace",
+    "repos"
+  ],
+  "$defs": {
+    "Workspace": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "file": {
+          "description": "The .code-workspace file this was resolved from, relative to the manifest.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "Repo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "description": "The repo's top level, relative to the manifest; `../` is allowed (C5).",
+          "type": "string"
+        },
+        "display": {
+          "description": "The display name, from `folders[].name`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remote": {
+          "description": "`remote.origin.url`, with any credentials removed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_branch": {
+          "description": "The indexed branch; overrides the rest of the C3 ladder.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "description": "Only these folders, relative to the repo, produce nodes and links. Empty is the whole repo.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ]
+    },
+    "Options": {
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "description": "Globs left out of the index, from `files.exclude`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_file_bytes": {
+          "description": "Files larger than this are not parsed.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      }
+    },
+    "Service": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "repo": {
+          "description": "The repo's `name`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "A folder in the repo; the whole repo when absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "repo"
+      ]
+    }
+  }
+}

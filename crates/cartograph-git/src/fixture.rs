@@ -7,6 +7,8 @@ use std::process::Command;
 
 pub struct Fixture {
     pub dir: PathBuf,
+    /// Author and committer of the next commits: (name, email).
+    pub author: (String, String),
     clock: i64,
 }
 
@@ -16,6 +18,7 @@ impl Fixture {
         std::fs::create_dir_all(dir).expect("mkdir");
         let f = Self {
             dir: dir.to_owned(),
+            author: ("Ada".into(), "ada@example.com".into()),
             clock: 1_600_000_000,
         };
         f.git(&["init", "-q", "-b", "main"]);
@@ -39,10 +42,10 @@ impl Fixture {
                 "GIT_CONFIG_GLOBAL",
                 if cfg!(windows) { "NUL" } else { "/dev/null" },
             )
-            .env("GIT_AUTHOR_NAME", "Ada")
-            .env("GIT_AUTHOR_EMAIL", "ada@example.com")
-            .env("GIT_COMMITTER_NAME", "Ada")
-            .env("GIT_COMMITTER_EMAIL", "ada@example.com")
+            .env("GIT_AUTHOR_NAME", &self.author.0)
+            .env("GIT_AUTHOR_EMAIL", &self.author.1)
+            .env("GIT_COMMITTER_NAME", &self.author.0)
+            .env("GIT_COMMITTER_EMAIL", &self.author.1)
             .env("GIT_AUTHOR_DATE", format!("{} +0000", self.clock))
             .env("GIT_COMMITTER_DATE", format!("{} +0000", self.clock))
             .output()

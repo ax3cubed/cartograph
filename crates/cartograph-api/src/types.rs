@@ -57,10 +57,16 @@ pub enum ErrorCode {
     BadRequest,
     /// 401: the bearer token is missing or wrong.
     Unauthorized,
-    /// 403: the Origin header doesn't match.
+    /// 403: the Origin header doesn't match, or `Sec-Fetch-Site` is `cross-site`.
     ForbiddenOrigin,
+    /// 403: the Host header isn't on the allow list (DNS rebinding).
+    ForbiddenHost,
     /// 404.
     NotFound,
+    /// 405: OPTIONS, or a method the route doesn't take. There is no CORS.
+    MethodNotAllowed,
+    /// 400: a node reference matches more than one node; `details.candidates` lists them.
+    Ambiguous,
     /// 409: a job of that kind is already running.
     Conflict,
     /// 412: `If-Match` failed; the file changed on disk.
@@ -71,12 +77,96 @@ pub enum ErrorCode {
     UnsupportedMediaType,
     /// 422: valid JSON, invalid request (a correction key that matches nothing).
     Unprocessable,
+    /// 422: the answer is over the response cap; `try` names a narrower scope.
+    TooLarge,
     /// 429: too many concurrent requests or Ask runs.
     TooManyRequests,
     /// 503: the index needs a migration or a rebuild.
     IndexUnavailable,
-    /// 500.
+    /// 503: the query ran past its deadline.
+    Timeout,
+    /// 500. The body never carries SQL, a path outside the workspace or a stack trace.
     Internal,
+}
+
+impl ErrorCode {
+    /// The HTTP status for this code. `--json` and MCP carry the code alone.
+    ///
+    /// Decided in the phase 2 review, and kept: `ambiguous` is 400 (the caller must name the node
+    /// more precisely; `details.candidates` says how), `too_large` is 422 (the request is valid but
+    /// its answer is over the cap; 413 is for the request body), and `timeout` is 503 with
+    /// `Retry-After` (the server ran out of time, the request isn't wrong).
+    pub fn status(self) -> u16 {
+        match self {
+            Self::BadRequest | Self::Ambiguous => 400,
+            Self::Unauthorized => 401,
+            Self::ForbiddenOrigin | Self::ForbiddenHost => 403,
+            Self::NotFound => 404,
+            Self::MethodNotAllowed => 405,
+            Self::Conflict => 409,
+            Self::PreconditionFailed => 412,
+            Self::PayloadTooLarge => 413,
+            Self::UnsupportedMediaType => 415,
+            Self::Unprocessable | Self::TooLarge => 422,
+            Self::TooManyRequests => 429,
+            Self::Internal => 500,
+            Self::IndexUnavailable | Self::Timeout => 503,
+        }
+    }
+}
+
+impl<T> Envelope<T> {
+    /// A first (or only) page.
+    pub fn new(generation: u64, data: T) -> Self {
+        Self {
+            schema: crate::SCHEMA_VERSION,
+            generation,
+            data,
+            next_cursor: None,
+            truncated: false,
+        }
+    }
+}
+
+impl ApiError {
+    pub fn new(code: ErrorCode, what: &str, why: &str, action: &str) -> Self {
+        Self {
+            code,
+            what: what.into(),
+            why: why.into(),
+            action: action.into(),
+            details: None,
+        }
+    }
+}
+
+impl From<ApiError> for ErrorBody {
+    fn from(error: ApiError) -> Self {
+        Self {
+            schema: crate::SCHEMA_VERSION,
+            error,
+        }
+    }
+}
+
+/// Page size when a read names none (F2, SRV-07).
+pub const DEFAULT_LIMIT: u32 = 50;
+/// The largest page any read returns.
+pub const MAX_LIMIT: u32 = 1000;
+
+/// Checks a `limit` parameter: absent means [`DEFAULT_LIMIT`]; 0 or over [`MAX_LIMIT`] is refused
+/// rather than quietly changed.
+pub fn page_limit(limit: Option<u32>) -> Result<u32, Box<ApiError>> {
+    match limit {
+        None => Ok(DEFAULT_LIMIT),
+        Some(n @ 1..=MAX_LIMIT) => Ok(n),
+        Some(_) => Err(Box::new(ApiError::new(
+            ErrorCode::BadRequest,
+            "limit is out of range",
+            "a page holds 1 to 1,000 rows",
+            "pass a limit from 1 to 1000, and follow next_cursor for more",
+        ))),
+    }
 }
 
 /// Common read parameters. Every read takes them; each route documents which it honours.
@@ -500,6 +590,7 @@ pub enum MarkerKind {
 
 /// `POST …/impact` carries exactly one of these; it changes nothing.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ImpactRequest {
     pub paths: Option<Vec<String>>,
     #[serde(rename = "ref")]
@@ -726,6 +817,7 @@ pub struct Correction {
 
 /// `POST …/corrections`, and MCP `correct`. `reason` is 1 to 500 characters.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CorrectionRequest {
     pub action: CorrectionAction,
     pub key: LinkKey,
@@ -753,6 +845,7 @@ pub enum ConceptDecisionKind {
 
 /// Pending ruling N7.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ConceptDecision {
     pub decision: ConceptDecisionKind,
     pub reason: String,
@@ -768,6 +861,7 @@ pub struct ConfigFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigWrite {
     pub yaml: String,
 }
@@ -780,6 +874,7 @@ pub enum AutoSync {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ExtractorSetting {
     pub name: String,
     pub version: String,
@@ -787,6 +882,7 @@ pub struct ExtractorSetting {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct IndexingSettings {
     pub extractors: Vec<ExtractorSetting>,
     pub auto_sync: AutoSync,
@@ -803,12 +899,13 @@ pub enum JobKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct JobRequest {
     pub kind: JobKind,
     pub repo: Option<RepoId>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
     Queued,
@@ -859,21 +956,25 @@ pub struct ActivityItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ActivityRead {
     /// Marks these read; empty marks everything read.
     pub ids: Vec<String>,
 }
 
-/// `GET /api/v1/fs/list`: names and three flags only (ruling R25).
+/// `GET /api/v1/fs/list`: names and three flags only (ruling R25). The list reads only the folder
+/// asked for, never inside a child, so listing home can't raise macOS privacy prompts for Desktop,
+/// Documents or Downloads; the flags are null (unknown) and a folder is read when it is opened.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FsEntry {
     pub name: String,
-    pub is_repo: bool,
-    pub has_workspace_file: bool,
-    pub has_children: bool,
+    pub is_repo: Option<bool>,
+    pub has_workspace_file: Option<bool>,
+    pub has_children: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DiscoverRequest {
     pub path: String,
     pub workspace_file: Option<String>,
@@ -906,10 +1007,14 @@ pub struct Discovery {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CreateWorkspace {
     pub path: String,
     pub workspace_file: Option<String>,
     pub name: Option<String>,
+    /// Also write `cartograph.yaml` in the workspace folder (C7); never overwrites one.
+    #[serde(default)]
+    pub manifest: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -957,6 +1062,7 @@ pub enum Density {
 
 /// `lib/model.ts` AppearanceSettings. `size` is a percentage: 90, 100, 115 or 130.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Appearance {
     pub theme: Theme,
     pub contrast: Contrast,
@@ -975,12 +1081,33 @@ pub enum AskPlacement {
 
 /// Preferences moved to the server by ruling R1.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Prefs {
     pub appearance: Appearance,
     pub keymap: BTreeMap<String, String>,
     pub pins: Vec<NodeId>,
     pub sidebar_open: bool,
     pub ask_placement: AskPlacement,
+}
+
+/// The app's defaults (`lib/theme.ts` DEFAULT_APPEARANCE), served before anything is saved.
+impl Default for Prefs {
+    fn default() -> Self {
+        Self {
+            appearance: Appearance {
+                theme: Theme::Dark,
+                contrast: Contrast::Standard,
+                motion: Motion::Follow,
+                hues: Hues::Default,
+                size: 100,
+                density: Density::Comfortable,
+            },
+            keymap: BTreeMap::new(),
+            pins: Vec::new(),
+            sidebar_open: true,
+            ask_placement: AskPlacement::Panel,
+        }
+    }
 }
 
 // ---------------------------------------------------------------- MCP and agents
@@ -1024,6 +1151,7 @@ pub struct AgentStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AgentInstall {
     pub agent: String,
     #[serde(default)]
@@ -1033,6 +1161,7 @@ pub struct AgentInstall {
 // ---------------------------------------------------------------- Ask and providers
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RunRequest {
     pub question: String,
     pub at: Option<At>,
@@ -1144,6 +1273,7 @@ pub struct Provider {
 
 /// The only request bodies with a `base_url`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderWrite {
     pub name: String,
     pub kind: ProviderKind,
@@ -1152,6 +1282,7 @@ pub struct ProviderWrite {
 
 /// The only request body with a key.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct KeyWrite {
     pub key: String,
 }
@@ -1165,12 +1296,14 @@ pub struct ProviderTest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Selection {
     pub provider: String,
     pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Privacy {
     /// Pending ruling N2: refuse every non-loopback provider.
     pub local_only: bool,

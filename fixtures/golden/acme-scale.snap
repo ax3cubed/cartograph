@@ -1,0 +1,13 @@
+---
+source: fixtures/gen/tests/golden.rs
+expression: text
+---
+acme-01 sha256:eaadb12882e5864bc36b6dae875badf6d7cc0cb45d70f848b9d75bebcc1ef067 commits 3937 paths 809 facts 8105 intervals 6684
+acme-02 sha256:18a2a7a1685576e17ed505c606e07d1805150bc97f250655b5c12a614880f426 commits 3938 paths 948 facts 8387 intervals 6932
+acme-03 sha256:1de3319eec38f6addc054db124fa60ef3c070afad9bf0b946c3d8d99ba8a29c7 commits 3938 paths 941 facts 8435 intervals 7052
+acme-04 sha256:0e34a27bee02c49b5badc2cafb4f7af73032086e07119605ee47a5b6b044d587 commits 3937 paths 949 facts 8376 intervals 6923
+acme-05 sha256:ee87ad5feeca0bbe7e1006d4ec2573d0e251fdeda5a7fdb387831030bd6c3802 commits 3938 paths 949 facts 8400 intervals 6982
+acme-06 sha256:43640fed74123553146ee4b1ef2849a3b6a1e1a6d6ead541a6ee85f23a95ab95 commits 3938 paths 941 facts 8402 intervals 6960
+acme-07 sha256:5fc3b8f798f487361fb718d0cce09b5c86f213d217b31ebe912d1d0f02c9f906 commits 3937 paths 948 facts 8571 intervals 7172
+acme-08 sha256:1dd96eb9a906afa13edeeab7300867704456261101d8af8d7a73f1a9af7305e2 commits 3938 paths 949 facts 8457 intervals 7013
+acme-09 sha256:d6825421f1963fd8b291e546e228b56001514a89950fc6caf9939fe620f5d902 commits 3938 paths 949 facts 8456 intervals 6993

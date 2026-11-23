@@ -2,11 +2,31 @@
 
 pub mod build;
 pub mod extract;
+pub mod freshness;
+pub mod sync;
+pub mod timeline;
 
 use std::path::Path;
 
 pub use build::{BuildError, Summary, build_single, default_workers};
 use cartograph_discovery as _;
+use cartograph_facts::FactCache;
+use cartograph_store::writer::WriterLock;
+
+/// Builds `repo` up to `to` (default HEAD) into a new file and renames it over `index` (IDX-16).
+/// The old index stays readable until the rename; a failed or killed build leaves it untouched.
+pub fn rebuild_single(
+    lock: &WriterLock,
+    repo: &Path,
+    to: Option<&str>,
+    index: &Path,
+    cache: &mut FactCache,
+    workers: usize,
+) -> Result<Summary, BuildError> {
+    cartograph_store::migrate::rebuild(lock, index, |tmp| {
+        build_single(repo, to, tmp, cache, workers)
+    })
+}
 
 /// A workspace id for a repository folder, until the registry (IDX-11) assigns them: the folder's
 /// name and a hash of its canonical path.

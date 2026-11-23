@@ -325,6 +325,39 @@ mod tests {
     }
 
     #[test]
+    fn pages_default_to_50_and_stop_at_1000() {
+        use types::{ErrorCode, page_limit};
+        assert_eq!(page_limit(None).unwrap(), 50);
+        assert_eq!(page_limit(Some(1000)).unwrap(), 1000);
+        for bad in [0, 1001, u32::MAX] {
+            assert_eq!(
+                page_limit(Some(bad)).unwrap_err().code,
+                ErrorCode::BadRequest
+            );
+        }
+    }
+
+    #[test]
+    fn every_error_code_has_a_status_and_a_snake_case_name() {
+        use types::ErrorCode;
+        let names = render(&json_schema());
+        for code in [
+            ErrorCode::ForbiddenHost,
+            ErrorCode::MethodNotAllowed,
+            ErrorCode::Ambiguous,
+            ErrorCode::TooLarge,
+            ErrorCode::Timeout,
+        ] {
+            let name = serde_json::to_value(code).unwrap();
+            assert!(
+                names.contains(&format!("{name}")),
+                "{name} is not in the schema"
+            );
+            assert!((400..600).contains(&code.status()));
+        }
+    }
+
+    #[test]
     fn wire_names_are_snake_case() {
         let text = render(&openapi());
         for bad in [

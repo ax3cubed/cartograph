@@ -1,0 +1,47 @@
+name: Nightly properties
+
+# HD-06: the property tests with 10,000 cases (pull requests run 256) and the SIGKILL harness at its
+# full count. A failure uploads the proptest regression files: commit them, so every later run
+# replays the failing seed first.
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  properties:
+    name: Properties, 10,000 cases (HD-06)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: perf
+          save-if: false
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-nextest
+      - name: Properties
+        env:
+          PROPTEST_CASES: "10000"
+          CARTOGRAPH_KILL_POINTS: "100"
+          CARTOGRAPH_KILLS: "1000"
+        run: >
+          cargo nextest run --locked --cargo-profile perf -p cartograph-fixtures -p cartograph-cli
+          -p cartograph-index -E 'binary(properties) | binary(props) | binary(writer)' --no-tests=warn
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proptest-regressions
+          path: "**/*.proptest-regressions"
+          if-no-files-found: ignore

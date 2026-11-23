@@ -31,6 +31,21 @@ string_id!(
     LinkId
 );
 
+/// A new workspace id: 8 random hex characters (IDX-11). Random rather than derived from a path, so
+/// moving the workspace folder keeps its index; the registry and the index's meta store it.
+pub fn new_workspace_id() -> String {
+    let mut b = [0u8; 4];
+    getrandom::fill(&mut b).expect("the OS random source");
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// True for an id [`new_workspace_id`] could have made, so a registry entry can't name `../x`.
+pub fn is_workspace_id(s: &str) -> bool {
+    s.len() == 8
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// A step on the merged first-parent timeline. Intervals are `[from_seq, to_seq)`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
@@ -60,6 +75,14 @@ impl Oid {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn workspace_ids_are_8_hex_and_differ() {
+        let (a, b) = (new_workspace_id(), new_workspace_id());
+        assert!(is_workspace_id(&a) && is_workspace_id(&b));
+        assert_ne!(a, b);
+        assert!(!is_workspace_id("../../x1"));
+    }
 
     proptest! {
         #[test]
