@@ -16,7 +16,9 @@ use cartograph_facts::replay::Change;
 use cartograph_facts::{FactCache, Interval, Link, Replay};
 use cartograph_git::{CommitStep, GitError, ObjectId, Repo};
 use cartograph_parse::{extractor_for, tracked};
+use cartograph_store::hash::store_fact_hash;
 use cartograph_store::rusqlite::{self, params};
+use cartograph_store::writer::Batches;
 use cartograph_store::{Index, StoreError};
 
 use crate::extract::{ExtractStats, Facts, extract, extractor_of};
@@ -167,7 +169,9 @@ pub fn build_single(
         extract_ms,
         ..Default::default()
     };
-    ix.conn.execute_batch("BEGIN")?;
+    // Every committed batch bumps meta.generation (IDX-13). A build killed part way leaves a file
+    // with state `building` that passes quick_check; it is never renamed into place (IDX-16).
+    let mut batches = Batches::begin(&ix.conn)?;
     for (seq, step) in steps.iter().enumerate() {
         let seq = seq as u64;
         s.change_events += step.changes.len();
@@ -180,8 +184,8 @@ pub fn build_single(
             w.interval(&i.link, i.from, Some(i.to))?;
             s.intervals += 1;
         }
-        if seq % 1000 == 999 {
-            ix.conn.execute_batch("COMMIT; BEGIN")?;
+        if batches.step() {
+            batches.commit(&ix.conn)?;
         }
     }
     let mut open: Vec<(&Link, u64)> = replay.open().collect();
@@ -201,11 +205,17 @@ pub fn build_single(
         "UPDATE run SET finished_at = unixepoch(), stats = ?1 WHERE id = 1",
         [format!("{s:?}")],
     )?;
-    ix.conn.execute_batch(
-        "UPDATE meta SET value = 'complete' WHERE key = 'state';
-         UPDATE meta SET value = 1 WHERE key = 'generation';
-         COMMIT; PRAGMA wal_checkpoint(TRUNCATE);",
+    let last = steps.len().saturating_sub(1) as i64;
+    ix.conn.execute(
+        "UPDATE repo SET indexed_commit = head, indexed_seq = ?1 WHERE id = 1",
+        [last],
     )?;
+    ix.conn.execute_batch(&format!(
+        "UPDATE meta SET value = 'complete' WHERE key = 'state';
+         INSERT OR REPLACE INTO meta (key, value) VALUES ('watermark_seq', {last});"
+    ))?;
+    store_fact_hash(&ix.conn)?;
+    batches.finish(&ix.conn)?;
     Ok(s)
 }
 
@@ -356,11 +366,11 @@ pub fn links_at(
     Ok(v)
 }
 
-/// The step of a commit, by sha.
+/// The first step of a commit, by sha (a commit can sit in two repos).
 pub fn seq_of(conn: &rusqlite::Connection, sha: ObjectId) -> rusqlite::Result<Option<u64>> {
     use rusqlite::OptionalExtension;
     conn.query_row(
-        "SELECT seq FROM commits WHERE sha = ?1",
+        "SELECT seq FROM commits WHERE sha = ?1 ORDER BY seq LIMIT 1",
         [sha.as_bytes()],
         |r| r.get::<_, i64>(0),
     )

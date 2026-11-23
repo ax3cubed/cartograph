@@ -8,15 +8,18 @@
 //! `[from, to)` opens when the count leaves zero and closes when it returns there. A link that
 //! closes and reopens within one step is left open.
 //!
-//! ponytail: paths and keys are strings, not interned integers, and resolutions aren't memoised
-//! across references; remotion replays in a few seconds without either.
+//! ponytail: paths and keys are strings, not interned integers (a key is one `Arc<str>` shared by
+//! every reference waiting on it), and resolutions aren't memoised across references; remotion
+//! replays in a few seconds without either.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use cartograph_parse::manifest::{is_package_json, resolution_json};
 use cartograph_parse::{BlobFacts, Fact, extractor_for};
 use oxc_resolver::{ResolveError, ResolveOptions, ResolverGeneric, TsconfigDiscovery};
+use rustc_hash::FxHashSet;
+use serde::{Deserialize, Serialize};
 
 use crate::fs::{FsState, ReplayFs, to_abs, to_rel};
 
@@ -71,7 +74,7 @@ struct Ref {
     from: String,
     spec: String,
     outcome: Outcome,
-    keys: Vec<String>,
+    keys: Vec<Arc<str>>,
 }
 
 /// One changed path and its new facts (`None`: gone).
@@ -105,7 +108,7 @@ pub struct Replay {
     free: Vec<usize>,
     by_file: HashMap<String, Vec<usize>>,
     /// The reverse index: key -> references waiting on it.
-    waiting: HashMap<String, HashSet<usize>>,
+    waiting: HashMap<Arc<str>, FxHashSet<usize>>,
     /// Package name -> the package.json paths declaring it.
     pkgs: HashMap<String, BTreeSet<String>>,
     counts: HashMap<Link, u32>,
@@ -178,6 +181,31 @@ impl Replay {
 
     pub fn apply(&mut self, changes: &[Change], seq: u64) {
         self.stats.steps += 1;
+        let pending = self.stage(changes);
+        if pending.len() > 100_000 {
+            tracing::warn!(
+                seq,
+                refs = pending.len(),
+                "one step re-resolves many references"
+            );
+        }
+        self.stats.max_in_step = self.stats.max_in_step.max(pending.len());
+        // One cold start per importer: its references share the tsconfig and package.json reads.
+        let batches: Vec<Vec<usize>> = pending
+            .chunk_by(|a, b| {
+                self.refs[*a].as_ref().map(|r| &r.from) == self.refs[*b].as_ref().map(|r| &r.from)
+            })
+            .map(<[usize]>::to_vec)
+            .collect();
+        for batch in batches {
+            self.resolve_batch(&batch);
+        }
+        self.settle_step(seq);
+    }
+
+    /// Takes `changes` into the tree, the file system and the references, and returns the live
+    /// references to resolve again, sorted by importer then specifier. Resolves nothing.
+    fn stage(&mut self, changes: &[Change]) -> Vec<usize> {
         let mut dirty: Vec<String> = Vec::new();
         let mut pending: Vec<usize> = Vec::new();
         for (path, new) in changes {
@@ -244,7 +272,7 @@ impl Replay {
         }
         if self.reverse {
             for k in &dirty {
-                if let Some(w) = self.waiting.get(k) {
+                if let Some(w) = self.waiting.get(k.as_str()) {
                     pending.extend(w);
                 }
             }
@@ -253,31 +281,17 @@ impl Replay {
         }
         pending.sort_unstable();
         pending.dedup();
-        if pending.len() > 100_000 {
-            tracing::warn!(
-                seq,
-                refs = pending.len(),
-                "one step re-resolves many references"
-            );
-        }
-        self.stats.max_in_step = self.stats.max_in_step.max(pending.len());
         pending.retain(|id| self.refs[*id].is_some());
-        // One cold start per importer: its references share the tsconfig and package.json reads.
         pending.sort_by(|a, b| {
             let (x, y) = (self.refs[*a].as_ref(), self.refs[*b].as_ref());
             x.map(|r| (&r.from, &r.spec))
                 .cmp(&y.map(|r| (&r.from, &r.spec)))
         });
-        let batches: Vec<Vec<usize>> = pending
-            .chunk_by(|a, b| {
-                self.refs[*a].as_ref().map(|r| &r.from) == self.refs[*b].as_ref().map(|r| &r.from)
-            })
-            .map(<[usize]>::to_vec)
-            .collect();
-        for batch in batches {
-            self.resolve_batch(&batch);
-        }
-        // Net effect of the step only.
+        pending
+    }
+
+    /// Opens and closes intervals for the net effect of the step only.
+    fn settle_step(&mut self, seq: u64) {
         for (link, was) in std::mem::take(&mut self.touched) {
             let is = self.counts.contains_key(&link);
             if was && !is {
@@ -294,6 +308,98 @@ impl Replay {
                 self.open_at.insert(link, seq);
             }
         }
+    }
+
+    /// Each live reference's outcome and the reverse index, encoded. With the tree, that is
+    /// everything [`Replay::restore`] needs to continue without resolving the tree again. Only the
+    /// reverse-index replay keeps `waiting`, so only it has a snapshot.
+    pub fn snapshot(&self) -> Vec<u8> {
+        assert!(
+            self.reverse,
+            "the ablation keeps no reverse index to snapshot"
+        );
+        let mut strings = Interner::default();
+        let mut position = vec![u32::MAX; self.refs.len()];
+        let mut refs = Vec::new();
+        for (id, r) in self.refs.iter().enumerate() {
+            let Some(r) = r else { continue };
+            position[id] = u32::try_from(refs.len()).expect("under 4G references");
+            refs.push(SnapRef {
+                from: strings.id(&r.from),
+                spec: strings.id(&r.spec),
+                outcome: match &r.outcome {
+                    Outcome::Link((LinkKind::Import, _, to)) => SnapOutcome::Import(strings.id(to)),
+                    Outcome::Link((LinkKind::Package, _, to)) => {
+                        SnapOutcome::Package(strings.id(to))
+                    }
+                    Outcome::External => SnapOutcome::External,
+                    Outcome::Builtin => SnapOutcome::Builtin,
+                    Outcome::Unresolved => SnapOutcome::Unresolved,
+                },
+            });
+        }
+        let waiting = self
+            .waiting
+            .iter()
+            .map(|(k, ids)| (strings.id(k), ids.iter().map(|i| position[*i]).collect()))
+            .collect();
+        postcard::to_stdvec(&Snapshot {
+            strings: strings.list,
+            refs,
+            waiting,
+        })
+        .expect("a snapshot always encodes")
+    }
+
+    /// The replay at step `at` over `tree` (every live path and its facts), with the outcomes and
+    /// reverse index of a [`Replay::snapshot`] taken at that step instead of resolving every
+    /// reference. Every link opens at `at`. `None` when the bytes don't decode or don't hold
+    /// exactly the tree's references: the caller replays the tree instead.
+    pub fn restore(tree: &[Change], at: u64, snapshot: &[u8]) -> Option<Self> {
+        let snap: Snapshot = postcard::from_bytes(snapshot).ok()?;
+        let s = |i: u32| snap.strings.get(i as usize).map(String::as_str);
+        let mut saved: HashMap<(&str, &str), usize> = HashMap::with_capacity(snap.refs.len());
+        for (p, r) in snap.refs.iter().enumerate() {
+            saved.insert((s(r.from)?, s(r.spec)?), p);
+        }
+        let mut replay = Self::new(true);
+        let pending = replay.stage(tree);
+        if pending.len() != snap.refs.len() || saved.len() != snap.refs.len() {
+            return None;
+        }
+        // Snapshot position -> reference id.
+        let mut id_of = vec![0; snap.refs.len()];
+        for id in pending {
+            let r = replay.refs[id].as_ref()?;
+            let p = *saved.get(&(r.from.as_str(), r.spec.as_str()))?;
+            id_of[p] = id;
+            let link =
+                |kind, to: u32| Some(Outcome::Link((kind, r.from.clone(), s(to)?.to_owned())));
+            let outcome = match snap.refs[p].outcome {
+                SnapOutcome::Import(to) => link(LinkKind::Import, to)?,
+                SnapOutcome::Package(to) => link(LinkKind::Package, to)?,
+                SnapOutcome::External => Outcome::External,
+                SnapOutcome::Builtin => Outcome::Builtin,
+                SnapOutcome::Unresolved => Outcome::Unresolved,
+            };
+            if let Outcome::Link(l) = &outcome {
+                replay.bump(l.clone(), 1);
+            }
+            replay.refs[id].as_mut()?.outcome = outcome;
+        }
+        replay.waiting.reserve(snap.waiting.len());
+        for (k, ps) in &snap.waiting {
+            let key: Arc<str> = Arc::from(s(*k)?);
+            let mut ids = FxHashSet::with_capacity_and_hasher(ps.len(), Default::default());
+            for p in ps {
+                let id = *id_of.get(*p as usize)?;
+                replay.refs[id].as_mut()?.keys.push(Arc::clone(&key));
+                ids.insert(id);
+            }
+            replay.waiting.insert(key, ids);
+        }
+        replay.settle_step(at);
+        Some(replay)
     }
 
     /// Points `node_modules/<name>` at the package with the smallest manifest path.
@@ -364,7 +470,7 @@ impl Replay {
         self.free.push(id);
     }
 
-    fn unwait(&mut self, id: usize, keys: &[String]) {
+    fn unwait(&mut self, id: usize, keys: &[Arc<str>]) {
         for k in keys {
             if let Some(w) = self.waiting.get_mut(k) {
                 w.remove(&id);
@@ -406,11 +512,19 @@ impl Replay {
         self.stats.resolutions += 1;
         if self.reverse {
             self.unwait(id, &r.keys);
-            for k in &keys {
-                self.waiting.entry(k.clone()).or_default().insert(id);
+            r.keys = keys
+                .into_iter()
+                .map(|k| match self.waiting.get_key_value(k.as_str()) {
+                    Some((shared, _)) => Arc::clone(shared),
+                    None => Arc::from(k),
+                })
+                .collect();
+            for k in &r.keys {
+                self.waiting.entry(Arc::clone(k)).or_default().insert(id);
             }
+        } else {
+            r.keys = keys.into_iter().map(Arc::from).collect();
         }
-        r.keys = keys;
         if outcome != r.outcome {
             if let Outcome::Link(l) = &r.outcome {
                 self.bump(l.clone(), -1);
@@ -432,6 +546,51 @@ impl Replay {
         } else {
             self.counts.insert(link, m);
         }
+    }
+}
+
+/// Bump when what a snapshot means changes: the resolve options, how keys are recorded, or the
+/// encoding. A snapshot of another version is not restored.
+pub const SNAPSHOT_VERSION: u32 = 1;
+
+#[derive(Serialize, Deserialize)]
+struct Snapshot {
+    /// Every path, specifier and key once; the rest are indexes into it.
+    strings: Vec<String>,
+    refs: Vec<SnapRef>,
+    /// The reverse index: each key and the positions in `refs` waiting on it.
+    waiting: Vec<(u32, Vec<u32>)>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SnapRef {
+    from: u32,
+    spec: u32,
+    outcome: SnapOutcome,
+}
+
+/// An [`Outcome`] without its link's source, which is the reference's.
+#[derive(Serialize, Deserialize)]
+enum SnapOutcome {
+    Import(u32),
+    Package(u32),
+    External,
+    Builtin,
+    Unresolved,
+}
+
+#[derive(Default)]
+struct Interner<'a> {
+    ids: HashMap<&'a str, u32>,
+    list: Vec<String>,
+}
+
+impl<'a> Interner<'a> {
+    fn id(&mut self, s: &'a str) -> u32 {
+        *self.ids.entry(s).or_insert_with(|| {
+            self.list.push(s.to_owned());
+            u32::try_from(self.list.len() - 1).expect("under 4G strings")
+        })
     }
 }
 

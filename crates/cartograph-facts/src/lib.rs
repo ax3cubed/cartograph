@@ -6,7 +6,7 @@ pub mod replay;
 
 pub use cache::FactCache;
 use cartograph_core as _;
-pub use replay::{Interval, Link, LinkKind, Replay, from_scratch};
+pub use replay::{Interval, Link, LinkKind, Replay, SNAPSHOT_VERSION, from_scratch};
 
 #[cfg(test)]
 mod tests;
