@@ -14,14 +14,23 @@ path = "src/main.rs"
 
 [dependencies]
 cartograph-core.workspace = true
+cartograph-discovery.workspace = true
 cartograph-facts.workspace = true
 cartograph-index.workspace = true
 cartograph-query.workspace = true
+cartograph-server.workspace = true
+cartograph-store.workspace = true
 clap.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
+# HD-11 generates its rejection tests from the route table; HD-06 compares fact hashes.
+cartograph-api.workspace = true
+cartograph-fixtures = { path = "../../fixtures/gen" }
 cartograph-git.workspace = true
 cartograph-store.workspace = true
+insta.workspace = true
+proptest.workspace = true
 tempfile.workspace = true
 
 [lints]

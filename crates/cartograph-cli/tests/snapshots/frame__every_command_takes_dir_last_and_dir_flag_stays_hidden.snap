@@ -1,0 +1,21 @@
+---
+source: crates/cartograph-cli/tests/frame.rs
+expression: "text(&cartograph(d.path(), &[\"verify\", \"--help\"]).stdout)"
+---
+Compare fact hashes with another index or the manifest
+
+Usage: cartograph verify [OPTIONS] [OTHER] [DIR]
+
+Arguments:
+  [OTHER]  The other index
+  [DIR]    The folder to work on [default: the current folder]
+
+Options:
+      --manifest          Compare with the committed manifest instead
+      --workspace <FILE>  The .code-workspace file to use instead of finding one
+      --json              Print one JSON object, {"schema":1,…}, on stdout
+  -q, --quiet             Print nothing but errors
+      --no-color          No colour, as NO_COLOR does
+  -y, --yes               Answer yes to every question; needed for destructive commands without a terminal
+  -v, --verbose...        More output on stderr: -v info, -vv debug, -vvv trace
+  -h, --help              Print help

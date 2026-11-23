@@ -1,0 +1,7 @@
+---
+source: crates/cartograph-cli/tests/frame.rs
+expression: err
+---
+error: not confirmed: Rebuild <tmp>/index.cartograph from nothing?
+  why: there is no terminal to ask on
+  try: run the same command with --yes

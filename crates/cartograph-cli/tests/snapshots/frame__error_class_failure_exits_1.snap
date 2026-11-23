@@ -1,0 +1,7 @@
+---
+source: crates/cartograph-cli/tests/frame.rs
+expression: text(&o.stderr)
+---
+error: no home folder found
+  why: neither HOME nor USERPROFILE is set, so ~/.cartograph has no location
+  try: set CARTOGRAPH_HOME to a local folder

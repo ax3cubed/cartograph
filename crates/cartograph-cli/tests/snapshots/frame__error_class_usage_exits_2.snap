@@ -1,0 +1,11 @@
+---
+source: crates/cartograph-cli/tests/frame.rs
+expression: text(&o.stderr)
+---
+error: unexpected argument '--bogus' found
+
+  tip: to pass '--bogus' as a value, use '-- --bogus'
+
+Usage: cartograph status [OPTIONS] [DIR]
+
+For more information, try '--help'.
