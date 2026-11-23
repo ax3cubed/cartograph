@@ -96,7 +96,19 @@ impl GraphQuery {
 }
 
 impl Snapshot<'_> {
+    /// The slice, from the per-generation cache when the same request was answered already.
     pub fn graph(&self, q: &GraphQuery) -> Result<GraphSlice, QueryError> {
+        // The row cap is part of the request: a slice built under a larger one may pass a smaller.
+        let key = format!("{q:?} max_rows={}", self.limits.max_rows);
+        if let Some(s) = self.cached_slice(&key) {
+            return Ok((*s).clone());
+        }
+        let s = self.build_graph(q)?;
+        self.keep_slice(&key, std::sync::Arc::new(s.clone()));
+        Ok(s)
+    }
+
+    fn build_graph(&self, q: &GraphQuery) -> Result<GraphSlice, QueryError> {
         let at = self.resolve_at(&q.at)?;
         let seq = at.seq as i64;
         // A repo dropped from the workspace keeps its history, so `at=` before its removal can

@@ -17,6 +17,8 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# SRV-08's golden: the query functions against `lib/workspace.ts` on the northwind fixture.
+cartograph-fixtures = { path = "../../fixtures/gen" }
 cartograph-facts.workspace = true
 cartograph-git.workspace = true
 cartograph-index.workspace = true

@@ -74,15 +74,24 @@ impl Snapshot<'_> {
     pub fn workspace_summary(&self, id: &str) -> Result<WorkspaceSummary, QueryError> {
         let repos = self.repo_rows()?;
         let first = repos.first();
+        // An index older than format 3 has no structure tables: its files alone.
+        let (services, modules, files) = match cartograph_store::summary_counts(self.conn()) {
+            Ok(c) => c,
+            Err(_) => (
+                0,
+                0,
+                i64::from(self.count("SELECT count(*) FROM file_path WHERE to_seq IS NULL")?),
+            ),
+        };
         Ok(WorkspaceSummary {
             id: id.into(),
             name: first.map_or_else(|| id.to_owned(), |r| r.name.clone()),
             path: first.map(|r| r.path.clone()).unwrap_or_default(),
             demo: false,
             repos: repos.len() as u32,
-            services: 0,
-            modules: 0,
-            files: self.count("SELECT count(*) FROM file_path WHERE to_seq IS NULL")?,
+            services: services as u32,
+            modules: modules as u32,
+            files: files as u32,
             commits: self.count("SELECT count(*) FROM commits")?,
             state: self.index_state()?,
             built_at: self.built_at()?,

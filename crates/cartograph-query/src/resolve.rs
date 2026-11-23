@@ -139,6 +139,19 @@ impl Snapshot<'_> {
                 .query_map((seq, reference), row)?
                 .collect::<Result<_, _>>()?,
         };
+        // No file: a service or module by its name, its folder or its key.
+        let hits = if hits.is_empty() {
+            c.prepare_cached(
+                "SELECT n.id, n.key FROM node n WHERE n.kind != 'file' AND n.key IS NOT NULL
+                   AND (n.name = ?1 OR n.key = 'module:' || ?1
+                        OR (n.key LIKE 'service:%' AND substr(n.key, -length(?1) - 1) = ':' || ?1))
+                 ORDER BY n.key LIMIT 11",
+            )?
+            .query_map([reference], row)?
+            .collect::<Result<_, _>>()?
+        } else {
+            hits
+        };
         match hits.as_slice() {
             [] => Err(QueryError::NotFound {
                 what: "no node has that name".into(),

@@ -6,13 +6,14 @@
 //! for long (B2).
 
 use std::path::{Path, PathBuf};
-use std::sync::{Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use cartograph_store::rusqlite::{Connection, OptionalExtension};
 use cartograph_store::{Index, State};
 
 use crate::QueryError;
+use crate::adjacency::Adjacency;
 
 /// Default deadline for one request's snapshot.
 pub const DEFAULT_DEADLINE: Duration = Duration::from_secs(5);
@@ -48,7 +49,15 @@ pub struct Store {
     size: usize,
     pool: Mutex<Pool>,
     freed: Condvar,
+    /// The graph of the last generation read, built on first use (SRV-11).
+    graph: Mutex<Option<Arc<Adjacency>>>,
+    /// The last few graph slices, by generation and request (SRV-04's cached mark).
+    slices: Mutex<Vec<(SliceKey, Arc<cartograph_api::types::GraphSlice>)>>,
 }
+
+type SliceKey = (u64, u64, String);
+/// Slices kept: a map open at a few dates and levels.
+const SLICES: usize = 8;
 
 struct Pool {
     idle: Vec<Pooled>,
@@ -127,6 +136,8 @@ impl Store {
                 state,
             }),
             freed: Condvar::new(),
+            graph: Mutex::new(None),
+            slices: Mutex::new(Vec::new()),
         };
         store.lock().idle.push(Pooled {
             conn: tune(ix.conn)?,
@@ -280,6 +291,52 @@ impl Snapshot<'_> {
             });
         }
         Ok(())
+    }
+
+    /// The in-memory graph of this snapshot's generation: the cached one, or built now and cached.
+    /// Two requests racing on a new generation may both build it; the last one is kept.
+    pub(crate) fn adjacency(&self) -> Result<Arc<Adjacency>, QueryError> {
+        let epoch = self.conn.as_ref().expect("held until drop").epoch;
+        let key = (epoch, self.generation);
+        let cached = self
+            .store
+            .graph
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        if let Some(g) = cached.filter(|g| g.key == key) {
+            return Ok(g);
+        }
+        let g = Arc::new(Adjacency::build(self, key)?);
+        *self.store.graph.lock().unwrap_or_else(|p| p.into_inner()) = Some(g.clone());
+        Ok(g)
+    }
+
+    /// A slice this generation already built for the same request, if any.
+    pub(crate) fn cached_slice(&self, key: &str) -> Option<Arc<cartograph_api::types::GraphSlice>> {
+        let k = self.slice_key(key);
+        self.store
+            .slices
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .find(|(x, _)| *x == k)
+            .map(|(_, s)| s.clone())
+    }
+
+    pub(crate) fn keep_slice(&self, key: &str, slice: Arc<cartograph_api::types::GraphSlice>) {
+        let k = self.slice_key(key);
+        let mut all = self.store.slices.lock().unwrap_or_else(|p| p.into_inner());
+        all.retain(|(x, _)| x.0 == k.0 && x.1 == k.1 && *x != k);
+        if all.len() >= SLICES {
+            all.remove(0);
+        }
+        all.push((k, slice));
+    }
+
+    fn slice_key(&self, key: &str) -> SliceKey {
+        let epoch = self.conn.as_ref().expect("held until drop").epoch;
+        (epoch, self.generation, key.to_owned())
     }
 
     /// Fails with `too_large` when an answer would pass the row budget.
