@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use cartograph_core::Explain;
 use cartograph_facts::replay::Change;
-use cartograph_facts::{FactCache, Interval, Link, Replay};
+use cartograph_facts::{FactCache, Interval, Replay};
 use cartograph_git::{CommitStep, GitError, ObjectId, Repo};
 use cartograph_parse::{extractor_for, tracked};
 use cartograph_store::hash::store_fact_hash;
@@ -21,7 +21,10 @@ use cartograph_store::rusqlite::{self, params};
 use cartograph_store::writer::Batches;
 use cartograph_store::{Index, StoreError};
 
-use crate::extract::{ExtractStats, Facts, extract, extractor_of};
+use crate::derive::{DerivedStats, Inputs, RepoInput, refresh};
+use crate::extract::{ExtractStats, Facts, extract};
+use crate::layout::Circle;
+use crate::rows::Rows;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
@@ -77,6 +80,7 @@ pub struct Summary {
     pub extract_ms: u128,
     pub replay_ms: u128,
     pub total_ms: u128,
+    pub derived: DerivedStats,
 }
 
 /// The worker count for extraction: min(cores, 8), until IDX-02 settles it.
@@ -133,6 +137,18 @@ pub fn build_single(
     cache: &mut FactCache,
     workers: usize,
 ) -> Result<Summary, BuildError> {
+    build_single_with(repo_path, to, out, cache, workers, None)
+}
+
+/// [`build_single`], seeding the layout with positions carried over by node key (IDX-16).
+pub(crate) fn build_single_with(
+    repo_path: &Path,
+    to: Option<&str>,
+    out: &Path,
+    cache: &mut FactCache,
+    workers: usize,
+    carried: Option<HashMap<String, Circle>>,
+) -> Result<Summary, BuildError> {
     let t0 = Instant::now();
     let repo = Repo::open(repo_path)?;
     let head = repo
@@ -142,7 +158,6 @@ pub fn build_single(
         walk_and_extract(&repo, head, cache, workers)?;
     let ix = Index::create(out)?;
     let t = Instant::now();
-    let mut w = Writer::new(&ix.conn)?;
     let repo_name = repo_path
         .canonicalize()
         .ok()
@@ -172,179 +187,64 @@ pub fn build_single(
     // Every committed batch bumps meta.generation (IDX-13). A build killed part way leaves a file
     // with state `building` that passes quick_check; it is never renamed into place (IDX-16).
     let mut batches = Batches::begin(&ix.conn)?;
+    let mut rows = Rows::load(&ix.conn, -1)?;
+    let bare = |p: &str| p.to_owned();
     for (seq, step) in steps.iter().enumerate() {
-        let seq = seq as u64;
+        let seq = seq as i64;
         s.change_events += step.changes.len();
-        w.commit(seq, step)?;
-        replay.apply(&changes_of(step, &facts), seq);
-        for c in &step.changes {
-            w.file_change(seq, &c.path, c.new)?;
-        }
-        for i in replay.closed.drain(..) {
-            w.interval(&i.link, i.from, Some(i.to))?;
-            s.intervals += 1;
-        }
+        rows.commit(seq, 1, step)?;
+        rows.step(seq, 1, step, &bare, &changes_of(step, &facts), &mut replay)?;
         if batches.step() {
+            rows.flush(seq)?;
             batches.commit(&ix.conn)?;
         }
     }
-    let mut open: Vec<(&Link, u64)> = replay.open().collect();
-    open.sort();
-    for (l, from) in &open {
-        w.interval(l, *from, None)?;
-    }
-    s.open_at_head = open.len();
-    s.intervals += open.len();
-    w.facts(&facts)?;
+    let last = steps.len().saturating_sub(1) as i64;
+    rows.flush(last)?;
+    rows.facts(facts.iter())?;
+    let count = |sql: &str| ix.conn.query_row(sql, [], |r| r.get::<_, i64>(0));
+    s.links = count("SELECT count(*) FROM link")? as usize;
+    s.intervals = count("SELECT count(*) FROM interval")? as usize;
+    s.open_at_head = count("SELECT count(*) FROM interval WHERE to_seq IS NULL")? as usize;
     s.resolutions = replay.stats.resolutions;
-    s.links = w.links.len();
     s.outcomes = replay.outcomes();
+    let (files_total, files_parsed, imports_total, imports_resolved) =
+        crate::derive::coverage(&replay);
+    let moved = std::mem::take(&mut rows.moved);
     s.replay_ms = t.elapsed().as_millis();
     s.total_ms = t0.elapsed().as_millis();
     ix.conn.execute(
-        "UPDATE run SET finished_at = unixepoch(), stats = ?1 WHERE id = 1",
-        [format!("{s:?}")],
-    )?;
-    let last = steps.len().saturating_sub(1) as i64;
-    ix.conn.execute(
-        "UPDATE repo SET indexed_commit = head, indexed_seq = ?1 WHERE id = 1",
-        [last],
+        "UPDATE run SET finished_at = unixepoch(), stats = ?1, files_total = ?2,
+           files_parsed = ?3, imports_total = ?4, imports_resolved = ?5 WHERE id = 1",
+        params![
+            format!("{s:?}"),
+            files_total,
+            files_parsed,
+            imports_total,
+            imports_resolved
+        ],
     )?;
     ix.conn.execute_batch(&format!(
         "UPDATE meta SET value = 'complete' WHERE key = 'state';
          INSERT OR REPLACE INTO meta (key, value) VALUES ('watermark_seq', {last});"
     ))?;
-    store_fact_hash(&ix.conn)?;
+    let hash = store_fact_hash(&ix.conn)?;
+    let inputs = Inputs {
+        repos: vec![RepoInput {
+            id: 1,
+            name: &repo_name,
+            prefixed: false,
+            repo: &repo,
+            tip: head,
+            scopes: &[],
+        }],
+        moved,
+        carried,
+        ..Default::default()
+    };
+    s.derived = refresh::<BuildError>(&ix.conn, &inputs, &hash, last)?;
     batches.finish(&ix.conn)?;
     Ok(s)
-}
-
-/// Rows for one build. Intervals are written when they close, and the open ones at the end.
-struct Writer<'c> {
-    conn: &'c rusqlite::Connection,
-    /// Path -> (file id, node id, open blob).
-    files: HashMap<String, (i64, i64, Option<ObjectId>)>,
-    links: HashMap<Link, i64>,
-}
-
-impl<'c> Writer<'c> {
-    fn new(conn: &'c rusqlite::Connection) -> rusqlite::Result<Self> {
-        Ok(Self {
-            conn,
-            files: HashMap::new(),
-            links: HashMap::new(),
-        })
-    }
-
-    fn commit(&mut self, seq: u64, s: &CommitStep) -> rusqlite::Result<()> {
-        self.conn
-            .prepare_cached(
-                "INSERT INTO commits (seq, repo, sha, time, corrected_time, author, summary)
-                 VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6)",
-            )?
-            .execute(params![
-                seq as i64,
-                s.sha.as_bytes(),
-                s.time,
-                s.corrected_time,
-                s.author,
-                s.summary
-            ])?;
-        Ok(())
-    }
-
-    /// One lineage per path until IDX-18 detects renames: a path that comes back keeps its file.
-    fn file_change(&mut self, seq: u64, path: &str, new: Option<ObjectId>) -> rusqlite::Result<()> {
-        let seq = seq as i64;
-        let (file, _, old) = match self.files.get(path) {
-            Some(f) => *f,
-            None => {
-                self.conn
-                    .prepare_cached("INSERT INTO file (repo) VALUES (1)")?
-                    .execute([])?;
-                let file = self.conn.last_insert_rowid();
-                self.conn
-                    .prepare_cached("INSERT INTO node (kind, file) VALUES ('file', ?1)")?
-                    .execute([file])?;
-                let node = self.conn.last_insert_rowid();
-                self.files.insert(path.to_owned(), (file, node, None));
-                (file, node, None)
-            }
-        };
-        if old.is_some() {
-            self.conn
-                .prepare_cached(
-                    "UPDATE file_version SET to_seq = ?2 WHERE file = ?1 AND to_seq IS NULL",
-                )?
-                .execute(params![file, seq])?;
-            if new.is_none() {
-                self.conn
-                    .prepare_cached(
-                        "UPDATE file_path SET to_seq = ?2 WHERE file = ?1 AND to_seq IS NULL",
-                    )?
-                    .execute(params![file, seq])?;
-            }
-        }
-        if let Some(n) = new {
-            if old.is_none() {
-                self.conn
-                    .prepare_cached(
-                        "INSERT INTO file_path (file, path, from_seq) VALUES (?1, ?2, ?3)",
-                    )?
-                    .execute(params![file, path, seq])?;
-            }
-            self.conn
-                .prepare_cached(
-                    "INSERT INTO file_version (file, blob, from_seq) VALUES (?1, ?2, ?3)",
-                )?
-                .execute(params![file, n.as_bytes(), seq])?;
-        }
-        self.files.get_mut(path).expect("inserted").2 = new;
-        Ok(())
-    }
-
-    fn interval(&mut self, link: &Link, from: u64, to: Option<u64>) -> rusqlite::Result<()> {
-        let id = match self.links.get(link) {
-            Some(id) => *id,
-            None => {
-                let node = |p: &str| self.files.get(p).expect("a link joins two indexed files").1;
-                self.conn
-                    .prepare_cached("INSERT INTO link (kind, src, dst) VALUES (?1, ?2, ?3)")?
-                    .execute(params![link.0.as_str(), node(&link.1), node(&link.2)])?;
-                let id = self.conn.last_insert_rowid();
-                self.links.insert(link.clone(), id);
-                id
-            }
-        };
-        self.conn
-            .prepare_cached("INSERT INTO interval (link, from_seq, to_seq) VALUES (?1, ?2, ?3)")?
-            .execute(params![id, from as i64, to.map(|t| t as i64)])?;
-        Ok(())
-    }
-
-    fn facts(&mut self, facts: &Facts) -> rusqlite::Result<()> {
-        let mut kinds: HashMap<&str, i64> = HashMap::new();
-        let mut rows: Vec<_> = facts.iter().collect();
-        rows.sort_by_key(|((o, k), _)| (*o, *k));
-        for ((oid, kind), f) in rows {
-            let ex = match kinds.get(kind) {
-                Some(id) => *id,
-                None => {
-                    self.conn.execute(
-                        "INSERT INTO extractor (name, version) VALUES (?1, ?2)",
-                        params![kind, extractor_of(kind).version()],
-                    )?;
-                    let id = self.conn.last_insert_rowid();
-                    kinds.insert(kind, id);
-                    id
-                }
-            };
-            self.conn
-                .prepare_cached("INSERT INTO fact (blob, extractor, payload) VALUES (?1, ?2, ?3)")?
-                .execute(params![oid.as_bytes(), ex, f.encode()])?;
-        }
-        Ok(())
-    }
 }
 
 /// The links live at `seq`, read back from an index: `(kind, from path, to path)`.

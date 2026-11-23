@@ -2,6 +2,17 @@
 source: crates/cartograph-store/src/tests.rs
 expression: "rows.join(\";\\n\")"
 ---
+CREATE TABLE alias (
+  host TEXT NOT NULL,
+  node INTEGER NOT NULL REFERENCES node (id),
+  source TEXT NOT NULL
+) STRICT;
+CREATE TABLE archived_interval (
+  rewrite INTEGER NOT NULL REFERENCES rewrite (id),
+  link INTEGER NOT NULL REFERENCES link (id),
+  from_sha BLOB NOT NULL,
+  to_sha BLOB
+) STRICT;
 CREATE TABLE commits (
   seq INTEGER PRIMARY KEY,
   repo INTEGER NOT NULL REFERENCES repo (id),
@@ -11,6 +22,13 @@ CREATE TABLE commits (
   author TEXT NOT NULL,
   summary TEXT NOT NULL
 ) STRICT;
+CREATE TABLE derived (
+  kind TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  inputs_key BLOB NOT NULL,
+  stale INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (kind, scope)
+) STRICT, WITHOUT ROWID;
 CREATE TABLE extractor (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -31,7 +49,9 @@ CREATE TABLE file_path (
   file INTEGER NOT NULL REFERENCES file (id),
   path TEXT NOT NULL,
   from_seq INTEGER NOT NULL,
-  to_seq INTEGER
+  to_seq INTEGER,
+  via TEXT NOT NULL DEFAULT 'add',
+  similarity INTEGER
 ) STRICT;
 CREATE TABLE file_version (
   file INTEGER NOT NULL REFERENCES file (id),
@@ -41,6 +61,14 @@ CREATE TABLE file_version (
 ) STRICT;
 CREATE TABLE interval (
   link INTEGER NOT NULL REFERENCES link (id),
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE TABLE layout (
+  node INTEGER NOT NULL REFERENCES node (id),
+  x REAL NOT NULL,
+  y REAL NOT NULL,
+  r REAL NOT NULL,
   from_seq INTEGER NOT NULL,
   to_seq INTEGER
 ) STRICT;
@@ -58,7 +86,23 @@ CREATE TABLE meta (
 CREATE TABLE node (
   id INTEGER PRIMARY KEY,
   kind TEXT NOT NULL,
-  file INTEGER REFERENCES file (id)
+  file INTEGER REFERENCES file (id),
+  key TEXT,
+  name TEXT,
+  parent INTEGER,
+  service INTEGER,
+  detected_by TEXT,
+  fan_in INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE TABLE node_span (
+  node INTEGER NOT NULL REFERENCES node (id),
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE TABLE note (
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  detail TEXT NOT NULL
 ) STRICT;
 CREATE TABLE repo (
   id INTEGER PRIMARY KEY,
@@ -70,14 +114,62 @@ CREATE TABLE repo (
   indexed_seq INTEGER,
   removed INTEGER NOT NULL DEFAULT 0
 ) STRICT;
+CREATE TABLE rewrite (
+  id INTEGER PRIMARY KEY,
+  repo INTEGER NOT NULL REFERENCES repo (id),
+  old_head BLOB NOT NULL,
+  new_head BLOB NOT NULL,
+  base BLOB,
+  at INTEGER,
+  recorded_at INTEGER NOT NULL,
+  archived INTEGER NOT NULL,
+  dropped INTEGER NOT NULL
+) STRICT;
 CREATE TABLE run (
   id INTEGER PRIMARY KEY,
   started_at INTEGER NOT NULL,
   finished_at INTEGER,
   writer_version TEXT NOT NULL,
   head BLOB,
-  stats TEXT
+  stats TEXT,
+  files_total INTEGER,
+  files_parsed INTEGER,
+  imports_total INTEGER,
+  imports_resolved INTEGER
 ) STRICT;
+CREATE TABLE scope_count (
+  node INTEGER PRIMARY KEY REFERENCES node (id),
+  modules INTEGER NOT NULL,
+  files INTEGER NOT NULL,
+  links_out INTEGER NOT NULL,
+  links_in INTEGER NOT NULL,
+  links_inside INTEGER NOT NULL
+) STRICT;
+CREATE VIRTUAL TABLE search USING fts5 (
+  name, split, path, docstring, summary,
+  content = '', contentless_delete = 1, prefix = '2 3', tokenize = 'unicode61'
+);
+CREATE TABLE 'search_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+CREATE TABLE 'search_data'(id INTEGER PRIMARY KEY, block BLOB);
+CREATE TABLE 'search_docsize'(id INTEGER PRIMARY KEY, sz BLOB, origin INTEGER);
+CREATE TABLE 'search_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE VIRTUAL TABLE search_sub USING fts5 (
+  name, path, content = '', contentless_delete = 1, tokenize = 'trigram'
+);
+CREATE TABLE 'search_sub_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+CREATE TABLE 'search_sub_data'(id INTEGER PRIMARY KEY, block BLOB);
+CREATE TABLE 'search_sub_docsize'(id INTEGER PRIMARY KEY, sz BLOB, origin INTEGER);
+CREATE TABLE 'search_sub_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE TABLE unresolved (
+  file INTEGER NOT NULL REFERENCES file (id),
+  spec TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  stage TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX archived_interval_rewrite ON archived_interval (rewrite);
 CREATE UNIQUE INDEX commits_repo_sha ON commits (repo, sha);
 CREATE INDEX commits_sha ON commits (sha);
 CREATE INDEX commits_time ON commits (corrected_time);
@@ -86,4 +178,12 @@ CREATE INDEX file_path_path ON file_path (path);
 CREATE INDEX file_version_file ON file_version (file, from_seq);
 CREATE INDEX interval_at ON interval (from_seq, to_seq, link);
 CREATE INDEX interval_link ON interval (link);
-CREATE INDEX node_file ON node (file)
+CREATE INDEX layout_node ON layout (node, from_seq);
+CREATE INDEX node_file ON node (file);
+CREATE UNIQUE INDEX node_key ON node (key);
+CREATE INDEX node_parent ON node (parent);
+CREATE INDEX node_service ON node (service);
+CREATE INDEX node_span_node ON node_span (node);
+CREATE INDEX note_seq ON note (seq);
+CREATE INDEX unresolved_at ON unresolved (from_seq, to_seq);
+CREATE INDEX unresolved_file ON unresolved (file, spec)

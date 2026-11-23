@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 use cartograph_core::Explain;
 use cartograph_facts::cache::create_private_dir;
 use cartograph_facts::replay::Change;
-use cartograph_facts::{FactCache, Interval, Link, Replay, SNAPSHOT_VERSION};
+use cartograph_facts::{FactCache, Replay, SNAPSHOT_VERSION};
 use cartograph_git::{CommitStep, GitError, ObjectId, Repo};
 use cartograph_parse::{BlobFacts, extractor_for, tracked};
 use cartograph_store::hash::store_fact_hash;
@@ -46,7 +46,10 @@ use cartograph_store::rusqlite::{self, OptionalExtension, params};
 use cartograph_store::writer::{Batches, DIRTY_FILE, Progress, WriterLock, mark_dirty, recover};
 use cartograph_store::{Index, StoreError};
 
-use crate::extract::{ExtractStats, Facts, extract, extractor_of};
+use crate::derive::{DerivedStats, Inputs, RepoInput, coverage, refresh};
+use crate::extract::{ExtractStats, Facts, extract};
+use crate::rows::Rows;
+use crate::structure::ServiceSpec;
 use crate::timeline::{RepoSpec, duplicate_packages, merge, namespaced, valid_repo_name};
 
 /// At most this many extra rounds per process for the dirty flag (D2), so a commit loop can't pin
@@ -67,6 +70,8 @@ pub struct Workspace {
     pub exclude: Vec<String>,
     /// `manifest::config_hash`, stored as `meta.config_hash` for the fact hash (IDX-17).
     pub config_hash: Option<String>,
+    /// The manifest's `services:` entries (C6's first rule, IDX-20).
+    pub services: Vec<ServiceSpec>,
 }
 
 impl Workspace {
@@ -171,6 +176,11 @@ pub struct SyncSummary {
     pub dirty_left: bool,
     /// The replay was restored from the last sync's snapshot instead of resolving the tree.
     pub restored: bool,
+    /// Derived artefacts rebuilt (IDX-21): zero when nothing they read changed.
+    pub derived: DerivedStats,
+    /// Coverage at the last step (IDX-22): (files total, files parsed, imports total, imports
+    /// resolved).
+    pub coverage: (i64, i64, i64, i64),
     pub rehydrate_ms: u128,
     pub walk_ms: u128,
     pub replay_ms: u128,
@@ -378,24 +388,96 @@ pub fn sync_with_progress(
     Ok(SyncOutcome::Synced(s))
 }
 
+/// C7, after "Split" added a `services:` entry for `repo` (IDX-20): rebuilds that repository's
+/// structure and what depends on it (counts, search, layout) under the writer lock. Links and
+/// lineages are untouched: this re-parents nodes, it doesn't replay.
+pub fn restructure(ws: &Workspace, repo: &str) -> Result<DerivedStats, SyncError> {
+    let Some(spec) = ws.repos.iter().find(|r| r.name == repo) else {
+        return Err(SyncError::BadName(repo.to_owned()));
+    };
+    let _lock = acquire(ws, true)?.expect("acquire waits");
+    let ix = Index::open_write(&ws.index_path())?;
+    let conn = &ix.conn;
+    let meta = |k: &str| -> rusqlite::Result<i64> {
+        Ok(conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", [k], |r| r.get(0))
+            .optional()?
+            .unwrap_or(0))
+    };
+    let (prefixed, watermark) = (meta("repo_prefix")? != 0, meta("watermark_seq")?);
+    let row: Option<(i64, Option<Vec<u8>>)> = conn
+        .query_row(
+            "SELECT id, indexed_commit FROM repo WHERE name = ?1",
+            [repo],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((id, Some(tip))) = row else {
+        return Ok(DerivedStats::default());
+    };
+    let Some(tip) = oid(&tip) else {
+        return Ok(DerivedStats::default());
+    };
+    let git = Repo::open(&spec.path)?;
+    let batches = Batches::begin(conn)?;
+    cartograph_store::derived::forget(conn, "detect", repo)?;
+    let hash = cartograph_store::fact_hash(conn)?;
+    let inputs = Inputs {
+        repos: vec![RepoInput {
+            id,
+            name: &spec.name,
+            prefixed,
+            repo: &git,
+            tip,
+            scopes: &spec.scopes,
+        }],
+        services: &ws.services,
+        exclude: &ws.exclude,
+        config_hash: ws.config_hash.as_deref(),
+        ..Default::default()
+    };
+    let d = refresh::<SyncError>(conn, &inputs, &hash, watermark)?;
+    batches.finish(conn)?;
+    Ok(d)
+}
+
 /// `git fetch` in each registry repository (IDX-14 security): no terminal prompt, `file://`
 /// remotes only when the user's config allows them. Returns the repositories whose fetch failed;
 /// the sync goes on with what is local.
+///
+/// Four repositories are fetched at a time (IDX-27, proposed); a failure is recorded and never
+/// retried in a loop.
 fn fetch(ws: &Workspace) -> Vec<String> {
     let mut failed = Vec::new();
-    for r in &ws.repos {
-        let ok = Command::new("git")
-            .arg("-C")
-            .arg(&r.path)
-            .args(["-c", "protocol.file.allow=user", "fetch", "--quiet"])
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
-        if !ok {
-            failed.push(r.name.clone());
-        }
+    for chunk in ws.repos.chunks(4) {
+        let ok: Vec<bool> = std::thread::scope(|s| {
+            let jobs: Vec<_> = chunk
+                .iter()
+                .map(|r| {
+                    s.spawn(move || {
+                        Command::new("git")
+                            .arg("-C")
+                            .arg(&r.path)
+                            .args(["-c", "protocol.file.allow=user", "fetch", "--quiet"])
+                            .env("GIT_TERMINAL_PROMPT", "0")
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .status()
+                            .is_ok_and(|s| s.success())
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|j| j.join().unwrap_or(false))
+                .collect()
+        });
+        failed.extend(
+            chunk
+                .iter()
+                .zip(ok)
+                .filter(|(_, ok)| !ok)
+                .map(|(r, _)| r.name.clone()),
+        );
     }
     failed
 }
@@ -448,7 +530,12 @@ fn round(
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<(), SyncError> {
     let path = ws.index_path();
+    let mut carried = None;
     if path.exists() && bring_current(lock, &path) == Upgrade::Rebuild {
+        // Positions carry over by node key into the index built again (IDX-25).
+        carried = Index::open_read(&path)
+            .ok()
+            .and_then(|ix| crate::layout::positions_by_key(&ix.conn).ok());
         discard(ws)?;
     }
     let ix = if path.exists() {
@@ -537,6 +624,7 @@ fn round(
 
     // 2. Each repository's base and tip.
     let mut parts = Vec::new();
+    let mut rewrites: Vec<Rewrite> = Vec::new();
     for spec in specs {
         let repo = Repo::open(&spec.path)?;
         let tip = match &spec.branch {
@@ -559,7 +647,9 @@ fn round(
             && let Err(GitError::NotAncestor { .. }) =
                 repo.walk_first_parent(oid(&commits[last].sha), tip, tracked)
         {
-            // Rewritten: keep the indexed steps still on the chain, replay from there.
+            // Rewritten (IDX-19): the merge base is the last indexed step still on the new
+            // first-parent chain (none: the repo is walked again from its root). Steps after it
+            // are replayed, for every repo, since cross-repo links depend on order.
             let chain = first_parent_chain(&repo, tip)?;
             base = indexed
                 .iter()
@@ -567,6 +657,13 @@ fn round(
                 .count();
             floor = floor.min(commits[indexed[base]].seq - 1);
             s.rewritten.push(spec.name.clone());
+            let kept = base.checked_sub(1).map(|i| &commits[indexed[i]]);
+            rewrites.push(Rewrite {
+                repo: id.expect("indexed"),
+                old_head: commits[last].sha.clone(),
+                new_head: tip,
+                base: kept.map(|c| (c.sha.clone(), c.seq, c.corrected)),
+            });
         }
         if id.is_none() {
             s.added.push(spec.name.clone());
@@ -579,6 +676,12 @@ fn round(
             indexed,
             base,
         });
+    }
+
+    // 2b. An extractor whose version changed (IDX-21): its blobs are extracted again, and a blob
+    // whose facts changed is replayed from the first step it was alive at.
+    if let Some(changed_at) = reextract(conn, &parts, cache, opts.workers, &mut s.extract)? {
+        floor = floor.min(changed_at - 1);
     }
 
     // 3. The floor: the last indexed step before every new step. Walks start at the base; a part
@@ -639,6 +742,9 @@ fn round(
                 }
             }
         }
+        for r in &rewrites {
+            archive(conn, r)?;
+        }
         truncate(conn, floor)?;
         s.replayed_from = Some(floor);
     }
@@ -672,11 +778,9 @@ fn round(
                 replay = r;
                 s.restored = true;
             }
-            None => {
-                replay.apply(&tree, floor as u64);
-                replay.closed.clear();
-            }
+            None => replay.apply(&tree, floor as u64),
         }
+        replay.clear_events();
     }
     let indexed_facts: HashSet<(ObjectId, &str)> = facts.keys().copied().collect();
     for (k, f) in kept_facts {
@@ -740,6 +844,8 @@ fn round(
     let mut cancelled = false;
     for (r, step) in merge(new) {
         seq += 1;
+        let prefix = prefixes[r];
+        let path = |p: &str| namespaced(prefix, p);
         let changes: Vec<Change> = step
             .changes
             .iter()
@@ -748,7 +854,7 @@ fn round(
                     let kind = extractor_for(&c.path)?.1;
                     facts.get(&(o, kind)).map(Arc::clone)
                 });
-                (namespaced(prefixes[r], &c.path), f)
+                (path(&c.path), f)
             })
             .collect();
         if is_removal(&step) {
@@ -756,13 +862,7 @@ fn round(
         } else {
             rows.commit(seq, ids[r], &step)?;
         }
-        replay.apply(&changes, seq as u64);
-        for ((path, _), c) in changes.iter().zip(&step.changes) {
-            rows.file_change(ids[r], seq, path, c.new)?;
-        }
-        for i in replay.closed.drain(..) {
-            rows.close(&i)?;
-        }
+        rows.step(seq, ids[r], &step, &path, &changes, &mut replay)?;
         s.steps += 1;
         done += 1;
         progress(done, total);
@@ -777,7 +877,7 @@ fn round(
             false,
         );
         if batches.step() {
-            rows.flush(&replay, seq)?;
+            rows.flush(seq)?;
             batches.commit(conn)?;
             // E5: a cancel stops the round after the batch it lands in, not at its end. The steps
             // so far are a whole prefix of the merged timeline, so the round ends below as an
@@ -813,19 +913,21 @@ fn round(
             [],
             |r| r.get::<_, i64>(0),
         )?;
-        rows.removal(seq, *id, name, corrected)?;
+        let step = removal_step(seq, *id, name, corrected, &live);
+        rows.commit_only(seq, *id, &step)?;
         let changes: Vec<Change> = live.iter().map(|p| (p.clone(), None)).collect();
-        replay.apply(&changes, seq as u64);
-        for p in &live {
-            rows.file_change(*id, seq, p, None)?;
-        }
-        for i in replay.closed.drain(..) {
-            rows.close(&i)?;
-        }
+        rows.step(
+            seq,
+            *id,
+            &step,
+            &|p: &str| p.to_owned(),
+            &changes,
+            &mut replay,
+        )?;
         s.removed.push(name.clone());
         s.steps += 1;
     }
-    rows.flush(&replay, seq)?;
+    rows.flush(seq)?;
     // The check reads each path's first folder as its repo; a one-repository tree has no repo
     // prefix, so its top folders would pass for repos and two packages in one repo would warn.
     s.duplicate_packages = if prefixed {
@@ -835,21 +937,181 @@ fn round(
     };
     s.watermark = seq;
     s.replay_ms += t.elapsed().as_millis();
+    s.coverage = coverage(&replay);
+    let (files_total, files_parsed, imports_total, imports_resolved) = s.coverage;
     conn.execute(
-        "INSERT INTO run (started_at, finished_at, writer_version, stats)
-         VALUES (unixepoch(), unixepoch(), ?1, ?2)",
+        "INSERT INTO run (started_at, finished_at, writer_version, stats, files_total,
+           files_parsed, imports_total, imports_resolved)
+         VALUES (unixepoch(), unixepoch(), ?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             env!("CARGO_PKG_VERSION"),
-            format!("sync: {} steps after {floor}", s.steps)
+            format!("sync: {} steps after {floor}", s.steps),
+            files_total,
+            files_parsed,
+            imports_total,
+            imports_resolved
         ],
     )?;
     conn.execute("UPDATE meta SET value = 'complete' WHERE key = 'state'", [])?;
-    // ponytail: IDX-21 (derived rows) and IDX-25 (layout) join here; CARTOGRAPH.md (SRV-23) is
-    // written by the caller from `freshness`.
+    // CARTOGRAPH.md (SRV-23) is written by the caller from `freshness`.
     let hash = store_fact_hash(conn)?;
+    let moved = std::mem::take(&mut rows.moved);
+    drop(rows);
+    let tips: Vec<Option<ObjectId>> = parts
+        .iter()
+        .map(|p| {
+            conn.query_row(
+                "SELECT indexed_commit FROM repo WHERE name = ?1",
+                [&p.spec.name],
+                |r| r.get::<_, Option<Vec<u8>>>(0),
+            )
+            .map(|b| b.as_deref().and_then(oid))
+        })
+        .collect::<Result<_, _>>()?;
+    let inputs = Inputs {
+        repos: parts
+            .iter()
+            .zip(&ids)
+            .zip(&tips)
+            .filter_map(|((p, id), tip)| {
+                Some(RepoInput {
+                    id: *id,
+                    name: &p.spec.name,
+                    prefixed,
+                    repo: &p.repo,
+                    tip: (*tip)?,
+                    scopes: &p.spec.scopes,
+                })
+            })
+            .collect(),
+        services: &ws.services,
+        exclude: &ws.exclude,
+        config_hash: ws.config_hash.as_deref(),
+        moved,
+        carried: carried.take(),
+        removed: db_repos
+            .iter()
+            .filter(|(_, n)| !ws.repos.iter().any(|r| &r.name == n))
+            .map(|(id, n)| (*id, n.clone(), prefixed))
+            .collect(),
+    };
+    let d = refresh::<SyncError>(conn, &inputs, &hash, seq)?;
+    s.derived.structures += d.structures;
+    s.derived.counts += d.counts;
+    s.derived.search_rows += d.search_rows;
+    s.derived.layouts += d.layouts;
     batches.finish(conn)?;
     put_snapshot(ws, &hash.to_string(), seq, &replay);
     Ok(())
+}
+
+/// Extracts again the blobs whose facts came from an older version of their extractor (IDX-21,
+/// B3), reading each from a repository that has it. Only those extractors' blobs are parsed; facts
+/// and cache rows of every other extractor are untouched. The fact rows move to the new version.
+/// Returns the first step at which a blob whose facts changed was alive, if any.
+fn reextract(
+    conn: &rusqlite::Connection,
+    parts: &[Part],
+    cache: &mut FactCache,
+    workers: usize,
+    stats: &mut ExtractStats,
+) -> Result<Option<i64>, SyncError> {
+    let stale: Vec<(i64, String)> = conn
+        .prepare("SELECT id, name, version FROM extractor")?
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .filter_map(|r| match r {
+            Ok((id, name, version)) => {
+                let current = extractor_for_kind(&name)?;
+                (current != version).then_some(Ok((id, name)))
+            }
+            Err(e) => Some(Err(e)),
+        })
+        .collect::<Result<_, _>>()?;
+    if stale.is_empty() {
+        return Ok(None);
+    }
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(workers.max(1))
+        .build()
+        .expect("a thread pool");
+    let mut first: Option<i64> = None;
+    for (old_id, kind) in stale {
+        let Some(kind) = cartograph_parse::EXTRACTORS
+            .iter()
+            .find_map(|e| e.kinds().iter().find(|k| **k == kind).copied())
+        else {
+            continue;
+        };
+        // Each blob with one repository it was seen in.
+        let blobs: Vec<(Vec<u8>, String, Vec<u8>)> = conn
+            .prepare(
+                "SELECT f.blob, (SELECT r.name FROM file_version fv JOIN file fi ON fi.id = fv.file
+                                 JOIN repo r ON r.id = fi.repo WHERE fv.blob = f.blob LIMIT 1),
+                        f.payload
+                 FROM fact f WHERE f.extractor = ?1",
+            )?
+            .query_map([old_id], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    r.get(2)?,
+                ))
+            })?
+            .collect::<Result<_, _>>()?;
+        let new_id = crate::rows::extractor_id(conn, kind)?;
+        for p in parts {
+            let mine: Vec<&(Vec<u8>, String, Vec<u8>)> =
+                blobs.iter().filter(|b| b.1 == p.spec.name).collect();
+            let items: Vec<(ObjectId, &'static str)> = mine
+                .iter()
+                .filter_map(|b| Some((oid(&b.0)?, kind)))
+                .collect();
+            let mut fresh = Facts::new();
+            let st = extract(&p.repo, items, cache, &pool, &mut fresh)?;
+            stats.blobs += st.blobs;
+            stats.parsed += st.parsed;
+            stats.from_cache += st.from_cache;
+            stats.skipped += st.skipped;
+            for (blob, _, old) in mine {
+                let Some(f) = oid(blob).and_then(|o| fresh.get(&(o, kind))) else {
+                    continue;
+                };
+                let payload = f.encode();
+                conn.prepare_cached(
+                    "UPDATE fact SET extractor = ?3, payload = ?4 WHERE blob = ?1 AND extractor = ?2",
+                )?
+                .execute(params![blob, old_id, new_id, payload])?;
+                if &payload != old {
+                    let at: Option<i64> = conn
+                        .prepare_cached("SELECT min(from_seq) FROM file_version WHERE blob = ?1")?
+                        .query_row([blob], |r| r.get(0))?;
+                    first = match (first, at) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (a, b) => a.or(b),
+                    };
+                }
+            }
+        }
+        conn.execute(
+            "DELETE FROM extractor WHERE id = ?1 AND id NOT IN (SELECT extractor FROM fact)",
+            [old_id],
+        )?;
+    }
+    Ok(first)
+}
+
+/// The version of the extractor that makes `kind`, if this binary has one.
+fn extractor_for_kind(kind: &str) -> Option<&'static str> {
+    cartograph_parse::EXTRACTORS
+        .iter()
+        .find(|e| kind.split('/').next() == Some(e.name()))
+        .map(|e| e.version())
 }
 
 /// The first line of a snapshot file: what it was taken from. A snapshot is used only by the next
@@ -927,15 +1189,42 @@ fn write_cache(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
-/// The synthetic step that closed a removed folder's files ([`Rows::removal`]): it is not a
+/// The synthetic step of a folder removed from the workspace: it deletes the folder's live files.
+/// Its sha is 20 bytes no git object can have by accident: a marker and the step.
+fn removal_step(seq: i64, repo: i64, name: &str, corrected: i64, live: &[String]) -> CommitStep {
+    let mut sha = [0xffu8; 20];
+    sha[..8].copy_from_slice(&seq.to_be_bytes());
+    sha[8..16].copy_from_slice(&repo.to_be_bytes());
+    CommitStep {
+        sha: ObjectId::from_bytes_or_panic(&sha),
+        time: corrected,
+        corrected_time: corrected,
+        author: "cartograph".into(),
+        summary: format!("{name}: removed from workspace"),
+        changes: live
+            .iter()
+            .map(|p| cartograph_git::Change {
+                path: p.clone(),
+                old: None,
+                new: None,
+            })
+            .collect(),
+        renames: Vec::new(),
+        rename_limit: false,
+    }
+}
+
+/// The synthetic step that closed a removed folder's files ([`removal_step`]): it is not a
 /// commit of the repository, so it never becomes the repository's indexed commit.
 fn is_removal(step: &CommitStep) -> bool {
     step.author == "cartograph" && step.sha.as_bytes()[16..] == [0xff; 4]
 }
 
 /// A removed repository's steps after `floor`, oldest first, rebuilt from its rows: its commits,
-/// and the file versions that opened or closed at each. Paths are namespaced as stored; those the
-/// workspace now excludes are left out. The facts of every blob they add go into `facts`.
+/// and at each one the paths and blobs of its lineages before and after, so additions,
+/// modifications, deletions and renames come back as they were walked. Paths are namespaced as
+/// stored; those the workspace now excludes are left out. The facts of every blob they add go into
+/// `facts`.
 fn removed_history(
     conn: &rusqlite::Connection,
     repo: i64,
@@ -943,31 +1232,100 @@ fn removed_history(
     exclude: &[String],
     facts: &mut Facts,
 ) -> rusqlite::Result<Vec<CommitStep>> {
-    use cartograph_git::Change as GitChange;
+    use cartograph_git::{Change as GitChange, Rename};
     use std::collections::BTreeMap;
-    let mut at: BTreeMap<i64, BTreeMap<String, GitChange>> = BTreeMap::new();
+    type Span<T> = (T, i64, Option<i64>);
+    // Per lineage: its paths (path, via, similarity) and its versions, each with its interval.
+    type PathRow = (String, String, Option<i64>);
+    let mut paths: BTreeMap<i64, Vec<Span<PathRow>>> = BTreeMap::new();
+    let mut versions: BTreeMap<i64, Vec<Span<ObjectId>>> = BTreeMap::new();
     let mut st = conn.prepare(
-        "SELECT fv.from_seq, fv.to_seq, fv.blob,
-                (SELECT path FROM file_path p WHERE p.file = fv.file ORDER BY from_seq LIMIT 1)
-         FROM file_version fv JOIN file f ON f.id = fv.file
-         WHERE f.repo = ?1 AND (fv.from_seq > ?2 OR fv.to_seq > ?2)",
+        "SELECT fp.file, fp.path, fp.via, fp.similarity, fp.from_seq, fp.to_seq FROM file_path fp
+         JOIN file f ON f.id = fp.file WHERE f.repo = ?1 AND (fp.from_seq > ?2 OR fp.to_seq > ?2
+           OR fp.to_seq IS NULL)",
     )?;
     let mut rows = st.query(params![repo, floor])?;
     while let Some(r) = rows.next()? {
-        let (from, to): (i64, Option<i64>) = (r.get(0)?, r.get(1)?);
-        let (Some(blob), Some(path)) = (
-            oid(r.get_ref(2)?.as_blob()?),
-            r.get::<_, Option<String>>(3)?,
-        ) else {
-            continue;
-        };
-        let inner = path.split_once('/').map_or(path.as_str(), |(_, p)| p);
-        if crate::timeline::excluded(exclude, inner) {
-            continue;
+        paths.entry(r.get(0)?).or_default().push((
+            (r.get(1)?, r.get(2)?, r.get(3)?),
+            r.get(4)?,
+            r.get(5)?,
+        ));
+    }
+    let mut st = conn.prepare(
+        "SELECT fv.file, fv.blob, fv.from_seq, fv.to_seq FROM file_version fv
+         JOIN file f ON f.id = fv.file WHERE f.repo = ?1 AND (fv.from_seq > ?2 OR fv.to_seq > ?2
+           OR fv.to_seq IS NULL)",
+    )?;
+    let mut rows = st.query(params![repo, floor])?;
+    while let Some(r) = rows.next()? {
+        if let Some(b) = oid(r.get_ref(1)?.as_blob()?) {
+            versions
+                .entry(r.get(0)?)
+                .or_default()
+                .push((b, r.get(2)?, r.get(3)?));
         }
-        if from > floor {
-            change(&mut at, from, &path).new = Some(blob);
-            if let Some((_, kind)) = extractor_for(&path)
+    }
+    let at = |spans: &[(i64, Option<i64>)], t: i64| {
+        spans
+            .iter()
+            .position(|(f, to)| *f <= t && to.is_none_or(|to| t < to))
+    };
+    let kept = |p: &str| {
+        let inner = p.split_once('/').map_or(p, |(_, p)| p);
+        !crate::timeline::excluded(exclude, inner)
+    };
+    let mut steps_at: BTreeMap<i64, (Vec<GitChange>, Vec<Rename>)> = BTreeMap::new();
+    for (file, ps) in &paths {
+        let vs = versions.get(file).map_or(&[][..], Vec::as_slice);
+        let mut events: Vec<i64> = ps
+            .iter()
+            .flat_map(|(_, f, t)| [Some(*f), *t])
+            .chain(vs.iter().flat_map(|(_, f, t)| [Some(*f), *t]))
+            .flatten()
+            .filter(|e| *e > floor)
+            .collect();
+        events.sort_unstable();
+        events.dedup();
+        let pspans: Vec<_> = ps.iter().map(|(_, f, t)| (*f, *t)).collect();
+        let vspans: Vec<_> = vs.iter().map(|(_, f, t)| (*f, *t)).collect();
+        let state = |t: i64| {
+            let p = at(&pspans, t).map(|i| &ps[i].0);
+            let v = at(&vspans, t).map(|i| vs[i].0);
+            p.zip(v).filter(|((path, ..), _)| kept(path))
+        };
+        for e in events {
+            let (before, after) = (state(e - 1), state(e));
+            let (changes, renames) = steps_at.entry(e).or_default();
+            let mut push = |path: &str, old, new| {
+                changes.push(GitChange {
+                    path: path.to_owned(),
+                    old,
+                    new,
+                })
+            };
+            match (before, after) {
+                (Some(((a, ..), x)), Some(((b, via, sim), y))) if a != b => {
+                    push(a, Some(x), None);
+                    push(b, None, Some(y));
+                    renames.push(Rename {
+                        from: a.clone(),
+                        to: b.clone(),
+                        similarity: sim.map_or(100, |s| s.clamp(0, 100) as u8),
+                        exact: via == "rename-exact",
+                    });
+                }
+                (Some(((a, ..), x)), Some((_, y))) if x != y => push(a, Some(x), Some(y)),
+                (Some(((a, ..), x)), None) => push(a, Some(x), None),
+                (None, Some(((b, ..), y))) => push(b, None, Some(y)),
+                _ => {}
+            }
+        }
+    }
+    for (changes, _) in steps_at.values() {
+        for c in changes {
+            let Some(blob) = c.new else { continue };
+            if let Some((_, kind)) = extractor_for(&c.path)
                 && !facts.contains_key(&(blob, kind))
                 && let Some(f) = conn
                     .prepare_cached(
@@ -981,9 +1339,6 @@ fn removed_history(
                 facts.insert((blob, kind), Arc::new(f));
             }
         }
-        if let Some(to) = to.filter(|t| *t > floor) {
-            change(&mut at, to, &path).old = Some(blob);
-        }
     }
     let mut st = conn.prepare(
         "SELECT seq, sha, time, corrected_time, author, summary FROM commits
@@ -996,42 +1351,75 @@ fn removed_history(
         let Some(sha) = oid(r.get_ref(1)?.as_blob()?) else {
             continue;
         };
+        let (mut changes, mut renames) = steps_at.remove(&seq).unwrap_or_default();
+        changes.sort_by(|a, b| a.path.cmp(&b.path));
+        renames.sort_by(|a, b| a.to.cmp(&b.to));
         steps.push(CommitStep {
             sha,
             time: r.get(2)?,
             corrected_time: r.get(3)?,
             author: r.get(4)?,
             summary: r.get(5)?,
-            changes: at
-                .remove(&seq)
-                .map(|m| m.into_values().collect())
-                .unwrap_or_default(),
+            changes,
+            renames,
+            rename_limit: false,
         });
     }
     Ok(steps)
 }
 
-fn change<'a>(
-    at: &'a mut std::collections::BTreeMap<
-        i64,
-        std::collections::BTreeMap<String, cartograph_git::Change>,
-    >,
-    seq: i64,
-    path: &str,
-) -> &'a mut cartograph_git::Change {
-    at.entry(seq)
-        .or_default()
-        .entry(path.to_owned())
-        .or_insert_with(|| cartograph_git::Change {
-            path: path.to_owned(),
-            old: None,
-            new: None,
-        })
+/// A history rewrite found by a round (IDX-19).
+struct Rewrite {
+    repo: i64,
+    old_head: Vec<u8>,
+    new_head: ObjectId,
+    /// The merge base: its sha, step and corrected time; `None` for unrelated history.
+    base: Option<(Vec<u8>, i64, i64)>,
+}
+
+/// Archived intervals kept per rewrite (IDX-19 security, proposed); the rest are counted.
+pub const ARCHIVE_CAP: i64 = 10_000;
+
+/// Records a rewrite and keeps the links of the old history that opened after the merge base,
+/// keyed by the old commits' shas (board G10: "links that existed only in the old history are kept
+/// separately"). Runs before the truncation removes them.
+fn archive(conn: &rusqlite::Connection, r: &Rewrite) -> rusqlite::Result<()> {
+    let after = r.base.as_ref().map_or(-1, |b| b.1);
+    let total: i64 = conn.query_row(
+        "SELECT count(*) FROM interval i JOIN link l ON l.id = i.link JOIN node n ON n.id = l.src
+         JOIN file f ON f.id = n.file WHERE f.repo = ?1 AND i.from_seq > ?2",
+        params![r.repo, after],
+        |x| x.get(0),
+    )?;
+    let archived = total.min(ARCHIVE_CAP);
+    conn.execute(
+        "INSERT INTO rewrite (repo, old_head, new_head, base, at, recorded_at, archived, dropped)
+         VALUES (?1, ?2, ?3, ?4, ?5, unixepoch(), ?6, ?7)",
+        params![
+            r.repo,
+            r.old_head,
+            r.new_head.as_bytes(),
+            r.base.as_ref().map(|b| b.0.clone()),
+            r.base.as_ref().map(|b| b.2),
+            archived,
+            total - archived
+        ],
+    )?;
+    let id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO archived_interval (rewrite, link, from_sha, to_sha)
+         SELECT ?1, i.link, cf.sha, ct.sha FROM interval i JOIN link l ON l.id = i.link
+         JOIN node n ON n.id = l.src JOIN file f ON f.id = n.file
+         JOIN commits cf ON cf.seq = i.from_seq LEFT JOIN commits ct ON ct.seq = i.to_seq
+         WHERE f.repo = ?2 AND i.from_seq > ?3 ORDER BY i.from_seq, i.link LIMIT ?4",
+        params![id, r.repo, after, ARCHIVE_CAP],
+    )?;
+    Ok(())
 }
 
 /// Removes every step after `floor`: rows opened after it go, rows closed after it reopen.
 fn truncate(conn: &rusqlite::Connection, floor: i64) -> rusqlite::Result<()> {
-    for t in ["interval", "file_version", "file_path"] {
+    for t in ["interval", "file_version", "file_path", "unresolved"] {
         conn.execute(&format!("DELETE FROM {t} WHERE from_seq > ?1"), [floor])?;
         conn.execute(
             &format!("UPDATE {t} SET to_seq = NULL WHERE to_seq > ?1"),
@@ -1039,6 +1427,7 @@ fn truncate(conn: &rusqlite::Connection, floor: i64) -> rusqlite::Result<()> {
         )?;
     }
     conn.execute("DELETE FROM commits WHERE seq > ?1", [floor])?;
+    conn.execute("DELETE FROM note WHERE seq > ?1", [floor])?;
     // Facts of blobs only the removed steps had, as a full build would never have seen them.
     conn.execute_batch(
         "DELETE FROM fact WHERE blob NOT IN (SELECT blob FROM file_version);
@@ -1092,257 +1481,4 @@ fn rehydrate(conn: &rusqlite::Connection, facts: &mut Facts) -> rusqlite::Result
         tree.push((path, Some(f)));
     }
     Ok(tree)
-}
-
-/// The rows a round writes. Paths map to their lineage across runs, read back from `file_path`.
-struct Rows<'c> {
-    conn: &'c rusqlite::Connection,
-    /// Path -> (file id, node id, open blob).
-    files: HashMap<String, (i64, i64, Option<ObjectId>)>,
-    links: HashMap<Link, i64>,
-    /// Links open at or before this step have their open row written.
-    written: i64,
-    /// Repo id -> its last step written: (seq, sha).
-    last: HashMap<i64, (i64, ObjectId)>,
-}
-
-impl<'c> Rows<'c> {
-    fn load(conn: &'c rusqlite::Connection, floor: i64) -> rusqlite::Result<Self> {
-        let mut files = HashMap::new();
-        let mut st = conn.prepare(
-            "SELECT fp.path, fp.file, n.id, fp.to_seq IS NULL FROM file_path fp
-             JOIN node n ON n.file = fp.file AND n.kind = 'file' ORDER BY fp.from_seq",
-        )?;
-        let mut live = Vec::new();
-        let mut rows = st.query([])?;
-        while let Some(r) = rows.next()? {
-            let path: String = r.get(0)?;
-            if r.get::<_, bool>(3)? {
-                live.push(path.clone());
-            }
-            files.insert(path, (r.get(1)?, r.get(2)?, None));
-        }
-        let mut st = conn.prepare(
-            "SELECT fp.path, fv.blob FROM file_version fv
-             JOIN file_path fp ON fp.file = fv.file AND fp.to_seq IS NULL
-             WHERE fv.to_seq IS NULL",
-        )?;
-        let mut rows = st.query([])?;
-        while let Some(r) = rows.next()? {
-            let path: String = r.get(0)?;
-            if let Some(f) = files.get_mut(&path) {
-                f.2 = oid(r.get_ref(1)?.as_blob()?);
-            }
-        }
-        Ok(Self {
-            conn,
-            files,
-            links: HashMap::new(),
-            written: floor,
-            last: HashMap::new(),
-        })
-    }
-
-    fn commit(&mut self, seq: i64, repo: i64, s: &CommitStep) -> rusqlite::Result<()> {
-        self.last.insert(repo, (seq, s.sha));
-        self.commit_only(seq, repo, s)
-    }
-
-    /// The commit row alone, without making it the repository's indexed commit.
-    fn commit_only(&mut self, seq: i64, repo: i64, s: &CommitStep) -> rusqlite::Result<()> {
-        self.conn
-            .prepare_cached(
-                "INSERT INTO commits (seq, repo, sha, time, corrected_time, author, summary)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )?
-            .execute(params![
-                seq,
-                repo,
-                s.sha.as_bytes(),
-                s.time,
-                s.corrected_time,
-                s.author,
-                s.summary
-            ])?;
-        Ok(())
-    }
-
-    /// The synthetic step of a folder removed from the workspace. Its sha is 20 bytes no git object
-    /// can have by accident: a marker and the step.
-    fn removal(&mut self, seq: i64, repo: i64, name: &str, corrected: i64) -> rusqlite::Result<()> {
-        let mut sha = [0xffu8; 20];
-        sha[..8].copy_from_slice(&seq.to_be_bytes());
-        sha[8..16].copy_from_slice(&repo.to_be_bytes());
-        self.conn.execute(
-            "INSERT INTO commits (seq, repo, sha, time, corrected_time, author, summary)
-             VALUES (?1, ?2, ?3, ?4, ?4, 'cartograph', ?5)",
-            params![
-                seq,
-                repo,
-                &sha[..],
-                corrected,
-                format!("{name}: removed from workspace")
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// One lineage per path until IDX-18 detects renames: a path that comes back keeps its file.
-    fn file_change(
-        &mut self,
-        repo: i64,
-        seq: i64,
-        path: &str,
-        new: Option<ObjectId>,
-    ) -> rusqlite::Result<()> {
-        let (file, _, old) = match self.files.get(path) {
-            Some(f) => *f,
-            None => {
-                self.conn
-                    .prepare_cached("INSERT INTO file (repo) VALUES (?1)")?
-                    .execute([repo])?;
-                let file = self.conn.last_insert_rowid();
-                self.conn
-                    .prepare_cached("INSERT INTO node (kind, file) VALUES ('file', ?1)")?
-                    .execute([file])?;
-                let node = self.conn.last_insert_rowid();
-                self.files.insert(path.to_owned(), (file, node, None));
-                (file, node, None)
-            }
-        };
-        if old.is_some() {
-            self.conn
-                .prepare_cached(
-                    "UPDATE file_version SET to_seq = ?2 WHERE file = ?1 AND to_seq IS NULL",
-                )?
-                .execute(params![file, seq])?;
-            if new.is_none() {
-                self.conn
-                    .prepare_cached(
-                        "UPDATE file_path SET to_seq = ?2 WHERE file = ?1 AND to_seq IS NULL",
-                    )?
-                    .execute(params![file, seq])?;
-            }
-        }
-        if let Some(n) = new {
-            if old.is_none() {
-                self.conn
-                    .prepare_cached(
-                        "INSERT INTO file_path (file, path, from_seq) VALUES (?1, ?2, ?3)",
-                    )?
-                    .execute(params![file, path, seq])?;
-            }
-            self.conn
-                .prepare_cached(
-                    "INSERT INTO file_version (file, blob, from_seq) VALUES (?1, ?2, ?3)",
-                )?
-                .execute(params![file, n.as_bytes(), seq])?;
-        }
-        self.files.get_mut(path).expect("inserted").2 = new;
-        Ok(())
-    }
-
-    fn link_id(&mut self, link: &Link) -> rusqlite::Result<i64> {
-        if let Some(id) = self.links.get(link) {
-            return Ok(*id);
-        }
-        let node = |p: &str| self.files.get(p).expect("a link joins two indexed files").1;
-        let (src, dst) = (node(&link.1), node(&link.2));
-        self.conn
-            .prepare_cached(
-                "INSERT INTO link (kind, src, dst) VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING",
-            )?
-            .execute(params![link.0.as_str(), src, dst])?;
-        let id = self
-            .conn
-            .prepare_cached("SELECT id FROM link WHERE kind = ?1 AND src = ?2 AND dst = ?3")?
-            .query_row(params![link.0.as_str(), src, dst], |r| r.get(0))?;
-        self.links.insert(link.clone(), id);
-        Ok(id)
-    }
-
-    fn interval(&mut self, link: &Link, from: i64, to: Option<i64>) -> rusqlite::Result<()> {
-        let id = self.link_id(link)?;
-        self.conn
-            .prepare_cached("INSERT INTO interval (link, from_seq, to_seq) VALUES (?1, ?2, ?3)")?
-            .execute(params![id, from, to])?;
-        Ok(())
-    }
-
-    /// A closed interval. One that opened at or before the last flush has its open row: it gets
-    /// its end.
-    fn close(&mut self, i: &Interval) -> rusqlite::Result<()> {
-        if i.from as i64 > self.written {
-            return self.interval(&i.link, i.from as i64, Some(i.to as i64));
-        }
-        let id = self.link_id(&i.link)?;
-        self.conn
-            .prepare_cached("UPDATE interval SET to_seq = ?2 WHERE link = ?1 AND to_seq IS NULL")?
-            .execute(params![id, i.to as i64])?;
-        Ok(())
-    }
-
-    /// Before a batch commits: the open rows of links that opened since the last flush, each
-    /// repository's indexed commit and the watermark, so the batch is a complete index.
-    fn flush(&mut self, replay: &Replay, seq: i64) -> rusqlite::Result<()> {
-        let mut open: Vec<(&Link, u64)> = replay
-            .open()
-            .filter(|(_, from)| *from as i64 > self.written)
-            .collect();
-        open.sort();
-        for (l, from) in open {
-            self.interval(l, from as i64, None)?;
-        }
-        self.written = seq;
-        for (repo, (at, sha)) in self.last.drain() {
-            self.conn
-                .prepare_cached(
-                    "UPDATE repo SET indexed_commit = ?2, indexed_seq = ?3, head = ?2 WHERE id = ?1",
-                )?
-                .execute(params![repo, sha.as_bytes(), at])?;
-        }
-        self.conn
-            .prepare_cached(
-                "INSERT OR REPLACE INTO meta (key, value) VALUES ('watermark_seq', ?1)",
-            )?
-            .execute([seq])?;
-        Ok(())
-    }
-
-    /// Facts of each blob, once.
-    fn facts<'f>(
-        &mut self,
-        facts: impl Iterator<Item = (&'f (ObjectId, &'static str), &'f Arc<BlobFacts>)>,
-    ) -> rusqlite::Result<()> {
-        let mut kinds: HashMap<&str, i64> = HashMap::new();
-        let mut rows: Vec<_> = facts.collect();
-        rows.sort_by_key(|((o, k), _)| (*o, *k));
-        for ((oid, kind), f) in rows {
-            let ex = match kinds.get(kind) {
-                Some(id) => *id,
-                None => {
-                    let version = extractor_of(kind).version();
-                    self.conn.execute(
-                        "INSERT INTO extractor (name, version) VALUES (?1, ?2)
-                         ON CONFLICT DO NOTHING",
-                        params![kind, version],
-                    )?;
-                    let id = self.conn.query_row(
-                        "SELECT id FROM extractor WHERE name = ?1 AND version = ?2",
-                        params![kind, version],
-                        |r| r.get(0),
-                    )?;
-                    kinds.insert(kind, id);
-                    id
-                }
-            };
-            self.conn
-                .prepare_cached(
-                    "INSERT INTO fact (blob, extractor, payload) VALUES (?1, ?2, ?3)
-                     ON CONFLICT DO NOTHING",
-                )?
-                .execute(params![oid.as_bytes(), ex, f.encode()])?;
-        }
-        Ok(())
-    }
 }

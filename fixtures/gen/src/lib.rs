@@ -34,6 +34,7 @@ pub mod acme;
 pub mod history;
 pub mod layout;
 pub mod northwind;
+pub mod scale;
 
 const FIXTURE_RS: &str = include_str!("../../../crates/cartograph-git/src/fixture.rs");
 const LIB_RS: &str = include_str!("lib.rs");

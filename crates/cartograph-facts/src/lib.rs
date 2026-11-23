@@ -2,6 +2,7 @@
 
 pub mod cache;
 pub mod fs;
+pub mod lang;
 pub mod replay;
 
 pub use cache::FactCache;

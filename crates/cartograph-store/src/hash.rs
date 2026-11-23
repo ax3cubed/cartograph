@@ -245,10 +245,12 @@ pub fn fact_hash(conn: &Connection) -> rusqlite::Result<FactHash> {
         }
     }
 
-    // A node's key is its file's; a node without a file (none yet) is keyed by its kind.
+    // A node's key is its file's; a node without a file (a Go package's folder) is keyed by its
+    // structure key, which names its path.
     let mut intervals: Vec<Vec<Vec<u8>>> = vec![Vec::new(); repos.len()];
     let mut st = conn.prepare(
-        "SELECT l.kind, ns.kind, ns.file, nd.kind, nd.file, cf.sha, ct.sha
+        "SELECT l.kind, coalesce(ns.key, ns.kind), ns.file, coalesce(nd.key, nd.kind), nd.file,
+                cf.sha, ct.sha
          FROM interval x JOIN link l ON l.id = x.link
          JOIN node ns ON ns.id = l.src JOIN node nd ON nd.id = l.dst
          JOIN commits cf ON cf.seq = x.from_seq LEFT JOIN commits ct ON ct.seq = x.to_seq",

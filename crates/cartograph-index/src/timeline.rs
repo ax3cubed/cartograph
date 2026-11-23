@@ -63,6 +63,19 @@ pub fn excluded(patterns: &[String], path: &str) -> bool {
     })
 }
 
+/// Whether a workspace glob (`packages/*`, `apps/**`) matches the folder `path` exactly. Patterns
+/// come from manifests in the repository, so they are capped: 256 bytes and 32 segments (IDX-20
+/// security); a longer one matches nothing.
+pub fn glob_matches(pattern: &str, path: &str) -> bool {
+    let p = pattern.trim_start_matches("./").trim_end_matches('/');
+    if p.len() > 256 || p.split('/').count() > 32 {
+        return false;
+    }
+    let pat: Vec<&str> = p.split('/').collect();
+    let segs: Vec<&str> = path.split('/').collect();
+    glob(&pat, &segs)
+}
+
 // Both matchers are greedy with one backtrack point, the last star: a later star can absorb
 // anything an earlier one could, so nothing else needs retrying. The patterns come from a committed
 // workspace file and run on every changed path under the writer lock, so the cost must stay

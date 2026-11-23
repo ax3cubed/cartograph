@@ -1,6 +1,7 @@
 //! The index file (IDX-03): the schema, the open rules (B3) and the connection pragmas; the single
 //! writer and its lock (IDX-13, [`writer`]); migrations and the atomic rename (IDX-16,
-//! [`migrate`]); the fact hash (IDX-17, [`hash`]).
+//! [`migrate`]); the fact hash (IDX-17, [`hash`]); derived rows (IDX-21, [`derived`]); search
+//! (AI-15, [`search`]).
 //!
 //! An index file is untrusted input (board G01): the application id is checked, `quick_check` runs
 //! before first use, the schema has no triggers or views, and every connection runs with
@@ -16,8 +17,10 @@ use cartograph_core::Explain;
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
+pub mod derived;
 pub mod hash;
 pub mod migrate;
+pub mod search;
 pub mod writer;
 
 pub use hash::{FactHash, fact_hash};
@@ -26,8 +29,9 @@ pub use rusqlite;
 /// `PRAGMA application_id`: "CART" (proposed value).
 pub const APPLICATION_ID: i32 = 0x4341_5254;
 /// The index format this binary writes and reads.
-pub const FORMAT_VERSION: i64 = 2;
-/// The oldest reader that can read what this binary writes: v2 only adds columns.
+pub const FORMAT_VERSION: i64 = 3;
+/// The oldest reader that can read what this binary writes: v2 and v3 only add tables and columns,
+/// and an older reader's queries mean the same on them.
 pub const MIN_READER_VERSION: i64 = 1;
 /// `PRAGMA user_version`, kept equal to the format version.
 pub const USER_VERSION: i64 = FORMAT_VERSION;
@@ -276,6 +280,21 @@ impl Index {
             path: path.to_owned(),
         })
     }
+}
+
+/// The workspace's (services, modules, files) live at the last step, in one query: what
+/// WorkspaceSummary shows (IDX-20). Services count services and libraries, the map's top level.
+pub fn summary_counts(conn: &Connection) -> rusqlite::Result<(i64, i64, i64)> {
+    conn.query_row(
+        "SELECT
+           (SELECT count(*) FROM node n WHERE n.kind IN ('service', 'library')
+              AND EXISTS (SELECT 1 FROM node_span s WHERE s.node = n.id AND s.to_seq IS NULL)),
+           (SELECT count(*) FROM node n WHERE n.kind = 'module'
+              AND EXISTS (SELECT 1 FROM node_span s WHERE s.node = n.id AND s.to_seq IS NULL)),
+           (SELECT count(*) FROM file_path WHERE to_seq IS NULL)",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )
 }
 
 /// Files whose `quick_check` passed in this process.

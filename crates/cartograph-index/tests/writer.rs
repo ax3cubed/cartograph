@@ -209,14 +209,16 @@ fn a_v1_index_migrates_to_v2_with_the_fresh_build_s_fact_hash() {
     std::fs::copy(&fresh, &v1).unwrap();
     Connection::open(&v1)
         .unwrap()
-        .execute_batch(
-            "ALTER TABLE repo DROP COLUMN indexed_commit; ALTER TABLE repo DROP COLUMN indexed_seq;
+        .execute_batch(&format!(
+            "{}
+             ALTER TABLE repo DROP COLUMN indexed_commit; ALTER TABLE repo DROP COLUMN indexed_seq;
              ALTER TABLE repo DROP COLUMN removed;
              DROP INDEX commits_repo_sha; DROP INDEX commits_sha;
              CREATE UNIQUE INDEX commits_sha ON commits (sha);
              UPDATE meta SET value = 1 WHERE key = 'format_version';
              PRAGMA user_version = 1;",
-        )
+            migrate::UNDO_V3
+        ))
         .unwrap();
     assert_eq!(
         Index::open_read(&v1).unwrap().state,
@@ -247,17 +249,18 @@ fn rewrite(src: &Path, out: &Path, page_size: u32, shift: i64, reverse: bool) {
          INSERT INTO extractor SELECT id + {shift}, name, version FROM s.extractor ORDER BY id {order};
          INSERT INTO repo SELECT id + {shift}, name, '/elsewhere/' || name, head, shallow,
            indexed_commit, indexed_seq + {shift}, removed FROM s.repo ORDER BY id {order};
-         INSERT INTO run SELECT id, started_at + 999, finished_at + 999, writer_version, head, stats
-           FROM s.run;
+         INSERT INTO run (id, started_at, finished_at, writer_version, head, stats)
+           SELECT id, started_at + 999, finished_at + 999, writer_version, head, stats FROM s.run;
          INSERT INTO commits SELECT seq + {shift}, repo + {shift}, sha, time, corrected_time, author,
            summary FROM s.commits ORDER BY seq {order};
          INSERT INTO file SELECT id + {shift}, repo + {shift} FROM s.file ORDER BY id {order};
-         INSERT INTO file_path SELECT file + {shift}, path, from_seq + {shift}, to_seq + {shift}
-           FROM s.file_path ORDER BY rowid {order};
+         INSERT INTO file_path SELECT file + {shift}, path, from_seq + {shift}, to_seq + {shift},
+           via, similarity FROM s.file_path ORDER BY rowid {order};
          INSERT INTO file_version SELECT file + {shift}, blob, from_seq + {shift}, to_seq + {shift}
            FROM s.file_version ORDER BY rowid {order};
          INSERT INTO fact SELECT blob, extractor + {shift}, payload FROM s.fact ORDER BY blob {order};
-         INSERT INTO node SELECT id + {shift}, kind, file + {shift} FROM s.node ORDER BY id {order};
+         INSERT INTO node (id, kind, file, key) SELECT id + {shift}, kind, file + {shift}, key
+           FROM s.node ORDER BY id {order};
          INSERT INTO link SELECT id + {shift}, kind, src + {shift}, dst + {shift} FROM s.link
            ORDER BY id {order};
          INSERT INTO interval SELECT link + {shift}, from_seq + {shift}, to_seq + {shift}

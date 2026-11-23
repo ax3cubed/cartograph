@@ -33,7 +33,7 @@ pub struct FsState {
 }
 
 impl FsState {
-    fn note(&mut self, p: &str) {
+    pub(crate) fn note(&mut self, p: &str) {
         if let Some(l) = &mut self.log {
             l.push(p.to_owned());
         }
@@ -57,7 +57,7 @@ impl FsState {
         }
     }
 
-    fn is_dir(&self, rel: &str) -> bool {
+    pub(crate) fn is_dir(&self, rel: &str) -> bool {
         rel.is_empty() || self.dirs.contains_key(rel)
     }
 

@@ -147,6 +147,8 @@ fn step(t: i64, n: u8) -> CommitStep {
         author: String::new(),
         summary: String::new(),
         changes: Vec::new(),
+        renames: Vec::new(),
+        rename_limit: false,
     }
 }
 
@@ -773,6 +775,7 @@ fn branch_scopes_and_excludes_decide_what_is_indexed() {
         }],
         exclude: vec!["**/dist".into()],
         config_hash: Some("sha256:test".into()),
+        ..Default::default()
     };
     let mut cache = FactCache::open(&d.path().join("facts.db")).unwrap();
     assert_eq!(run(&w, &mut cache).steps, 1);

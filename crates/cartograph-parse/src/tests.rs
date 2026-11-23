@@ -171,6 +171,143 @@ fn golden_facts_for_a_fixture_folder() {
     insta::assert_snapshot!(out);
 }
 
+#[test]
+fn go_python_and_php_imports() {
+    use ImportStyle::*;
+    let s = |x: &str| x.to_owned();
+    assert_eq!(
+        specs(
+            "a.go",
+            "package a\nimport (\n  \"fmt\"\n  db \"example.com/app/db\"\n  _ `example.com/x`\n)\n"
+        ),
+        [
+            (s("example.com/app/db"), Go),
+            (s("example.com/x"), Go),
+            (s("fmt"), Go)
+        ]
+    );
+    assert_eq!(
+        specs(
+            "a.py",
+            "import os, a.b as c\nfrom . import x\nfrom ..pkg.mod import y as z, w\nfrom m import *\n\
+             import importlib\nimportlib.import_module('plug.ins')\nimportlib.import_module(name)\n"
+        ),
+        [
+            (s("..pkg.mod:w"), Python),
+            (s("..pkg.mod:y"), Python),
+            (s(".:x"), Python),
+            (s("a.b"), Python),
+            (s("importlib"), Python),
+            (s("m:*"), Python),
+            (s("os"), Python),
+            (s("plug.ins"), Dynamic),
+        ]
+    );
+    let (e, k) = extractor_for("a.py").unwrap();
+    assert!(
+        e.extract(k, b"importlib.import_module(f'x{y}')\n")
+            .facts()
+            .iter()
+            .any(|f| matches!(f, Fact::DynamicUnresolved { .. }))
+    );
+    assert_eq!(
+        specs(
+            "a.php",
+            "<?php\nnamespace App;\nuse App\\Models\\User;\nuse App\\Http\\{Kernel, Request as R};\n\
+             use function App\\helper;\nrequire_once __DIR__ . '/boot.php';\ninclude 'lib/x.php';\nrequire $path;\n"
+        ),
+        [
+            (s("./boot.php"), PhpInclude),
+            (s("App\\Http\\Kernel"), PhpUse),
+            (s("App\\Http\\Request"), PhpUse),
+            (s("App\\Models\\User"), PhpUse),
+            (s("lib/x.php"), PhpInclude),
+        ]
+    );
+    let (e, k) = extractor_for("a.php").unwrap();
+    assert!(
+        e.extract(k, b"<?php require $path;")
+            .facts()
+            .iter()
+            .any(|f| matches!(f, Fact::DynamicUnresolved { .. }))
+    );
+}
+
+#[test]
+fn language_manifests_keep_what_resolution_reads() {
+    let m = |path: &str, src: &str| -> Vec<String> {
+        let (e, k) = extractor_for(path).unwrap();
+        e.extract(k, src.as_bytes())
+            .facts()
+            .iter()
+            .map(|f| format!("{f:?}"))
+            .collect()
+    };
+    assert_eq!(
+        m(
+            "svc/go.mod",
+            "module example.com/svc // the service\n\ngo 1.22\nreplace (\n  example.com/lib => ../lib\n  example.com/far v1.0.0 => example.com/fork v1.1.0\n)\n"
+        ),
+        [
+            "Manifest { field: \"module\", value: \"\\\"example.com/svc\\\"\" }",
+            "Manifest { field: \"replace\", value: \"[[\\\"example.com/lib\\\",\\\"../lib\\\"]]\" }",
+        ]
+    );
+    assert_eq!(
+        m("go.work", "go 1.22\nuse ./a\n"),
+        ["Manifest { field: \"use\", value: \"[\\\"./a\\\"]\" }"]
+    );
+    assert_eq!(
+        m(
+            "pyproject.toml",
+            "[project]\nname = \"acme-billing\"\n[tool.setuptools.packages.find]\nwhere = [\"src\"]\n"
+        ),
+        [
+            "Manifest { field: \"name\", value: \"\\\"acme-billing\\\"\" }",
+            "Manifest { field: \"roots\", value: \"[\\\"src\\\"]\" }",
+        ]
+    );
+    assert_eq!(
+        m(
+            "setup.cfg",
+            "[metadata]\nname = legacy\n[options]\npackage_dir =\n    =lib\n"
+        ),
+        ["Manifest { field: \"name\", value: \"\\\"legacy\\\"\" }"],
+        "a value on the next line isn't read (ponytail: multi-line INI values)"
+    );
+    assert_eq!(
+        m(
+            "composer.json",
+            r#"{"name":"acme/app","autoload":{"psr-4":{"App\\":"src/"}},"autoload-dev":{"psr-4":{"App\\":["tests/"]}}}"#
+        ),
+        [
+            "Manifest { field: \"name\", value: \"\\\"acme/app\\\"\" }",
+            "Manifest { field: \"psr-4\", value: \"{\\\"App\\\\\\\\\\\":[\\\"src/\\\",\\\"tests/\\\"]}\" }",
+        ]
+    );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+    /// The fuzz targets of IDX-23's extractors: no input panics them, and the same bytes give the
+    /// same facts.
+    #[test]
+    fn language_extractors_never_panic(bytes in proptest::collection::vec(any::<u8>(), 0..2048), which in 0usize..8) {
+        let path = ["a.go", "a.py", "a.php", "go.mod", "go.work", "pyproject.toml", "setup.cfg", "composer.json"][which];
+        let (e, k) = extractor_for(path).unwrap();
+        let a = e.extract(k, &bytes).encode();
+        prop_assert_eq!(&a, &e.extract(k, &bytes).encode());
+    }
+
+    #[test]
+    fn import_like_go_python_php_never_panic(src in r#"(import|from|use|require|include|\\|\(|\)|'|"|;| |\n|\.|a|__DIR__|<\?php|\{|\}|,|as|\*)*"#) {
+        for path in ["a.go", "a.py", "a.php"] {
+            let (e, k) = extractor_for(path).unwrap();
+            let _ = e.extract(k, src.as_bytes());
+        }
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
     /// The same bytes always give the same encoded facts, and no input panics an extractor (the

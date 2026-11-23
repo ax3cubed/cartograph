@@ -22,6 +22,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::fs::{FsState, ReplayFs, to_abs, to_rel};
+use crate::lang::{LangIndex, lang_key};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LinkKind {
@@ -111,11 +112,22 @@ pub struct Replay {
     waiting: FxHashMap<Arc<str>, FxHashSet<usize>>,
     /// Package name -> the package.json paths declaring it.
     pkgs: FxHashMap<String, BTreeSet<String>>,
+    /// Go, Python and PHP manifests (IDX-23).
+    langs: LangIndex,
     counts: FxHashMap<Link, u32>,
     open_at: FxHashMap<Link, u64>,
     touched: HashMap<Link, bool>,
+    /// References whose unresolved state may have changed this step: (importer, specifier) -> was
+    /// unresolved before the step.
+    unres_touched: HashMap<(String, String), bool>,
     /// Intervals closed so far; the writer drains them.
     pub closed: Vec<Interval>,
+    /// Links opened so far, each with the step it opened at; the writer drains them.
+    pub opened: Vec<(Link, u64)>,
+    /// References that became unresolved (importer, specifier, line) and that stopped being
+    /// unresolved (importer, specifier), with the step; the writer drains them (IDX-22).
+    pub unresolved_opened: Vec<(String, String, u32, u64)>,
+    pub unresolved_closed: Vec<(String, String, u64)>,
     pub stats: Stats,
     reverse: bool,
 }
@@ -142,13 +154,26 @@ impl Replay {
             by_file: FxHashMap::default(),
             waiting: FxHashMap::default(),
             pkgs: FxHashMap::default(),
+            langs: LangIndex::default(),
             counts: FxHashMap::default(),
             open_at: FxHashMap::default(),
             touched: HashMap::new(),
+            unres_touched: HashMap::new(),
             closed: Vec::new(),
+            opened: Vec::new(),
+            unresolved_opened: Vec::new(),
+            unresolved_closed: Vec::new(),
             stats: Stats::default(),
             reverse,
         }
+    }
+
+    /// Forgets the events not yet drained: after a rehydrate, what is open is already written.
+    pub fn clear_events(&mut self) {
+        self.closed.clear();
+        self.opened.clear();
+        self.unresolved_opened.clear();
+        self.unresolved_closed.clear();
     }
 
     /// The links live after the last step.
@@ -225,18 +250,27 @@ impl Replay {
                 None => self.tree.remove(path),
             };
             let package = is_package_json(path);
-            let manifest = kind.starts_with("manifest-js");
+            let manifest = kind.starts_with("manifest-");
             {
                 let mut st = self.fs.lock().expect("not poisoned");
                 let served: Option<Arc<str>> = new
                     .as_ref()
                     .filter(|_| manifest)
-                    .map(|f| Arc::from(resolution_json(f.facts(), package)));
-                if old.is_some() != new.is_some() {
+                    .map(|f| Arc::from(served_json(kind, f.facts(), package)));
+                let changed = if old.is_some() != new.is_some() {
                     dirty.push(path.clone());
                     st.count_dirs(path, if new.is_some() { 1 } else { -1 }, &mut dirty);
+                    true
                 } else if manifest && st.files.get(path) != Some(&served) {
                     dirty.push(path.clone());
+                    true
+                } else {
+                    false
+                };
+                if changed && let Some(k) = lang_key(kind) {
+                    dirty.push(k.to_owned());
+                    self.langs
+                        .update(path, kind, new.as_deref().map(BlobFacts::facts));
                 }
                 if new.is_some() {
                     st.files.insert(path.clone(), served);
@@ -305,9 +339,50 @@ impl Replay {
                     to: seq,
                 });
             } else if !was && is {
-                self.open_at.insert(link, seq);
+                self.open_at.insert(link.clone(), seq);
+                self.opened.push((link, seq));
             }
         }
+        let mut touched: Vec<_> = std::mem::take(&mut self.unres_touched)
+            .into_iter()
+            .collect();
+        touched.sort();
+        for ((from, spec), was) in touched {
+            let is = self
+                .find_ref(&from, &spec)
+                .is_some_and(|r| r.outcome == Outcome::Unresolved);
+            if was && !is {
+                self.unresolved_closed.push((from, spec, seq));
+            } else if !was && is {
+                let line = self.tree.get(&from).map_or(0, |f| {
+                    f.facts()
+                        .iter()
+                        .find_map(|x| match x {
+                            Fact::Import { spec: s, span, .. } if *s == spec => {
+                                Some(span.start_line)
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or(0)
+                });
+                self.unresolved_opened.push((from, spec, line, seq));
+            }
+        }
+    }
+
+    fn find_ref(&self, from: &str, spec: &str) -> Option<&Ref> {
+        self.by_file
+            .get(from)?
+            .iter()
+            .filter_map(|i| self.refs[*i].as_ref())
+            .find(|r| r.spec == spec)
+    }
+
+    /// Notes that a reference's unresolved state may change this step.
+    fn touch_ref(&mut self, from: &str, spec: &str, was_unresolved: bool) {
+        self.unres_touched
+            .entry((from.to_owned(), spec.to_owned()))
+            .or_insert(was_unresolved);
     }
 
     /// Each live reference's outcome and the reverse index, encoded. With the tree, that is
@@ -442,6 +517,7 @@ impl Replay {
     }
 
     fn add_ref(&mut self, from: &str, spec: &str) -> usize {
+        self.touch_ref(from, spec, false);
         let r = Ref {
             from: from.to_owned(),
             spec: spec.to_owned(),
@@ -473,6 +549,7 @@ impl Replay {
             self.by_file.remove(from);
         }
         let r = self.refs[id].take().expect("live");
+        self.touch_ref(from, spec, r.outcome == Outcome::Unresolved);
         self.unwait(id, &r.keys);
         if let Outcome::Link(l) = r.outcome {
             self.bump(l, -1);
@@ -501,7 +578,15 @@ impl Replay {
         let mut seen: Vec<String> = Vec::new();
         for &id in ids {
             let r = self.refs[id].as_ref().expect("live");
-            let res = self.resolver.resolve_file(to_abs(&r.from), &r.spec);
+            let kind = extractor_for(&r.from).map_or("", |(_, k)| k);
+            let lang = (!kind.starts_with("ts-imports")).then(|| {
+                let mut st = self.fs.lock().expect("not poisoned");
+                self.langs.resolve(kind, &mut st, &r.from, &r.spec)
+            });
+            let res = match lang {
+                Some(_) => None,
+                None => Some(self.resolver.resolve_file(to_abs(&r.from), &r.spec)),
+            };
             let mut st = self.fs.lock().expect("not poisoned");
             seen.append(st.log.as_mut().expect("recording"));
             drop(st);
@@ -509,7 +594,11 @@ impl Replay {
             seen.dedup();
             let mut keys = seen.clone();
             let r = self.refs[id].as_ref().expect("live");
-            let outcome = outcome(&r.from, &r.spec, res, &self.pkgs, &mut keys);
+            let outcome = match (lang, res) {
+                (Some(o), _) => o,
+                (None, Some(res)) => outcome(&r.from, &r.spec, res, &self.pkgs, &mut keys),
+                (None, None) => Outcome::Unresolved,
+            };
             keys.sort_unstable();
             keys.dedup();
             self.settle(id, outcome, keys);
@@ -536,6 +625,7 @@ impl Replay {
             r.keys = keys.into_iter().map(Arc::from).collect();
         }
         if outcome != r.outcome {
+            self.touch_ref(&r.from, &r.spec, r.outcome == Outcome::Unresolved);
             if let Outcome::Link(l) = &r.outcome {
                 self.bump(l.clone(), -1);
             }
@@ -561,7 +651,7 @@ impl Replay {
 
 /// Bump when what a snapshot means changes: the resolve options, how keys are recorded, or the
 /// encoding. A snapshot of another version is not restored.
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
@@ -680,15 +770,19 @@ fn outcome(
 pub fn from_scratch(tree: &HashMap<String, Arc<BlobFacts>>) -> BTreeSet<Link> {
     let mut st = FsState::default();
     let mut pkgs: FxHashMap<String, BTreeSet<String>> = FxHashMap::default();
+    let mut langs = LangIndex::default();
     let mut scratch = Vec::new();
     for (path, f) in tree {
         let Some((_, kind)) = extractor_for(path) else {
             continue;
         };
         let package = is_package_json(path);
+        if lang_key(kind).is_some() {
+            langs.update(path, kind, Some(f.facts()));
+        }
         let served = kind
-            .starts_with("manifest-js")
-            .then(|| Arc::from(resolution_json(f.facts(), package)));
+            .starts_with("manifest-")
+            .then(|| Arc::from(served_json(kind, f.facts(), package)));
         st.files.insert(path.clone(), served);
         st.count_dirs(path, 1, &mut scratch);
         if package && let Some(n) = package_name(f.facts()) {
@@ -704,21 +798,43 @@ pub fn from_scratch(tree: &HashMap<String, Arc<BlobFacts>>) -> BTreeSet<Link> {
         );
         st.count_dirs(&link, 1, &mut scratch);
     }
-    let resolver = ResolverGeneric::new_with_file_system(
-        ReplayFs(Arc::new(Mutex::new(st))),
-        resolve_options(),
-    );
+    let fs = Arc::new(Mutex::new(st));
+    let resolver =
+        ResolverGeneric::new_with_file_system(ReplayFs(Arc::clone(&fs)), resolve_options());
     let mut out = BTreeSet::new();
     for (path, f) in tree {
-        if !extractor_for(path).is_some_and(|(_, k)| k.starts_with("ts-imports")) {
+        let Some(kind) = extractor_for(path)
+            .map(|(_, k)| k)
+            .filter(|k| !k.starts_with("manifest-"))
+        else {
             continue;
-        }
+        };
         for spec in specs(f.facts()) {
-            let res = resolver.resolve_file(to_abs(path), spec);
-            if let Outcome::Link(l) = outcome(path, spec, res, &pkgs, &mut scratch) {
+            let o = if kind.starts_with("ts-imports") {
+                let res = resolver.resolve_file(to_abs(path), spec);
+                outcome(path, spec, res, &pkgs, &mut scratch)
+            } else {
+                langs.resolve(kind, &mut fs.lock().expect("not poisoned"), path, spec)
+            };
+            if let Outcome::Link(l) = o {
                 out.insert(l);
             }
         }
     }
     out
+}
+
+/// What the replay's file system serves for a manifest: package.json and tsconfig as their
+/// resolution fields (phase 0), other manifests as the object of their facts.
+fn served_json(kind: &str, facts: &[Fact], package: bool) -> String {
+    if kind.starts_with("manifest-js") {
+        return resolution_json(facts, package);
+    }
+    let mut o = serde_json::Map::new();
+    for f in facts {
+        if let Fact::Manifest { field, value } = f {
+            o.insert(field.clone(), serde_json::Value::String(value.clone()));
+        }
+    }
+    serde_json::Value::Object(o).to_string()
 }

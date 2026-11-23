@@ -391,17 +391,20 @@ fn migrate_runs_on_a_copy_and_an_unknown_version_means_rebuild() {
     let d = tmp();
     let p = with_format(d.path(), FORMAT_VERSION, MIN_READER_VERSION);
     let lock = writer::WriterLock::try_acquire(d.path()).unwrap().unwrap();
-    // Pretend this file is format 1 of a world where v1 -> v2 adds a table.
+    // Pretend this file is one format older, in a world where the last step adds a table.
     Connection::open(&p)
         .unwrap()
-        .execute_batch("UPDATE meta SET value = 1 WHERE key = 'format_version'")
+        .execute_batch(&format!(
+            "UPDATE meta SET value = {} WHERE key = 'format_version'",
+            FORMAT_VERSION - 1
+        ))
         .unwrap();
     let ino = |p: &Path| file_key(p).unwrap();
     let before = ino(&p);
     let reader = Index::open_read(&p).unwrap();
     assert_eq!(reader.state, State::NeedsMigrate);
-    let steps: &[migrate::Step] = &[(1, "CREATE TABLE added (x INTEGER) STRICT;")];
-    assert!(migrate::migrate_with(&lock, &p, steps, 2).unwrap());
+    let steps: &[migrate::Step] = &[(FORMAT_VERSION - 1, "CREATE TABLE added (x INTEGER) STRICT;")];
+    assert!(migrate::migrate_with(&lock, &p, steps, FORMAT_VERSION).unwrap());
     assert_ne!(ino(&p), before, "renamed in, not changed in place");
     // The reader that had the old file still reads the old file.
     let old: i64 = reader
@@ -424,7 +427,7 @@ fn migrate_runs_on_a_copy_and_an_unknown_version_means_rebuild() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!((v, user), (2, 2));
+    assert_eq!((v, user), (FORMAT_VERSION, USER_VERSION));
     assert!(!migrate::new_path(&p).exists());
     // Format 0 has no registered step: nothing changes and the caller rebuilds.
     Connection::open(&p)
