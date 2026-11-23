@@ -1,4 +1,4 @@
--- Index schema, format version 1 (IDX-03). Every table is STRICT. Everything that changes over time
+-- Index schema, format version 2 (IDX-03; v2 adds the repo's indexed commit, IDX-13). Every table is STRICT. Everything that changes over time
 -- is an interval [from_seq, to_seq) on the first-parent timeline; to_seq NULL means still open.
 -- No triggers and no views: an index file is untrusted input (board G01).
 
@@ -14,12 +14,17 @@ CREATE TABLE extractor (
   UNIQUE (name, version)
 ) STRICT;
 
+-- indexed_commit and indexed_seq move in the same transaction as the rows they cover (IDX-13), so a
+-- crash leaves a complete, earlier index. removed: dropped from the workspace (IDX-14).
 CREATE TABLE repo (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   path TEXT NOT NULL,
   head BLOB,
-  shallow INTEGER NOT NULL
+  shallow INTEGER NOT NULL,
+  indexed_commit BLOB,
+  indexed_seq INTEGER,
+  removed INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 CREATE TABLE run (
@@ -41,7 +46,9 @@ CREATE TABLE commits (
   author TEXT NOT NULL,
   summary TEXT NOT NULL
 ) STRICT;
-CREATE UNIQUE INDEX commits_sha ON commits (sha);
+-- One commit can sit in two repos (a fork, vendored history), so a sha is unique per repo only.
+CREATE UNIQUE INDEX commits_repo_sha ON commits (repo, sha);
+CREATE INDEX commits_sha ON commits (sha);
 CREATE INDEX commits_time ON commits (corrected_time);
 
 -- A file's lineage. Until rename detection (IDX-18), one lineage per path.
