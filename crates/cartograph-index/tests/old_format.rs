@@ -18,18 +18,19 @@ fn run(w: &Workspace, cache: &mut FactCache) -> SyncSummary {
 }
 
 /// Takes the index back to format 1, as `writer.rs` does; `format` other than 1 has no migration.
-/// Format 3's tables and columns go first, then format 2's.
+/// Formats 4 and 3's tables and columns go first, then format 2's.
 fn downgrade(w: &Workspace, format: i64) {
     Connection::open(w.index_path())
         .unwrap()
         .execute_batch(&format!(
-            "{undo}
+            "{undo4} {undo}
              ALTER TABLE repo DROP COLUMN indexed_commit; ALTER TABLE repo DROP COLUMN indexed_seq;
              ALTER TABLE repo DROP COLUMN removed;
              DROP INDEX commits_repo_sha; DROP INDEX commits_sha;
              CREATE UNIQUE INDEX commits_sha ON commits (sha);
              UPDATE meta SET value = {format} WHERE key = 'format_version';
              PRAGMA user_version = {format};",
+            undo4 = cartograph_store::migrate::UNDO_V4,
             undo = cartograph_store::migrate::UNDO_V3
         ))
         .unwrap();

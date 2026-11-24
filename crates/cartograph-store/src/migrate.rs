@@ -40,7 +40,34 @@ pub const MIGRATIONS: &[Step] = &[
     // it read as a delete and an add); the derived rows (structure, counts, layout, search) are
     // empty, so the next sync builds them.
     (2, V3),
+    // v4 adds what phase 4 writes: tables only, empty until the next sync derives them.
+    (3, V4),
 ];
+
+/// Takes a current file back to format 3 (test support). Each phase-4 item adds its own block.
+#[doc(hidden)]
+#[allow(clippy::useless_concat)] // one block per phase-4 item; concat! joins them
+pub const UNDO_V4: &str = concat!(
+    // ---- XS-23 owners: begin ----
+    "DROP TABLE ownership; DROP TABLE codeowners;\n",
+    // ---- XS-23 owners: end ----
+);
+
+/// The tables and columns format 4 adds, as `schema.sql` declares them. Each phase-4 item adds its
+/// own delimited block.
+#[allow(clippy::useless_concat)] // one block per phase-4 item; concat! joins them
+const V4: &str = concat!(
+    // ---- XS-23 owners: begin ----
+    "CREATE TABLE codeowners (repo INTEGER NOT NULL REFERENCES repo (id), blob BLOB NOT NULL,
+       from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX codeowners_repo ON codeowners (repo, from_seq);
+     CREATE TABLE ownership (file INTEGER NOT NULL REFERENCES file (id), owner TEXT NOT NULL,
+       kind TEXT NOT NULL, pattern TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER)
+       STRICT;
+     CREATE INDEX ownership_file ON ownership (file, from_seq);
+     CREATE INDEX ownership_owner ON ownership (owner);\n",
+    // ---- XS-23 owners: end ----
+);
 
 /// Takes a current file back to format 2 (test support: tests build an older file from a new one
 /// by undoing each format's additions, newest first).

@@ -30,8 +30,8 @@ pub use rusqlite;
 /// `PRAGMA application_id`: "CART" (proposed value).
 pub const APPLICATION_ID: i32 = 0x4341_5254;
 /// The index format this binary writes and reads.
-pub const FORMAT_VERSION: i64 = 3;
-/// The oldest reader that can read what this binary writes: v2 and v3 only add tables and columns,
+pub const FORMAT_VERSION: i64 = 4;
+/// The oldest reader that can read what this binary writes: v2, v3 and v4 only add tables and columns,
 /// and an older reader's queries mean the same on them.
 pub const MIN_READER_VERSION: i64 = 1;
 /// `PRAGMA user_version`, kept equal to the format version.

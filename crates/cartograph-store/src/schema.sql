@@ -1,5 +1,5 @@
--- Index schema, format version 3 (IDX-03; v2 adds the repo's indexed commit, IDX-13; v3 adds lineage
--- across renames, rewrites, structure nodes, derived rows, coverage, layout and search, phase 3).
+-- Index schema, format version 4 (IDX-03; v2 adds the repo's indexed commit, IDX-13; v3 adds lineage
+-- across renames, rewrites, structure nodes, derived rows, coverage, layout and search, phase 3; v4 adds cross-service tables, phase 4).
 -- Every table is STRICT. Everything that changes over time
 -- is an interval [from_seq, to_seq) on the first-parent timeline; to_seq NULL means still open.
 -- No triggers and no views: an index file is untrusted input (board G01).
@@ -234,3 +234,30 @@ CREATE VIRTUAL TABLE search USING fts5 (
 CREATE VIRTUAL TABLE search_sub USING fts5 (
   name, path, content = '', contentless_delete = 1, tokenize = 'trigram'
 );
+
+-- ---- XS-23 owners: begin ----
+-- The CODEOWNERS blob of a repo (the first of .github/, root, docs/, .gitlab/) over history, one
+-- row per version: present from from_seq until to_seq (NULL: still).
+CREATE TABLE codeowners (
+  repo INTEGER NOT NULL REFERENCES repo (id),
+  blob BLOB NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX codeowners_repo ON codeowners (repo, from_seq);
+
+-- Who owns a file lineage while (last matching pattern wins). owner is untrusted text (F8): an
+-- `@user`, an `@org/team` or an email, at most 256 bytes of [A-Za-z0-9._%+@/-]; pattern is the
+-- CODEOWNERS pattern that matched, cut to 512 bytes. kind: team, person or email. Emails are
+-- personal data: they stay in the index and are left out of reports.
+CREATE TABLE ownership (
+  file INTEGER NOT NULL REFERENCES file (id),
+  owner TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  pattern TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX ownership_file ON ownership (file, from_seq);
+CREATE INDEX ownership_owner ON ownership (owner);
+-- ---- XS-23 owners: end ----

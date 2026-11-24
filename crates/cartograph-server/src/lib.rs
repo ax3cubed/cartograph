@@ -376,13 +376,14 @@ mod tests {
             let ix = cartograph_store::Index::create(&dir.join("index.cartograph")).unwrap();
             ix.conn
                 .execute_batch(&format!(
-                    "{undo}
+                    "{undo4} {undo}
                      ALTER TABLE repo DROP COLUMN indexed_commit;
                      ALTER TABLE repo DROP COLUMN indexed_seq; ALTER TABLE repo DROP COLUMN removed;
                      DROP INDEX commits_repo_sha; DROP INDEX commits_sha;
                      CREATE UNIQUE INDEX commits_sha ON commits (sha);
                      UPDATE meta SET value = {format} WHERE key = 'format_version';
                      PRAGMA user_version = {format};",
+                    undo4 = cartograph_store::migrate::UNDO_V4,
                     undo = cartograph_store::migrate::UNDO_V3
                 ))
                 .unwrap();
