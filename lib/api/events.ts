@@ -4,8 +4,8 @@
 // backing off from 0.5 s to 15 s with jitter. Events reach the app coalesced per animation frame.
 //
 // Payloads carry ids and counts; any text in them (commit messages, names) is untrusted and renders as text only.
-import type { ActivityItem, Actor, Freshness, ServerEvent } from "./types.gen.ts";
-import { authHeaders } from "./client.ts";
+import type { ActivityItem, Freshness, ServerEvent } from "./types.gen.ts";
+import { authHeaders, get, send } from "./client.ts";
 import { bump, setGeneration } from "./cache.ts";
 import { expire, setUp } from "./session.ts";
 import { SseParser } from "./sse.ts";
@@ -51,95 +51,56 @@ function apply(e: ServerEvent) {
   record(e);
 }
 
-// ---------- activity (FE-16), built here from the stream ----------
+// ---------- activity (FE-16): the server's rows, kept current by the stream ----------
 //
-// ponytail: SRV-13's store and /api/v1/activity aren't in the binary yet, so rows are made in the browser from the
-// events every tab receives, and kept in localStorage (shared by this origin's tabs). Row ids are derived from the
-// event, so tabs that each record the same event write one row, and a sync's job.finished and its index.changed
-// collapse into one row per workspace per run. Read state rides in the same key; the storage event tells other tabs.
+// The server records a row per repo per run in the workspace's ask.db and sends each new one as activity.new. Read
+// state lives there too (POST /api/v1/activity/read), and activity.read tells every tab, in any browser. Text is
+// untrusted (repo and author names): cut at 120 characters and rendered as text only.
 
-export interface Row extends ActivityItem { ws: string; href?: string }
-const ACT_KEY = "cartograph.activity";
-const PER_WS = 500;
-const WHO: Record<Actor, string> = { app: "from the app", cli: "from the CLI", mcp: "by an agent over MCP", hook: "by a git hook", background: "by the background sync" };
-const started = new Map<string, { ws: string; by: Actor; kind: string }>();
+export type Row = ActivityItem;
 /** Untrusted text (names, error messages) is cut at 120 characters and rendered as text only. */
 export const cut = (t: string) => (t.length > 120 ? `${t.slice(0, 119)}…` : t);
 
 let rows: Row[] = [];
+let next: string | null = null;
+let loading = false;
 let loaded = false;
 const actSubs = new Set<() => void>();
-const readRows = (): Row[] => { try { return JSON.parse(localStorage.getItem(ACT_KEY) ?? "[]"); } catch { return []; } };
-function ensure() {
-  if (loaded || typeof window === "undefined") return;
-  loaded = true;
-  rows = readRows();
-  window.addEventListener("storage", (e) => { if (e.key === ACT_KEY) { rows = readRows(); actSubs.forEach((f) => f()); } });
+const changed = (r: Row[]) => { rows = r; actSubs.forEach((f) => f()); };
+/** The first page, or the page after `cursor`. */
+async function load(cursor?: string) {
+  if (loading) return;
+  loading = true;
+  try {
+    const got = await get<Row[]>("/api/v1/activity", { cursor });
+    next = got.next_cursor ?? null;
+    changed(cursor ? [...rows, ...got.data.filter((r) => !rows.some((x) => x.id === r.id))] : got.data);
+  } catch { /* offline or an older binary: the list stays as it was */ }
+  finally { loading = false; }
 }
-function write(next: Row[]) {
-  rows = next;
-  try { localStorage.setItem(ACT_KEY, JSON.stringify(next)); } catch { /* storage blocked: this tab keeps its rows */ }
-  actSubs.forEach((f) => f());
-}
-export const subscribeActivity = (f: () => void) => { ensure(); actSubs.add(f); return () => { actSubs.delete(f); }; };
-export const activityRows = () => { ensure(); return rows; };
-/** Marks `ids` read, or every row when none are given; other tabs follow through the storage event. */
+export const subscribeActivity = (f: () => void) => { actSubs.add(f); return () => { actSubs.delete(f); }; };
+/** The first page, once per tab; called only against a live server. */
+export const loadActivity = () => { if (!loaded) { loaded = true; void load(); } };
+export const activityRows = () => rows;
+export const hasMoreActivity = () => next !== null;
+/** The next page of 50. */
+export const moreActivity = () => (next ? load(next) : Promise.resolve());
+const readLocally = (ids: string[]) => changed(rows.map((r) => (!ids.length || ids.includes(r.id) ? { ...r, unread: false } : r)));
+/** Marks `ids` read on the server, or every row when none are given; other tabs follow through activity.read. */
 export function markRead(ids?: string[]) {
-  ensure();
-  rows = readRows(); // another tab may have added rows since
-  write(rows.map((r) => (!ids || ids.includes(r.id) ? { ...r, unread: false } : r)));
+  readLocally(ids ?? []);
+  send("POST", "/api/v1/activity/read", { ids: ids ?? [] }).catch(() => { /* the next load shows the server's state */ });
 }
-/** New or changed rows: the newest first, at most 500 per workspace. A row seen before keeps its read state. */
-function upsert(r: Omit<Row, "unread" | "at">, opts: { replace?: boolean } = {}) {
-  ensure();
-  const cur = readRows();
-  const old = cur.find((x) => x.id === r.id);
-  if (old && !opts.replace) { if (!toasted.has(old.id) && Date.now() - Date.parse(old.at) < 60_000) { toasted.add(old.id); newRow.forEach((f) => f(old)); } return; }
-  const row: Row = { ...r, text: cut(r.text), at: old?.at ?? new Date().toISOString(), unread: old ? old.unread : true };
-  const rest = cur.filter((x) => x.id !== r.id);
-  const next = [row, ...rest];
-  let n = 0;
-  write(next.filter((x) => x.ws !== r.ws || ++n <= PER_WS));
-  if (!toasted.has(row.id)) { toasted.add(row.id); newRow.forEach((f) => f(row)); }
-}
-/** Rows this tab has announced: every tab toasts each row once, whichever tab stored it first. */
-const toasted = new Set<string>();
 const newRow = new Set<(r: Row) => void>();
-/** Each row this tab records for the first time (the toast's cue). */
+/** Each new row as the stream announces it (the toast's cue). */
 export const onActivity = (f: (r: Row) => void) => { newRow.add(f); return () => { newRow.delete(f); }; };
 
 function record(e: ServerEvent) {
-  switch (e.event) {
-    case "job.started": started.set(e.data.job_id, { ws: e.data.ws, by: e.data.by, kind: e.data.kind }); break;
-    case "job.finished": {
-      const j = started.get(e.data.job_id);
-      started.delete(e.data.job_id);
-      if (!j) break;
-      const what = j.kind === "rebuild" ? "rebuilt" : "synced";
-      if (!e.data.ok) {
-        upsert({ id: `job:${e.data.job_id}`, ws: j.ws, kind: "warning", href: "/settings/indexing",
-          text: `${j.ws} ${j.kind} failed${e.data.error ? `: ${e.data.error.what}` : ""} · ${WHO[j.by]}` });
-        break;
-      }
-      if (e.data.generation == null) break; // nothing changed: no row
-      upsert({ id: `${j.ws}:gen:${e.data.generation}`, ws: j.ws, kind: j.kind === "rebuild" ? "index" : "sync", href: `/#ws=${encodeURIComponent(j.ws)}`,
-        text: `${j.ws} ${what} to generation ${e.data.generation} · ${WHO[j.by]}` }, { replace: true });
-      break;
-    }
-    case "index.changed":
-      // A job of this tab's names its actor above; otherwise the index changed outside the app.
-      upsert({ id: `${e.data.ws}:gen:${e.data.generation}`, ws: e.data.ws, kind: "sync", href: `/#ws=${encodeURIComponent(e.data.ws)}`,
-        text: `${e.data.ws} synced to generation ${e.data.generation} · outside the app (CLI, hook or schedule)` });
-      break;
-    case "freshness": {
-      const f = e.data.freshness;
-      if (f.state === "failed" || f.state === "rewritten") {
-        upsert({ id: `${e.data.ws}:${f.state}:${f.built_at ?? ""}`, ws: e.data.ws, kind: "warning", href: "/settings/indexing",
-          text: f.state === "failed" ? `${e.data.ws}: the index can't be read${f.error ? `. ${f.error.what}` : ""}` : `${e.data.ws}: a repository's history was rewritten. The next sync replays it.` });
-      }
-      break;
-    }
-  }
+  if (e.event === "activity.new") {
+    if (rows.some((r) => r.id === e.data.id)) return;
+    changed([e.data, ...rows]);
+    newRow.forEach((f) => f(e.data));
+  } else if (e.event === "activity.read") readLocally(e.data.ids);
 }
 
 /** Every event, after the app's own state has taken it in. For callers that follow one job (the wizard). */
@@ -157,7 +118,11 @@ function flush() {
   subs.forEach((f) => f());
 }
 function receive(e: Wire) {
-  if (e.event === "_up") { setUp(e.data.up); return; }
+  if (e.event === "_up") {
+    setUp(e.data.up);
+    if (e.data.up && loaded) void load(); // a reconnect: rows sent while the stream was down
+    return;
+  }
   queue.push(e);
   // a hidden tab gets no animation frames; a timer still delivers
   if (!frame) frame = document.hidden ? (setTimeout(flush, 100) as unknown as number) : requestAnimationFrame(flush);
