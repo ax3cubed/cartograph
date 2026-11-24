@@ -139,21 +139,34 @@ impl Adjacency {
             .enumerate()
             .map(|(i, &r)| (r, i as u32))
             .collect();
-        let dense = |r: Option<i64>| r.and_then(|r| index.get(&r).copied()).unwrap_or(NONE);
+        // Row id to dense index without hashing: ids are near-contiguous (`row` is sorted), so a
+        // vector over them is a few hundred KB and every per-link lookup below is one load.
+        let top = row.last().copied().unwrap_or(0).max(0) as usize;
+        let mut slot = vec![NONE; top + 1];
+        for (i, &r) in row.iter().enumerate() {
+            if r >= 0 {
+                slot[r as usize] = i as u32;
+            }
+        }
+        let at = |r: i64| -> Option<u32> {
+            usize::try_from(r)
+                .ok()
+                .and_then(|i| slot.get(i))
+                .copied()
+                .filter(|i| *i != NONE)
+        };
+        let dense = |r: Option<i64>| r.and_then(at).unwrap_or(NONE);
         let parent = parent_row.into_iter().map(dense).collect();
         let service = service_row.into_iter().map(dense).collect();
 
         let mut edges = Vec::new();
         let mut st = c.prepare_cached(
             "SELECT l.id, l.kind, l.src, l.dst, i.from_seq, i.to_seq
-             FROM interval i JOIN link l ON l.id = i.link ORDER BY l.id, i.from_seq",
+             FROM interval i JOIN link l ON l.id = i.link",
         )?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
-            let (Some(&src), Some(&dst)) = (
-                index.get(&r.get::<_, i64>(2)?),
-                index.get(&r.get::<_, i64>(3)?),
-            ) else {
+            let (Some(src), Some(dst)) = (at(r.get::<_, i64>(2)?), at(r.get::<_, i64>(3)?)) else {
                 continue;
             };
             edges.push(Edge {
@@ -168,6 +181,9 @@ impl Adjacency {
             });
         }
         drop(rows);
+        // Link id, then interval start: sorted here, not by ORDER BY, whose temp B-tree costs about
+        // three times the scan on 200k intervals.
+        edges.sort_unstable_by_key(|e| (e.link, e.from));
         snap.check_rows(
             row.len() + edges.len(),
             "the index is over the response cap",
@@ -203,10 +219,7 @@ impl Adjacency {
         )?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
-            let Some(h) = index
-                .get(&r.get::<_, i64>(0)?)
-                .and_then(|n| holders.get_mut(n))
-            else {
+            let Some(h) = at(r.get::<_, i64>(0)?).and_then(|n| holders.get_mut(&n)) else {
                 continue;
             };
             h.layout.push((
@@ -227,7 +240,7 @@ impl Adjacency {
         )?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
-            let Some(&node) = index.get(&r.get::<_, i64>(0)?) else {
+            let Some(node) = at(r.get::<_, i64>(0)?) else {
                 continue;
             };
             files.push(FileSpan {
