@@ -368,7 +368,7 @@ fn graph_levels_read_the_stored_layout_and_count_member_links() {
     use std::collections::BTreeMap;
     let b = built();
     let q = |sha: &str, lod: Lod| GraphQuery { lod, ..at(sha) };
-    let read = |sha: &str, lod: Lod| -> GraphSlice {
+    let read = |sha: &str, lod: Lod| -> std::sync::Arc<GraphSlice> {
         // A store of its own each time: nothing is shared but the file.
         let store = Store::open_path(&b.index).unwrap();
         let snap = store.snapshot(Limits::default()).unwrap();
@@ -501,7 +501,7 @@ fn at_resolves_dates_short_shas_and_now() {
         ErrorCode::NotFound
     );
     let date = rfc3339(1_600_000_000 + 60 * 5);
-    assert_eq!(snap.graph(&at(&date)).unwrap().at.unwrap().seq, 4);
+    assert_eq!(snap.graph(&at(&date)).unwrap().at.as_ref().unwrap().seq, 4);
 }
 
 #[test]
@@ -877,4 +877,101 @@ fn coverage_runs_extractors_and_services_read_what_the_index_stored() {
             ),
         ]
     );
+}
+
+/// SRV-04: the module and service slices roll up from the generation's in-memory graph. At every
+/// step, with and without repo=, they equal the roll-up read from the tables: the same nodes in
+/// the same order, the same links, ids, weights and added_seq.
+#[test]
+fn in_memory_roll_ups_equal_the_sql_ones_at_every_step_and_repo() {
+    use cartograph_api::types::Lod;
+    let d = tempfile::tempdir().unwrap();
+    let mut api = Fixture::init(&d.path().join("api"));
+    api.write(
+        "package.json",
+        r#"{"name":"api","private":true,"workspaces":["lib"]}"#,
+    );
+    api.write("src/a.ts", "export const a = 1;\n");
+    api.write("src/m/b.ts", "import { a } from '../a';\n");
+    api.write(
+        "lib/package.json",
+        r#"{"name":"lib","main":"src/index.ts"}"#,
+    );
+    api.write("lib/src/index.ts", "import { a } from '../../src/a';\n");
+    api.commit("api one");
+    let mut web = Fixture::init(&d.path().join("web"));
+    web.write("package.json", r#"{"name":"web","private":true}"#);
+    web.write("src/w.ts", "export const w = 1;\n");
+    web.write("src/v/x.ts", "import { w } from '../w';\n");
+    web.commit("web one");
+    api.write(
+        "src/m/c.ts",
+        "import { a } from '../a';\nimport l from 'lib';\n",
+    );
+    api.write(
+        "src/n/d.ts",
+        "import { c } from '../m/c';\nimport { b } from '../m/b';\n",
+    );
+    api.commit("api two");
+    api.remove("src/m/b.ts");
+    api.write("lib/src/e.ts", "import { c } from '../../src/m/c';\n");
+    api.commit("api three");
+    web.write(
+        "src/v/y.ts",
+        "import { x } from './x';\nimport { w } from '../w';\n",
+    );
+    web.commit("web two");
+    let dir = d.path().join("data/workspaces/0000000b");
+    let spec = |f: &Fixture| cartograph_index::timeline::RepoSpec {
+        name: f.dir.file_name().unwrap().to_string_lossy().into_owned(),
+        path: f.dir.clone(),
+        ..Default::default()
+    };
+    let w = cartograph_index::sync::Workspace {
+        dir: dir.clone(),
+        repos: vec![spec(&api), spec(&web)],
+        ..Default::default()
+    };
+    let mut cache = FactCache::open(&d.path().join("facts.db")).unwrap();
+    cartograph_index::sync::sync(&w, &Default::default(), &mut cache).unwrap();
+    let store = Store::open_path(&dir.join("index.cartograph")).unwrap();
+    let snap = store.snapshot(Limits::default()).unwrap();
+    // Every step by its sha: all but the last are past ones.
+    let shas: Vec<String> = snap
+        .conn()
+        .prepare("SELECT lower(hex(sha)) FROM commits ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(shas.len() >= 5, "{} steps", shas.len());
+    let (mut modules, mut links) = (0, 0);
+    for (seq, sha) in shas.iter().enumerate() {
+        for repo in [None, Some("api"), Some("web")] {
+            for lod in [Lod::Module, Lod::Service] {
+                let q = GraphQuery {
+                    lod,
+                    repo: repo.map(Into::into),
+                    ..at(sha)
+                };
+                let mem = snap.graph(&q).unwrap();
+                let sql = snap.rolled_up_sql(&q).unwrap();
+                assert_eq!(
+                    serde_json::to_value(&*mem).unwrap(),
+                    serde_json::to_value(&sql).unwrap(),
+                    "{lod:?} at {seq}, repo {repo:?}"
+                );
+                modules += mem
+                    .nodes
+                    .kind
+                    .iter()
+                    .filter(|k| **k == cartograph_api::types::NodeKind::Module)
+                    .count();
+                links += mem.links.id.len();
+            }
+        }
+    }
+    assert!(modules > 0, "the fixture has modules");
+    assert!(links > 0, "the fixture has rolled-up links");
 }

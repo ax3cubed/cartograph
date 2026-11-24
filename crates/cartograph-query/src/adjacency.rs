@@ -4,7 +4,9 @@
 //! the file) changes, so HTTP, MCP and Ask share it.
 //!
 //! Metrics, neighbours, ranking, changes, density and the traversals all run over it instead of a
-//! query per request: 200k links is a few MB and a scan of them is about a millisecond.
+//! query per request: 200k links is a few MB and a scan of them is about a millisecond. The module
+//! and service slices roll up from it too (SRV-04): it holds each file's path intervals and repo,
+//! and each holder's name and stored positions, so a roll-up reads no table.
 
 use std::collections::HashMap;
 
@@ -43,6 +45,35 @@ impl Edge {
     }
 }
 
+/// One path interval of one file node: the file is live at steps `from <= s < to` (IDX-18).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FileSpan {
+    pub node: u32,
+    /// The file's repo row id.
+    pub repo: i64,
+    pub from: u32,
+    /// [`NONE`] while open.
+    pub to: u32,
+}
+
+/// A service, library or module: what a roll-up shows.
+#[derive(Debug, Clone)]
+pub(crate) struct Holder {
+    /// `coalesce(name, key, '')`.
+    pub name: String,
+    /// Stored positions (IDX-25) as `(from, to, x, y, r)`, by `from`: the first live one is read.
+    pub layout: Vec<(u32, u32, f32, f32, f32)>,
+}
+
+impl Holder {
+    pub fn pos(&self, seq: u32) -> Option<(f32, f32, f32)> {
+        self.layout
+            .iter()
+            .find(|l| l.0 <= seq && seq < l.1)
+            .map(|l| (l.2, l.3, l.4))
+    }
+}
+
 pub(crate) struct Adjacency {
     pub key: (u64, u64),
     /// Dense node index -> node row id.
@@ -59,6 +90,10 @@ pub(crate) struct Adjacency {
     /// Corrected commit time by seq, and each step's repo row id.
     pub time: Vec<i64>,
     pub repo: Vec<i64>,
+    /// Every file node's path intervals, in no particular order.
+    pub files: Vec<FileSpan>,
+    /// Services, libraries and modules by node index.
+    pub holders: HashMap<u32, Holder>,
 }
 
 /// What a scope covers: the whole workspace, or a node and what lies below it.
@@ -75,7 +110,13 @@ impl Adjacency {
         let mut kind = Vec::new();
         let mut parent_row = Vec::new();
         let mut service_row = Vec::new();
-        let mut st = c.prepare_cached("SELECT id, kind, parent, service FROM node ORDER BY id")?;
+        let mut holders = HashMap::new();
+        let mut st = c.prepare_cached(
+            "SELECT id, kind, parent, service,
+               CASE WHEN kind IN ('service', 'library', 'module')
+                 THEN coalesce(name, key, '') END
+             FROM node ORDER BY id",
+        )?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
             row.push(r.get::<_, i64>(0)?);
@@ -87,6 +128,10 @@ impl Adjacency {
             });
             parent_row.push(r.get::<_, Option<i64>>(2)?);
             service_row.push(r.get::<_, Option<i64>>(3)?);
+            if let Some(name) = r.get::<_, Option<String>>(4)? {
+                let layout = Vec::new();
+                holders.insert(row.len() as u32 - 1, Holder { name, layout });
+            }
         }
         drop(rows);
         let index: HashMap<i64, u32> = row
@@ -149,6 +194,51 @@ impl Adjacency {
         let (out_off, out_e) = csr(|e| e.src);
         let (in_off, in_e) = csr(|e| e.dst);
 
+        // A holder's positions in the layout index's order, as the SQL roll-up's join read them.
+        let mut st = c.prepare_cached(
+            "SELECT l.node, l.x, l.y, l.r, l.from_seq, l.to_seq FROM layout l
+             JOIN node n ON n.id = l.node
+             WHERE n.kind IN ('service', 'library', 'module')
+             ORDER BY l.node, l.from_seq, l.rowid",
+        )?;
+        let mut rows = st.query([])?;
+        while let Some(r) = rows.next()? {
+            let Some(h) = index
+                .get(&r.get::<_, i64>(0)?)
+                .and_then(|n| holders.get_mut(n))
+            else {
+                continue;
+            };
+            h.layout.push((
+                r.get::<_, i64>(4)? as u32,
+                r.get::<_, Option<i64>>(5)?.map_or(NONE, |t| t as u32),
+                r.get::<_, f64>(1)? as f32,
+                r.get::<_, f64>(2)? as f32,
+                r.get::<_, f64>(3)? as f32,
+            ));
+        }
+        drop(rows);
+
+        // Every file node's path intervals, with its repo: the files a slice at `s` holds.
+        let mut files = Vec::new();
+        let mut st = c.prepare_cached(
+            "SELECT n.id, f.repo, fp.from_seq, fp.to_seq
+             FROM file_path fp JOIN node n ON n.file = fp.file JOIN file f ON f.id = fp.file",
+        )?;
+        let mut rows = st.query([])?;
+        while let Some(r) = rows.next()? {
+            let Some(&node) = index.get(&r.get::<_, i64>(0)?) else {
+                continue;
+            };
+            files.push(FileSpan {
+                node,
+                repo: r.get(1)?,
+                from: r.get::<_, i64>(2)? as u32,
+                to: r.get::<_, Option<i64>>(3)?.map_or(NONE, |t| t as u32),
+            });
+        }
+        drop(rows);
+
         let mut time = Vec::new();
         let mut repo = Vec::new();
         let mut st = c.prepare_cached("SELECT corrected_time, repo FROM commits ORDER BY seq")?;
@@ -171,6 +261,8 @@ impl Adjacency {
             in_e,
             time,
             repo,
+            files,
+            holders,
         })
     }
 

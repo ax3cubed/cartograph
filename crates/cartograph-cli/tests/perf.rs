@@ -290,34 +290,53 @@ fn perf_reads_on_60k_files_and_200k_links() {
     record("graph_file_slice_cold_ms", cold, 500.0, "ms");
     record("graph_file_slice_cached_ms", cached, 50.0, "ms");
 
-    // The service level, cold: 62 services and the links between them rolled up from the file
-    // scan. Recorded against SRV-04's 20 ms, not gated yet: the roll-up reads every live file and
-    // link, so it costs what a cold file slice does until roll-ups are kept per generation.
-    let q = GraphQuery::from_params(&GraphParams {
-        at: Some("2015-01-01".into()),
-        lod: Some(cartograph_api::types::Lod::Service),
-        ..Default::default()
-    })
-    .unwrap();
-    let t = Instant::now();
-    let services = store
-        .snapshot(Limits::default())
-        .unwrap()
-        .graph(&q)
-        .unwrap();
-    let service_cold = ms(t);
-    assert_eq!(services.nodes.id.len(), 62);
-    let rolled: u64 = services.links.weight.iter().map(|w| u64::from(*w)).sum();
-    assert!(rolled > 0 && rolled <= slice.links.id.len() as u64);
-    record("graph_service_slice_cold_ms", service_cold, 20.0, "ms");
-
     let snap = store.snapshot(Limits::default()).unwrap();
-    // The in-memory graph, built once per generation (SRV-11: under 300 ms).
+    // The in-memory graph, built once per generation (SRV-11: under 300 ms). It holds every link
+    // interval, file interval and holder the roll-ups below read; a server builds it as soon as it
+    // sees a new generation, so no user request waits for it.
     let t = Instant::now();
     let m = snap.metrics("n1", &At::Now).unwrap();
     let build = ms(t);
     record("adjacency_build_ms", build, 300.0, "ms");
     assert!(m.links > 0);
+
+    // The service and module levels, cold (SRV-04: 20 ms): the first request for that slice in
+    // this generation, rolled up from the in-memory graph built above, so no slice cache and no
+    // table scan. "Cold" means after the per-generation load, which is gated on its own above. A
+    // different row cap keys a different slice, so each of the five runs misses the slice cache.
+    let rolled_cold = |lod| {
+        let q = GraphQuery::from_params(&GraphParams {
+            at: Some("2015-01-01".into()),
+            lod: Some(lod),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut best = f64::MAX;
+        let mut out = None;
+        for i in 0..5 {
+            let limits = Limits {
+                max_rows: Limits::default().max_rows + i,
+                ..Limits::default()
+            };
+            let t = Instant::now();
+            let s = store.snapshot(limits).unwrap().graph(&q).unwrap();
+            best = best.min(ms(t));
+            out = Some(s);
+        }
+        (best, out.unwrap())
+    };
+    let (service_cold, services) = rolled_cold(cartograph_api::types::Lod::Service);
+    assert_eq!(services.nodes.id.len(), 62);
+    let rolled: u64 = services.links.weight.iter().map(|w| u64::from(*w)).sum();
+    assert!(rolled > 0 && rolled <= slice.links.id.len() as u64);
+    record("graph_service_slice_cold_ms", service_cold, 20.0, "ms");
+    // The module level is recorded, not gated: 1,140 modules make 185k links out of 200k, so it
+    // is as large as the file level, and building 185k link ids is most of its 7-10 ms locally,
+    // too close to 20 ms on a CI runner 2-4x slower.
+    let (module_cold, modules) = rolled_cold(cartograph_api::types::Lod::Module);
+    assert!(modules.nodes.id.len() > services.nodes.id.len());
+    assert!(!modules.links.id.is_empty());
+    record("graph_module_slice_cold_ms", module_cold, 20.0, "ms");
 
     // Search p95 over 40 queries, ranked FTS then substring hits.
     let mut times = Vec::new();
@@ -396,6 +415,10 @@ fn perf_reads_on_60k_files_and_200k_links() {
         "a cached file-level slice took {cached:.1} ms"
     );
     assert!(build < 300.0, "the graph took {build:.1} ms to build");
+    assert!(
+        service_cold < 20.0,
+        "a cold service-level slice took {service_cold:.1} ms"
+    );
     assert!(p95 < 30.0, "search p95 {p95:.1} ms");
     assert!(
         density < 30.0,

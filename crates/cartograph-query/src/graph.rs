@@ -8,12 +8,17 @@
 //! Module and service levels roll the file slice up: each file stands for its module (or its
 //! service when it sits in no module) or for its service, and the links between two holders
 //! become one link whose `weight` counts the file links (SRV-04's count). At module level the
-//! services that hold those modules are in the slice too, as their parents.
+//! services that hold those modules are in the slice too, as their parents. A roll-up reads the
+//! generation's in-memory graph (file and link intervals, holders and their positions), not the
+//! tables: a few milliseconds once the graph is built, which a server does as soon as it sees a
+//! new generation (SRV-04's "hold the intervals in memory per index generation").
 //!
-//! ponytail: `scope`, `range=` and the per-generation interval cache are still to come; the slice
-//! is built in memory, not streamed from the cursor: the response cap bounds it.
+//! ponytail: `scope` and `range=` are still to come; the slice is built in memory, not streamed
+//! from the cursor: the response cap bounds it.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::sync::Arc;
 
 use cartograph_api::types::{
     ConfidenceLevel, GraphParams, GraphSlice, LinkColumns, LinkKind, Lod, NodeColumns, NodeKind,
@@ -21,6 +26,7 @@ use cartograph_api::types::{
 use cartograph_core::{LinkId, NodeId};
 use cartograph_store::rusqlite::{self, OptionalExtension};
 
+use crate::adjacency::{Adjacency, Kind, NONE};
 use crate::resolve::{link_id, node_id};
 use crate::{At, QueryError, Snapshot};
 
@@ -113,6 +119,8 @@ struct LiveFile {
     id: i64,
     path: String,
     parent: Option<i64>,
+    /// Read only by the SQL roll-up the tests compare the in-memory one against.
+    #[cfg_attr(not(test), allow(dead_code))]
     service: Option<i64>,
     pos: Option<(f32, f32, f32)>,
 }
@@ -163,18 +171,82 @@ fn push_node(
     nodes.children.push(0);
 }
 
+/// Phase 1 links are parsed imports: both ends anchored in the tree, so exact at 1.0. The filters
+/// keep all of them or none.
+fn keeps_links(q: &GraphQuery) -> bool {
+    let keep = |k: LinkKind| q.kinds.as_ref().is_none_or(|ks| ks.contains(&k));
+    keep(LinkKind::Imports) && rank(ConfidenceLevel::Exact) >= rank(q.min_confidence)
+}
+
+/// Refuses one more live file past the node cap or the row budget: the same at every level.
+fn check_files(snap: &Snapshot<'_>, live: usize) -> Result<(), QueryError> {
+    if live >= MAX_NODES {
+        return Err(QueryError::TooLarge {
+            why: format!("more than {MAX_NODES} files are live at this commit"),
+            narrower: NARROWER.into(),
+        });
+    }
+    snap.check_rows(live + 1, NARROWER)
+}
+
+/// A roll-up's link index by (holder, holder) pair. 1,202 modules make 185k pairs out of 200k
+/// links, so this lookup runs once per live link: a dense n x n table (one load, 5.8 MB at 1,202
+/// holders) while it stays under [`DENSE_PAIRS`] cells, a hash map past that.
+enum Pairs {
+    /// Link index + 1, 0 for none; row-major.
+    Dense(Vec<u32>, usize),
+    Sparse(HashMap<(u32, u32), u32>),
+}
+
+/// 16 MB of `u32`: 2,048 holders.
+const DENSE_PAIRS: usize = 1 << 22;
+
+impl Pairs {
+    fn new(n: usize) -> Self {
+        if n * n <= DENSE_PAIRS {
+            // Zeroed memory comes from the allocator untouched: only the rows used are paged in.
+            Self::Dense(vec![0; n * n], n)
+        } else {
+            Self::Sparse(HashMap::new())
+        }
+    }
+
+    /// The link already made for `(a, b)`, or `None` after recording `next` as it.
+    fn get_or_put(&mut self, a: u32, b: u32, next: usize) -> Option<usize> {
+        match self {
+            Self::Dense(cells, n) => {
+                let c = &mut cells[a as usize * *n + b as usize];
+                if *c == 0 {
+                    *c = next as u32 + 1;
+                    None
+                } else {
+                    Some(*c as usize - 1)
+                }
+            }
+            Self::Sparse(m) => match m.entry((a, b)) {
+                Entry::Occupied(j) => Some(*j.get() as usize),
+                Entry::Vacant(v) => {
+                    v.insert(next as u32);
+                    None
+                }
+            },
+        }
+    }
+}
+
 const NARROWER: &str = "ask for fewer link kinds (kinds=) or one repo (repo=)";
 
 impl Snapshot<'_> {
     /// The slice, from the per-generation cache when the same request was answered already.
-    pub fn graph(&self, q: &GraphQuery) -> Result<GraphSlice, QueryError> {
+    /// Shared with that cache, not copied: a copy of 185k link ids costs what a roll-up does.
+    pub fn graph(&self, q: &GraphQuery) -> Result<Arc<GraphSlice>, QueryError> {
         // The row cap is part of the request: a slice built under a larger one may pass a smaller.
         let key = format!("{q:?} max_rows={}", self.limits.max_rows);
         if let Some(s) = self.cached_slice(&key) {
-            return Ok((*s).clone());
+            return Ok(s);
         }
-        let s = self.build_graph(q)?;
-        self.keep_slice(&key, std::sync::Arc::new(s.clone()));
+        let s = Arc::new(self.build_graph(q)?);
+        self.keep_slice(&key, s.clone());
         Ok(s)
     }
 
@@ -211,13 +283,7 @@ impl Snapshot<'_> {
         let mut out: Vec<LiveFile> = Vec::new();
         while let Some(r) = rows.next()? {
             let id: i64 = r.get(0)?;
-            if out.len() >= MAX_NODES {
-                return Err(QueryError::TooLarge {
-                    why: format!("more than {MAX_NODES} files are live at this commit"),
-                    narrower: NARROWER.into(),
-                });
-            }
-            self.check_rows(out.len() + 1, NARROWER)?;
+            check_files(self, out.len())?;
             out.push(LiveFile {
                 id,
                 // A roll-up never shows a path: skip the 60k allocations and the sort.
@@ -243,9 +309,7 @@ impl Snapshot<'_> {
         seq: i64,
         mut each: impl FnMut(i64, i64, i64, Option<i64>, i64) -> Result<(), QueryError>,
     ) -> Result<(), QueryError> {
-        // Phase 1 links are parsed imports: both ends anchored in the tree, so exact at 1.0.
-        let keep = |k: LinkKind| q.kinds.as_ref().is_none_or(|ks| ks.contains(&k));
-        if !keep(LinkKind::Imports) || rank(ConfidenceLevel::Exact) < rank(q.min_confidence) {
+        if !keeps_links(q) {
             return Ok(());
         }
         let mut st = self.conn().prepare_cached(
@@ -285,14 +349,12 @@ impl Snapshot<'_> {
             });
         }
         // repo= keeps that repo's files; links with an end outside them are dropped below.
-        let files = self.live_files(
-            seq,
-            q.repo.as_ref(),
-            !matches!(q.lod, Lod::Module | Lod::Service),
-        )?;
         let (nodes, links) = match q.lod {
-            Lod::Module | Lod::Service => self.rolled_up(q, seq, &files)?,
-            _ => self.file_level(q, seq, files)?,
+            Lod::Module | Lod::Service => self.rolled_up(&*self.adjacency()?, q, at.seq as u32)?,
+            _ => {
+                let files = self.live_files(seq, q.repo.as_ref(), true)?;
+                self.file_level(q, seq, files)?
+            }
         };
         Ok(GraphSlice {
             lod: q.lod,
@@ -367,9 +429,26 @@ impl Snapshot<'_> {
         Ok((nodes, links))
     }
 
-    /// Module or service level: each file stands for its holder at that level, and the links
-    /// between two holders become one, `weight` counting the file links.
-    fn rolled_up(
+    /// The roll-up read from the tables, as it was before the in-memory one: the reference
+    /// [`Self::rolled_up`] is tested against. Takes a checked repo name.
+    #[cfg(test)]
+    pub(crate) fn rolled_up_sql(&self, q: &GraphQuery) -> Result<GraphSlice, QueryError> {
+        let at = self.resolve_at(&q.at)?;
+        let seq = at.seq as i64;
+        let files = self.live_files(seq, q.repo.as_ref(), false)?;
+        let (nodes, links) = self.rolled_up_from(q, seq, &files)?;
+        Ok(GraphSlice {
+            lod: q.lod,
+            scope: None,
+            at: Some(at),
+            range: None,
+            nodes,
+            links,
+        })
+    }
+
+    #[cfg(test)]
+    fn rolled_up_from(
         &self,
         q: &GraphQuery,
         seq: i64,
@@ -525,5 +604,196 @@ impl Snapshot<'_> {
             Ok(())
         })?;
         Ok((nodes, links))
+    }
+
+    /// Module or service level: each file stands for its holder at that level, and the links
+    /// between two holders become one, `weight` counting the file links. Read from the
+    /// generation's in-memory graph; the same answer the tables give (`rolled_up_sql`).
+    fn rolled_up(
+        &self,
+        g: &Adjacency,
+        q: &GraphQuery,
+        seq: u32,
+    ) -> Result<(NodeColumns, LinkColumns), QueryError> {
+        // repo= keeps the files of every repo row with that name.
+        let repos: Option<Vec<i64>> = match &q.repo {
+            Some(name) => Some(
+                self.conn()
+                    .prepare_cached("SELECT id FROM repo WHERE name = ?1")?
+                    .query_map([name], |r| r.get(0))?
+                    .collect::<Result<_, _>>()?,
+            ),
+            None => None,
+        };
+        // Every node that isn't a file is a holder (`g.holders` has them all): one load, no hash.
+        let holder = |h: u32| h != NONE && g.kind[h as usize] != Kind::File;
+        let is_module = |h: u32| holder(h) && g.kind[h as usize] == Kind::Module;
+        let module_level = q.lod == Lod::Module;
+        // Each live file's holder at this level: its module, or its service when it is in none.
+        // Dense by node index: hashing 60k files was most of this loop.
+        let mut of = vec![NONE; g.row.len()];
+        let mut members = vec![0u32; g.row.len()];
+        let mut ids: Vec<u32> = Vec::new();
+        // A service's modules with a live file: each module is counted under the first service
+        // one of its files names, and under any other (never, today) through `extra`.
+        let mut module_service = vec![NONE; g.row.len()];
+        let mut modules_of = vec![0u32; g.row.len()];
+        let mut extra: std::collections::HashSet<(u32, u32)> = Default::default();
+        let mut live = 0;
+        for f in &g.files {
+            if !(f.from <= seq && seq < f.to)
+                || repos.as_ref().is_some_and(|r| !r.contains(&f.repo))
+            {
+                continue;
+            }
+            check_files(self, live)?;
+            live += 1;
+            let n = f.node as usize;
+            let (parent, service) = (g.parent[n], g.service[n]);
+            let h = if module_level && parent != NONE {
+                parent
+            } else {
+                service
+            };
+            if holder(h) {
+                of[n] = h;
+                if members[h as usize] == 0 {
+                    ids.push(h);
+                }
+                members[h as usize] += 1;
+            }
+            if is_module(parent) && holder(service) {
+                let first = &mut module_service[parent as usize];
+                if *first == NONE {
+                    *first = service;
+                    modules_of[service as usize] += 1;
+                } else if *first != service && extra.insert((service, parent)) {
+                    modules_of[service as usize] += 1;
+                }
+            }
+        }
+        // The nodes: the holders some live file stands for, and at module level their services.
+        if module_level {
+            let services: Vec<u32> = ids
+                .iter()
+                .filter(|h| is_module(**h))
+                .map(|h| g.parent[*h as usize])
+                .filter(|s| holder(*s))
+                .collect();
+            ids.extend(services);
+        }
+        // Services first, then modules, each by name: the same order every time.
+        let key = |h: &u32| (is_module(*h), &g.holders[h].name, g.row[*h as usize]);
+        ids.sort_by(|a, b| key(a).cmp(&key(b)));
+        ids.dedup();
+        let mut nodes = empty_nodes();
+        let mut index = vec![NONE; g.row.len()];
+        for (i, &h) in ids.iter().enumerate() {
+            index[h as usize] = i as u32;
+        }
+        for (i, &h) in ids.iter().enumerate() {
+            let x = &g.holders[&h];
+            let kind = if is_module(h) {
+                NodeKind::Module
+            } else {
+                // A library is a service that deploys nothing (C6); the wire has one kind for both.
+                NodeKind::Service
+            };
+            push_node(
+                &mut nodes,
+                g.row[h as usize],
+                kind,
+                x.name.clone(),
+                x.pos(seq),
+            );
+            let p = g.parent[h as usize];
+            if p != NONE && index[p as usize] != NONE {
+                nodes.parent[i] = index[p as usize] as i32;
+            }
+            // One level down: a service's modules with a live file, a module's live files.
+            nodes.children[i] = if kind == NodeKind::Module {
+                members[h as usize]
+            } else {
+                modules_of[h as usize]
+            };
+        }
+        self.check_rows(nodes.id.len(), NARROWER)?;
+
+        // Links: one per (holder, holder) pair, first seen in link id order.
+        let mut links = empty_links();
+        if !keeps_links(q) {
+            return Ok((nodes, links));
+        }
+        // Node to slice index, live files only: a link with any other end is dropped.
+        let slot: Vec<u32> = of
+            .iter()
+            .map(|&h| if h == NONE { NONE } else { index[h as usize] })
+            .collect();
+        // The columns are sized for every edge or every pair, whichever is fewer, so they never
+        // grow: growing them cost a fifth of the module level.
+        let n = nodes.id.len();
+        let most = g.edges.len().min(n * n);
+        let mut pair = Pairs::new(n);
+        links.id.reserve(most);
+        links.from.reserve(most);
+        links.to.reserve(most);
+        links.kind.reserve(most);
+        links.level.reserve(most);
+        links.score.reserve(most);
+        links.weight.reserve(most);
+        links.added_seq.reserve(most);
+        links.removed_seq.reserve(most);
+        for e in &g.edges {
+            if !e.live(seq) {
+                continue;
+            }
+            let (a, b) = (slot[e.src as usize], slot[e.dst as usize]);
+            if a == NONE || b == NONE || a == b {
+                continue;
+            }
+            if let Some(j) = pair.get_or_put(a, b, links.id.len()) {
+                links.weight[j] += 1;
+                links.added_seq[j] = links.added_seq[j].min(u64::from(e.from));
+                continue;
+            }
+            self.check_rows(n + links.id.len() + 1, NARROWER)?;
+            let (from, to) = (&nodes.id[a as usize].0, &nodes.id[b as usize].0);
+            let mut id = String::with_capacity(from.len() + 1 + to.len());
+            id.push_str(from);
+            id.push('>');
+            id.push_str(to);
+            links.id.push(LinkId(id));
+            links.from.push(a);
+            links.to.push(b);
+            links.kind.push(LinkKind::Imports);
+            links.level.push(ConfidenceLevel::Exact);
+            links.score.push(1.0);
+            links.weight.push(1);
+            links.added_seq.push(u64::from(e.from));
+            links.removed_seq.push(-1);
+        }
+        Ok((nodes, links))
+    }
+}
+
+#[cfg(test)]
+mod pairs_tests {
+    use super::Pairs;
+
+    /// Past 2,048 holders the table is a hash map; both give the same first-seen indexes.
+    #[test]
+    fn dense_and_sparse_pairs_agree() {
+        let mut dense = Pairs::new(3);
+        let mut sparse = Pairs::Sparse(Default::default());
+        assert!(matches!(dense, Pairs::Dense(..)));
+        assert!(matches!(Pairs::new(2049), Pairs::Sparse(_)));
+        for (i, (a, b)) in [(0, 1), (1, 0), (0, 1), (2, 2), (1, 0)]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(dense.get_or_put(a, b, i), sparse.get_or_put(a, b, i));
+        }
+        assert_eq!(dense.get_or_put(0, 1, 9), Some(0));
+        assert_eq!(sparse.get_or_put(1, 0, 9), Some(1));
     }
 }

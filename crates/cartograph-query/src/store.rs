@@ -312,6 +312,13 @@ impl Snapshot<'_> {
         Ok(g)
     }
 
+    /// Builds this generation's in-memory graph now unless it is built already, so the first
+    /// request that reads it (a roll-up, metrics, a traversal) doesn't pay for it. A server calls
+    /// this when it sees a new generation.
+    pub fn warm(&self) -> Result<(), QueryError> {
+        self.adjacency().map(|_| ())
+    }
+
     /// A slice this generation already built for the same request, if any.
     pub(crate) fn cached_slice(&self, key: &str) -> Option<Arc<cartograph_api::types::GraphSlice>> {
         let k = self.slice_key(key);

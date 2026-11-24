@@ -4,7 +4,9 @@
 //! happens; there is no replay log because the current state is always sent first. While at least
 //! one stream is open, a ticker looks at every workspace once a second: a new index generation
 //! becomes `index.changed`, a changed freshness becomes `freshness`, and a workspace that is behind
-//! gets a background sync (`ensure_fresh`, D1). With no stream open nothing polls.
+//! gets a background sync (`ensure_fresh`, D1). With no stream open nothing polls. A generation
+//! the server sees for the first time, after its own sync or on a tick, has its in-memory graph
+//! built at once (SRV-04, SRV-11), so the first roll-up or traversal a user asks for doesn't wait.
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -55,6 +57,8 @@ struct Jobs {
     /// FE-16, per workspace: the last activity row sent, and whether the index changed since the
     /// last record (recorded once its writer lets go, so a run's batches make one row).
     activity: HashMap<String, (i64, bool)>,
+    /// The generation whose in-memory graph was last built ahead, per workspace.
+    warmed: HashMap<String, u64>,
 }
 
 /// D1: the states a background sync brings current. Rewritten history is one of them: a sync
@@ -283,17 +287,25 @@ impl App {
             return;
         };
         let key = serde_json::to_string(&fresh).unwrap_or_default();
-        let (gen_changed, fresh_changed) = {
+        let (gen_changed, fresh_changed, warm) = {
             let mut jobs = self.live.jobs();
             let prev = jobs.seen.insert(ws.to_owned(), (generation, key.clone()));
-            match prev {
+            let (gen_changed, fresh_changed) = match prev {
                 // The first look sends what it sees. A stream got a state on connect, but a sync
                 // that ended before this tick changed it, and job.finished alone can't tell a tab
                 // that never saw the job start. Repeating an unchanged state costs one event.
                 None => (false, true),
                 Some((g, k)) => (g != generation, k != key),
-            }
+            };
+            // Not while this server's own job writes: it bumps the generation every batch, and
+            // its end ticks again with the last one.
+            let warm = !jobs.running.contains_key(ws)
+                && jobs.warmed.insert(ws.to_owned(), generation) != Some(generation);
+            (gen_changed, fresh_changed, warm)
         };
+        if warm {
+            self.warm(ws);
+        }
         if gen_changed {
             self.live.emit(ServerEvent::IndexChanged {
                 ws: ws.to_owned(),
@@ -366,6 +378,23 @@ impl App {
             jobs.spawned.insert(ws.to_owned(), Instant::now());
         }
         start(self, ws, JobKind::Sync, Actor::Background, false);
+    }
+
+    /// Builds the workspace's in-memory graph for its current generation on a thread of its own:
+    /// ~100 ms on 200k links, paid here instead of by the next request that reads it.
+    fn warm(&self, ws: &str) {
+        let Ok(store) = self.store(ws) else {
+            return;
+        };
+        let ws = ws.to_owned();
+        std::thread::spawn(move || {
+            let warmed = store
+                .snapshot(cartograph_query::Limits::default())
+                .and_then(|s| s.warm());
+            if let Err(e) = warmed {
+                tracing::debug!(ws, error = %e, "couldn't build the in-memory graph ahead");
+            }
+        });
     }
 
     /// The workspace's generation, fact hash and freshness, read on the blocking thread it's
