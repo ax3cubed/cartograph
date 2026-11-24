@@ -353,12 +353,18 @@ struct Draft {
     attrs: BTreeMap<String, (AttrValue, bool)>,
 }
 
-/// A node's source on one line, for evidence.
+/// What is read of a node's source for evidence, before it is masked and cut to 200 characters:
+/// more than the cap, so a secret just inside the cut is seen whole.
+const SNIPPET_READ: usize = 512;
+
+/// A node's source on one line, for evidence, with secrets masked (XS-10).
 fn snippet(n: Node, src: &[u8]) -> String {
-    text(n, src)
+    let one_line = text(n, src)
         .split_whitespace()
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    let head: String = one_line.chars().take(SNIPPET_READ).collect();
+    cartograph_core::secrets::mask(&head).into_owned()
 }
 
 impl Draft {

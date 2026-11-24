@@ -2,18 +2,25 @@
 //! string; a template string or a `+` concatenation becomes parts, so a matcher can see which
 //! segments the code spells out (`"/orders/"`) and which it doesn't (`id`).
 
+use cartograph_core::secrets::mask;
 use cartograph_parse::syntax::text;
 use tree_sitter::Node;
 
 use crate::schema::{AttrValue, Capped, MAX_PARTS, Part, Parts};
 
-/// Source text to a [`Part`], cut to the cap.
-fn lit(s: &str) -> Part {
-    Part::Lit(Capped::truncated(s))
+/// A piece of a value before it is masked and cut: both come last, so a secret can't be cut in half
+/// and slip past the rules, and text the code concatenates is scanned as one string.
+enum Seg {
+    Lit(String),
+    Expr(String),
 }
 
-fn expr(s: &str) -> Part {
-    Part::Expr(Capped::truncated(s))
+fn lit(s: &str) -> Seg {
+    Seg::Lit(s.to_owned())
+}
+
+fn expr(s: &str) -> Seg {
+    Seg::Expr(s.to_owned())
 }
 
 /// The text of a `string` node without its quotes.
@@ -26,18 +33,18 @@ fn unquote(s: &str) -> &str {
 }
 
 /// Appends `s` to the last part when that is text too, so adjacent literals are one part.
-fn push_lit(out: &mut Vec<Part>, s: &str) {
+fn push_lit(out: &mut Vec<Seg>, s: &str) {
     if s.is_empty() {
         return;
     }
-    if let Some(Part::Lit(last)) = out.last_mut() {
-        *last = Capped::truncated(&format!("{}{s}", last.as_str()));
+    if let Some(Seg::Lit(last)) = out.last_mut() {
+        last.push_str(s);
     } else {
         out.push(lit(s));
     }
 }
 
-fn collect(n: Node, src: &[u8], out: &mut Vec<Part>) {
+fn collect(n: Node, src: &[u8], out: &mut Vec<Seg>) {
     match n.kind() {
         "string" => push_lit(out, unquote(text(n, src))),
         // A name the code spells out (`.get` in `axios.get(…)`), not a value worked out at run time.
@@ -77,14 +84,25 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Part>) {
     }
 }
 
-/// The value of a captured node: a string when the code spells it out, parts otherwise.
+/// The value of a captured node: a string when the code spells it out, parts otherwise. Secrets
+/// are masked (XS-10).
 pub fn value_of(n: Node, src: &[u8]) -> AttrValue {
-    let mut parts = Vec::new();
-    collect(n, src, &mut parts);
-    parts.truncate(MAX_PARTS);
+    let mut segs = Vec::new();
+    collect(n, src, &mut segs);
+    segs.truncate(MAX_PARTS);
+    let mut parts: Vec<Part> = segs
+        .into_iter()
+        .map(|s| match s {
+            Seg::Lit(s) => Part::Lit(Capped::truncated(&mask(&s))),
+            Seg::Expr(s) => Part::Expr(Capped::truncated(&mask(&s))),
+        })
+        .collect();
     match parts.as_slice() {
         [] => AttrValue::Str(Capped::truncated("")),
-        [Part::Lit(s)] => AttrValue::Str(s.clone()),
+        [Part::Lit(_)] => match parts.pop() {
+            Some(Part::Lit(s)) => AttrValue::Str(s),
+            _ => unreachable!("matched a single literal"),
+        },
         _ => AttrValue::Parts {
             parts: Parts::new(parts).expect("truncated to the cap"),
         },

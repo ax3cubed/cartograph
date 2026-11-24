@@ -360,6 +360,7 @@ dependencies = [
  "getrandom 0.4.3",
  "insta",
  "proptest",
+ "regex",
  "schemars",
  "serde",
  "thiserror",

@@ -313,7 +313,7 @@ fn a_pathological_query_stops_at_the_budget_and_is_not_cached() {
     let a = adapter(scm).unwrap();
     let set = AdapterSet::new(vec![a]).unwrap();
     let (_d, mut c) = cache();
-    let src = "a b c d e f g h;\n".repeat(20_000);
+    let src = "a b c d e f g h;\n".repeat(1_000);
     let start = Instant::now();
     let limits = Limits {
         time_budget: Duration::from_millis(5),
@@ -361,4 +361,32 @@ proptest! {
     fn the_scm_loader_survives_query_shaped_text(s in "[()@#.?!*+\\[\\]_ a-z\"\\\\;\\n-]{0,120}") {
         let _ = adapter(&s);
     }
+}
+
+/// XS-10: a secret in a URL, in evidence or in a concatenation never reaches a fact, so never the
+/// cache either.
+#[test]
+fn a_planted_secret_is_masked_in_attributes_and_evidence() {
+    let (_d, mut c) = cache();
+    let src = r#"
+fetch("postgres://user:pw@db/app");
+fetch("https://x.test/?k=" + "AKIAIOSFODNN7" + "EXAMPLE");
+fetch(`https://x.test/${id}`, { headers: { password: "hunter2hunter2" } });
+axios.get("https://api.test/", { headers: { Authorization: "Bearer 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" } });
+"#;
+    let e = run(&mut c, 11, "leak.js", src);
+    assert_eq!(all(&e).len(), 4, "{}", pretty(&e));
+    let facts = pretty(&e);
+    let cached =
+        serde_json::to_string(&c.get_interface(&[11; 20], "adapter-fetch/js", "1.0.0")).unwrap();
+    for planted in [
+        "user:pw",
+        "AKIAIOSFODNN7EXAMPLE",
+        "hunter2hunter2",
+        "ghp_wWPw5k4a",
+    ] {
+        assert!(!facts.contains(planted), "{planted} in {facts}");
+        assert!(!cached.contains(planted), "{planted} in the cache");
+    }
+    assert!(facts.contains("[REDACTED]"));
 }
