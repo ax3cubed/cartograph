@@ -228,6 +228,48 @@ impl Repo {
     }
 }
 
+impl Repo {
+    /// For each of `commits`, the blob at the first of `paths` that is a regular file there. One
+    /// tree lookup per path and commit; a commit whose root tree equals the previous one's reuses
+    /// its answer (XS-23: a file read at every commit, changed at few).
+    pub fn first_blobs_at(
+        &self,
+        commits: &[ObjectId],
+        paths: &[&str],
+    ) -> Result<Vec<Option<ObjectId>>, GitError> {
+        let repo = self.local();
+        let mut out = Vec::with_capacity(commits.len());
+        let mut prev: Option<(ObjectId, Option<ObjectId>)> = None;
+        for &c in commits {
+            let tree_id = repo
+                .find_commit(c)
+                .map_err(obj)?
+                .tree_id()
+                .map_err(obj)?
+                .detach();
+            if let Some((t, found)) = prev
+                && t == tree_id
+            {
+                out.push(found);
+                continue;
+            }
+            let tree = repo.find_tree(tree_id).map_err(obj)?;
+            let mut found = None;
+            for p in paths {
+                if let Some(e) = tree.lookup_entry_by_path(p).map_err(obj)?
+                    && e.mode().is_blob()
+                {
+                    found = Some(e.object_id());
+                    break;
+                }
+            }
+            prev = Some((tree_id, found));
+            out.push(found);
+        }
+        Ok(out)
+    }
+}
+
 /// Reads a blob, checking its size from the header first so an oversized body is never read.
 pub fn read_blob(repo: &gix::Repository, oid: ObjectId, max: u64) -> Result<Vec<u8>, GitError> {
     let size = repo.find_header(oid).map_err(obj)?.size();

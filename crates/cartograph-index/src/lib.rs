@@ -5,6 +5,7 @@ pub mod derive;
 pub mod extract;
 pub mod freshness;
 pub mod layout;
+pub mod owners;
 mod rows;
 pub mod structure;
 pub mod sync;

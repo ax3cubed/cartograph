@@ -32,6 +32,7 @@ const API: &[&str] = &[
     "/api/v1/w/{ws}/runs",
     "/api/v1/w/{ws}/extractors",
     "/api/v1/w/{ws}/services",
+    "/api/v1/w/{ws}/owners",
     "/api/v1/mcp/tools",
     "/api/v1/agents",
     "/api/v1/activity",

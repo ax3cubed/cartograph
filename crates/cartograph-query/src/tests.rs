@@ -975,3 +975,55 @@ fn in_memory_roll_ups_equal_the_sql_ones_at_every_step_and_repo() {
     assert!(modules > 0, "the fixture has modules");
     assert!(links > 0, "the fixture has rolled-up links");
 }
+
+/// XS-23: owners come from the repository's CODEOWNERS at each commit; a change to it changes who
+/// owns a file from that commit and not before, and `…/owners` counts what is owned now.
+#[test]
+fn owners_follow_codeowners_at_each_commit() {
+    let d = tempfile::tempdir().unwrap();
+    let mut api = Fixture::init(&d.path().join("api"));
+    api.write("src/a.ts", "export const a = 1;\n");
+    api.write("lib/b.ts", "export const b = 1;\n");
+    api.write("CODEOWNERS", "* @everyone\n");
+    let c1 = api.commit("api one");
+    api.write(
+        "CODEOWNERS",
+        "* @everyone\n/src/ @acme/core\nb.ts docs@example.com\n",
+    );
+    let c2 = api.commit("api two: new owners");
+    let mut web = Fixture::init(&d.path().join("web"));
+    web.write("src/w.ts", "export const w = 1;\n");
+    web.commit("web one");
+    let dir = d.path().join("data/workspaces/0000000b");
+    let spec = |f: &Fixture| cartograph_index::timeline::RepoSpec {
+        name: f.dir.file_name().unwrap().to_string_lossy().into_owned(),
+        path: f.dir.clone(),
+        ..Default::default()
+    };
+    let w = cartograph_index::sync::Workspace {
+        dir: dir.clone(),
+        repos: vec![spec(&api), spec(&web)],
+        ..Default::default()
+    };
+    let mut cache = FactCache::open(&d.path().join("facts.db")).unwrap();
+    cartograph_index::sync::sync(&w, &Default::default(), &mut cache).unwrap();
+    let store = Store::open_path(&dir.join("index.cartograph")).unwrap();
+    let snap = store.snapshot(Limits::default()).unwrap();
+    let now = snap.resolve_at(&crate::At::Now).unwrap().seq;
+    let owners_at = |path: &str, sha: &str| -> Vec<String> {
+        let id = snap.resolve_node(path, now).unwrap();
+        snap.node_detail(&id.to_string(), &crate::At::Sha(sha.to_owned()))
+            .unwrap()
+            .owners
+    };
+    assert_eq!(owners_at("api/src/a.ts", &c1), ["@everyone"]);
+    assert_eq!(owners_at("api/src/a.ts", &c2), ["@acme/core"]);
+    assert_eq!(owners_at("api/lib/b.ts", &c1), ["@everyone"]);
+    assert_eq!(owners_at("api/lib/b.ts", &c2), ["docs@example.com"]);
+    // web has no CODEOWNERS: nobody owns its files.
+    assert!(owners_at("web/src/w.ts", &c2).is_empty());
+    let all = snap.owners().unwrap();
+    let got: Vec<(&str, u32)> = all.iter().map(|o| (o.id.as_str(), o.nodes)).collect();
+    assert_eq!(got, [("@acme/core", 1), ("docs@example.com", 1)]);
+    assert_eq!(all[0].patterns, ["/src/"]);
+}

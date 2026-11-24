@@ -21,6 +21,7 @@ mod detail;
 mod error;
 mod find;
 mod graph;
+mod owners;
 mod page;
 mod read;
 mod resolve;

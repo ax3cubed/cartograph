@@ -16,6 +16,7 @@ use cartograph_store::derived::{KeyInputs, changed, inputs_key, record};
 use cartograph_store::rusqlite::{self, Connection, params};
 
 use crate::layout::{self, Circle};
+use crate::owners;
 use crate::structure::{self, Detected, Root, ServiceSpec};
 
 /// Bump when what an artefact holds changes, so every index rebuilds it.
@@ -23,6 +24,7 @@ const DETECT_VERSION: &str = "detect 1";
 const STRUCTURE_VERSION: &str = "structure 1";
 const COUNTS_VERSION: &str = "counts 1";
 const SEARCH_VERSION: &str = "search 1";
+const OWNERS_VERSION: &str = "owners 1";
 
 /// One repository as the derived rows see it.
 pub struct RepoInput<'a> {
@@ -58,11 +60,12 @@ pub struct DerivedStats {
     pub counts: usize,
     pub search_rows: usize,
     pub layouts: usize,
+    pub owners: usize,
 }
 
 impl DerivedStats {
     pub fn rebuilt(&self) -> usize {
-        self.structures + self.counts + self.search_rows + self.layouts
+        self.structures + self.counts + self.search_rows + self.layouts + self.owners
     }
 }
 
@@ -279,6 +282,24 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
             restructured = true;
         }
         structure_keys.push(sk.to_vec());
+
+        // Owners (XS-23): only when a CODEOWNERS version or a path row changed.
+        owners::scan::<E>(conn, r.id, r.repo)?;
+        let mut o_in = vec![
+            owners::versions_key(conn, r.id)?,
+            format!("prefixed {}", r.prefixed).into_bytes(),
+        ];
+        if o_in[0].is_empty() {
+            o_in.truncate(1);
+        } else {
+            o_in.push(path_fingerprint(conn, r.id)?);
+        }
+        let ok = key("owners", OWNERS_VERSION, o_in, None);
+        if changed(conn, "owners", r.name, &ok)? {
+            owners::build::<E>(conn, r.id, r.repo, r.prefixed.then_some(r.name))?;
+            record(conn, "owners", r.name, &ok)?;
+            st.owners += 1;
+        }
     }
 
     // A repository dropped from the workspace keeps its structure; its spans close with its files.

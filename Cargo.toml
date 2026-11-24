@@ -46,6 +46,8 @@ tree-sitter-go = "=0.25.0"
 tree-sitter-python = "=0.25.0"
 tree-sitter-php = "=0.25.1"
 json-strip-comments = "=3.1.3"
+# XS-23: CODEOWNERS patterns compile once into a GlobSet.
+globset = "0.4.21"
 rayon = "1.12.0"
 # The replay's reverse index hashes ref ids by the million; already in the tree through oxc.
 rustc-hash = "2.1.3"
