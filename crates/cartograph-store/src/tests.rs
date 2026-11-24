@@ -232,6 +232,35 @@ fn quick_check_runs_once_per_file() {
     ));
 }
 
+#[test]
+fn a_writer_s_deferred_check_still_finds_damage() {
+    let d = tmp();
+    let p = with_format(d.path(), FORMAT_VERSION, MIN_READER_VERSION);
+    Connection::open(&p)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS pad (x); PRAGMA wal_checkpoint(TRUNCATE);
+             PRAGMA journal_mode = DELETE;",
+        )
+        .unwrap();
+    // A sound file: the check runs on its own thread, passes, and isn't run again.
+    let (ix, check) = Index::open_write_checking(&p).unwrap();
+    check.expect("not checked yet").wait().unwrap();
+    drop(ix);
+    assert!(Index::open_write_checking(&p).unwrap().1.is_none());
+    // A damaged copy opens, but its check fails.
+    let mut bytes = std::fs::read(&p).unwrap();
+    let n = bytes.len();
+    bytes[n - 4096..].fill(0xa5);
+    let q = d.path().join("copy.cartograph");
+    std::fs::write(&q, &bytes).unwrap();
+    let (_ix, check) = Index::open_write_checking(&q).unwrap();
+    assert!(matches!(
+        check.expect("not checked yet").wait(),
+        Err(StoreError::Damaged { .. })
+    ));
+}
+
 // IDX-13: the writer lock, the dirty flag and batches.
 
 #[test]

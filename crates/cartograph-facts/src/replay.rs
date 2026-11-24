@@ -116,10 +116,10 @@ pub struct Replay {
     langs: LangIndex,
     counts: FxHashMap<Link, u32>,
     open_at: FxHashMap<Link, u64>,
-    touched: HashMap<Link, bool>,
+    touched: FxHashMap<Link, bool>,
     /// References whose unresolved state may have changed this step: (importer, specifier) -> was
     /// unresolved before the step.
-    unres_touched: HashMap<(String, String), bool>,
+    unres_touched: FxHashMap<(String, String), bool>,
     /// Intervals closed so far; the writer drains them.
     pub closed: Vec<Interval>,
     /// Links opened so far, each with the step it opened at; the writer drains them.
@@ -130,6 +130,8 @@ pub struct Replay {
     pub unresolved_closed: Vec<(String, String, u64)>,
     pub stats: Stats,
     reverse: bool,
+    /// Set while [`Replay::restore`] stages a tree: that is not a step, so it notes no events.
+    restoring: bool,
 }
 
 impl Default for Replay {
@@ -157,14 +159,15 @@ impl Replay {
             langs: LangIndex::default(),
             counts: FxHashMap::default(),
             open_at: FxHashMap::default(),
-            touched: HashMap::new(),
-            unres_touched: HashMap::new(),
+            touched: FxHashMap::default(),
+            unres_touched: FxHashMap::default(),
             closed: Vec::new(),
             opened: Vec::new(),
             unresolved_opened: Vec::new(),
             unresolved_closed: Vec::new(),
             stats: Stats::default(),
             reverse,
+            restoring: false,
         }
     }
 
@@ -231,6 +234,17 @@ impl Replay {
     /// Takes `changes` into the tree, the file system and the references, and returns the live
     /// references to resolve again, sorted by importer then specifier. Resolves nothing.
     fn stage(&mut self, changes: &[Change]) -> Vec<usize> {
+        let mut pending = self.stage_unordered(changes);
+        pending.sort_by(|a, b| {
+            let (x, y) = (self.refs[*a].as_ref(), self.refs[*b].as_ref());
+            x.map(|r| (&r.from, &r.spec))
+                .cmp(&y.map(|r| (&r.from, &r.spec)))
+        });
+        pending
+    }
+
+    /// [`Replay::stage`], with the references in no particular order.
+    fn stage_unordered(&mut self, changes: &[Change]) -> Vec<usize> {
         let mut dirty: Vec<String> = Vec::new();
         let mut pending: Vec<usize> = Vec::new();
         for (path, new) in changes {
@@ -316,11 +330,6 @@ impl Replay {
         pending.sort_unstable();
         pending.dedup();
         pending.retain(|id| self.refs[*id].is_some());
-        pending.sort_by(|a, b| {
-            let (x, y) = (self.refs[*a].as_ref(), self.refs[*b].as_ref());
-            x.map(|r| (&r.from, &r.spec))
-                .cmp(&y.map(|r| (&r.from, &r.spec)))
-        });
         pending
     }
 
@@ -380,6 +389,9 @@ impl Replay {
 
     /// Notes that a reference's unresolved state may change this step.
     fn touch_ref(&mut self, from: &str, spec: &str, was_unresolved: bool) {
+        if self.restoring {
+            return;
+        }
         self.unres_touched
             .entry((from.to_owned(), spec.to_owned()))
             .or_insert(was_unresolved);
@@ -428,63 +440,130 @@ impl Replay {
 
     /// The replay at step `at` over `tree` (every live path and its facts), with the outcomes and
     /// reverse index of a [`Replay::snapshot`] taken at that step instead of resolving every
-    /// reference. Every link opens at `at`. `None` when the bytes don't decode or don't hold
+    /// reference. Every link opens at `at`, with no event left to drain: what is open there is
+    /// already written. `None` when the bytes don't decode or don't hold
     /// exactly the tree's references: the caller replays the tree instead.
     pub fn restore(tree: &[Change], at: u64, snapshot: &[u8]) -> Option<Self> {
         let snap: Snapshot = postcard::from_bytes(snapshot).ok()?;
+        let n = snap.refs.len();
         let s = |i: u32| snap.strings.get(i as usize).map(String::as_str);
-        let mut saved: FxHashMap<(&str, &str), usize> =
-            FxHashMap::with_capacity_and_hasher(snap.refs.len(), Default::default());
-        for (p, r) in snap.refs.iter().enumerate() {
-            saved.insert((s(r.from)?, s(r.spec)?), p);
-        }
-        let mut replay = Self::new(true);
-        let pending = replay.stage(tree);
-        if pending.len() != snap.refs.len() || saved.len() != snap.refs.len() {
+        // A restored reference's id is its position in the snapshot, so the reverse index and each
+        // reference's keys are built from the snapshot alone, on two threads, while this one
+        // stages the tree. Ids only name references: what a step resolves, and in what order,
+        // comes from (importer, specifier).
+        let keys: Vec<Arc<str>> = snap
+            .waiting
+            .iter()
+            .map(|(k, _)| s(*k).map(Arc::from))
+            .collect::<Option<_>>()?;
+        if snap
+            .waiting
+            .iter()
+            .flat_map(|(_, ps)| ps)
+            .any(|p| *p as usize >= n)
+        {
             return None;
         }
-        // Snapshot position -> reference id.
-        let mut id_of = vec![0; snap.refs.len()];
+        std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| {
+                let mut w: FxHashMap<Arc<str>, FxHashSet<usize>> =
+                    FxHashMap::with_capacity_and_hasher(keys.len(), Default::default());
+                for (key, (_, ps)) in keys.iter().zip(&snap.waiting) {
+                    w.insert(Arc::clone(key), ps.iter().map(|p| *p as usize).collect());
+                }
+                w
+            });
+            let per_ref = scope.spawn(|| {
+                let mut count = vec![0usize; n];
+                for p in snap.waiting.iter().flat_map(|(_, ps)| ps) {
+                    count[*p as usize] += 1;
+                }
+                let mut v: Vec<Vec<Arc<str>>> = count.into_iter().map(Vec::with_capacity).collect();
+                for (key, (_, ps)) in keys.iter().zip(&snap.waiting) {
+                    for p in ps {
+                        v[*p as usize].push(Arc::clone(key));
+                    }
+                }
+                v
+            });
+            let saved = scope.spawn(|| {
+                let mut saved: FxHashMap<(&str, &str), usize> =
+                    FxHashMap::with_capacity_and_hasher(n, Default::default());
+                for (p, r) in snap.refs.iter().enumerate() {
+                    saved.insert((s(r.from)?, s(r.spec)?), p);
+                }
+                (saved.len() == n).then_some(saved)
+            });
+            let mut replay = Self::new(true);
+            // Restoring is not a step: what is open at `at` is already written, so no events.
+            replay.restoring = true;
+            let pending = replay.stage_unordered(tree);
+            replay.restoring = false;
+            let restored = saved
+                .join()
+                .expect("no panic")
+                .and_then(|saved| replay.restore_refs(pending, &saved, &snap));
+            let waiting = waiting.join().expect("no panic");
+            let per_ref = per_ref.join().expect("no panic");
+            restored?;
+            replay.waiting = waiting;
+            for (r, keys) in replay.refs.iter_mut().zip(per_ref) {
+                r.as_mut()?.keys = keys;
+            }
+            replay.open_at = replay.counts.keys().map(|l| (l.clone(), at)).collect();
+            Some(replay)
+        })
+    }
+
+    /// Gives each staged reference the id and outcome it has in `snap`, whose references by
+    /// (importer, specifier) are `saved`. `None` when they aren't exactly the snapshot's.
+    fn restore_refs(
+        &mut self,
+        pending: Vec<usize>,
+        saved: &FxHashMap<(&str, &str), usize>,
+        snap: &Snapshot,
+    ) -> Option<()> {
+        let n = snap.refs.len();
+        let s = |i: u32| snap.strings.get(i as usize).map(String::as_str);
+        if pending.len() != n || self.refs.len() != n {
+            return None;
+        }
+        // Reference id -> snapshot position.
+        let mut position = vec![usize::MAX; n];
+        let mut refs: Vec<Option<Ref>> = (0..n).map(|_| None).collect();
         for id in pending {
-            let r = replay.refs[id].as_ref()?;
+            let mut r = self.refs[id].take()?;
             let p = *saved.get(&(r.from.as_str(), r.spec.as_str()))?;
-            id_of[p] = id;
+            if refs[p].is_some() {
+                return None;
+            }
             let link =
                 |kind, to: u32| Some(Outcome::Link((kind, r.from.clone(), s(to)?.to_owned())));
-            let outcome = match snap.refs[p].outcome {
+            r.outcome = match snap.refs[p].outcome {
                 SnapOutcome::Import(to) => link(LinkKind::Import, to)?,
                 SnapOutcome::Package(to) => link(LinkKind::Package, to)?,
                 SnapOutcome::External => Outcome::External,
                 SnapOutcome::Builtin => Outcome::Builtin,
                 SnapOutcome::Unresolved => Outcome::Unresolved,
             };
-            if let Outcome::Link(l) = &outcome {
-                replay.bump(l.clone(), 1);
+            if let Outcome::Link(l) = &r.outcome {
+                match self.counts.get_mut(l) {
+                    Some(c) => *c += 1,
+                    None => {
+                        self.counts.insert(l.clone(), 1);
+                    }
+                }
             }
-            replay.refs[id].as_mut()?.outcome = outcome;
+            position[id] = p;
+            refs[p] = Some(r);
         }
-        let mut per_ref = vec![0usize; snap.refs.len()];
-        for (_, ps) in &snap.waiting {
-            for p in ps {
-                *per_ref.get_mut(*p as usize)? += 1;
+        self.refs = refs;
+        for ids in self.by_file.values_mut() {
+            for id in ids {
+                *id = position[*id];
             }
         }
-        for (p, n) in per_ref.into_iter().enumerate() {
-            replay.refs[id_of[p]].as_mut()?.keys.reserve_exact(n);
-        }
-        replay.waiting.reserve(snap.waiting.len());
-        for (k, ps) in &snap.waiting {
-            let key: Arc<str> = Arc::from(s(*k)?);
-            let mut ids = FxHashSet::with_capacity_and_hasher(ps.len(), Default::default());
-            for p in ps {
-                let id = *id_of.get(*p as usize)?;
-                replay.refs[id].as_mut()?.keys.push(Arc::clone(&key));
-                ids.insert(id);
-            }
-            replay.waiting.insert(key, ids);
-        }
-        replay.settle_step(at);
-        Some(replay)
+        Some(())
     }
 
     /// Points `node_modules/<name>` at the package with the smallest manifest path.

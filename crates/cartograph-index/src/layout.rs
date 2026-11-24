@@ -10,9 +10,9 @@
 //! are kept out of the fact hash.
 //!
 //! Stability: a node that has a position keeps it. Only new nodes move, starting at their parent's
-//! centre, and they settle among their pinned siblings. A parent whose children and weights are
-//! unchanged (its inputs key, IDX-21) is skipped. A file that moved to another module is placed
-//! again there. A parent with more than [`GRID_ABOVE`] children is packed on a grid.
+//! centre, and they settle among their pinned siblings. A parent whose children all keep their
+//! places is skipped, links and all: its inputs key (IDX-21) is the one it was last laid out from.
+//! A file that moved to another module is placed again there. A parent with more than [`GRID_ABOVE`] children is packed on a grid.
 //!
 //! Positions are intervals: a node's first row starts at the step it first exists, so scrubbing
 //! back reads them with the same as-of rule as links.
@@ -380,55 +380,12 @@ pub fn run(
     }
     drop(rows);
 
-    // Children per parent (None: the workspace), and links between siblings.
+    // Children per parent (None: the workspace).
     let mut children: BTreeMap<Option<i64>, Vec<usize>> = BTreeMap::new();
     for (i, l) in live.iter().enumerate() {
         let p = l.parent.filter(|p| index.contains_key(p));
         children.entry(p).or_default().push(i);
     }
-    // The child of `parent` that holds node `i`, if any.
-    let ancestor_under = |mut i: usize, parent: Option<i64>| -> Option<usize> {
-        for _ in 0..4 {
-            let p = live[i].parent.filter(|p| index.contains_key(p));
-            if p == parent {
-                return Some(i);
-            }
-            i = index[&p?];
-        }
-        None
-    };
-    let mut weights: HashMap<Option<i64>, BTreeMap<(usize, usize), f64>> = HashMap::new();
-    let mut st = conn.prepare(
-        "SELECT l.src, l.dst FROM interval i JOIN link l ON l.id = i.link WHERE i.to_seq IS NULL",
-    )?;
-    let mut rows = st.query([])?;
-    while let Some(r) = rows.next()? {
-        let (Some(&a), Some(&b)) = (index.get(&r.get(0)?), index.get(&r.get(1)?)) else {
-            continue;
-        };
-        // The link counts once, at the deepest parent holding both ends apart.
-        let chain = |mut i: usize| {
-            let mut v = vec![i];
-            while let Some(p) = live[i].parent.and_then(|p| index.get(&p)) {
-                i = *p;
-                v.push(i);
-            }
-            v
-        };
-        let (ca, cb) = (chain(a), chain(b));
-        let common = ca.iter().find(|x| cb.contains(x)).map(|x| live[*x].id);
-        let (Some(x), Some(y)) = (ancestor_under(a, common), ancestor_under(b, common)) else {
-            continue;
-        };
-        if x != y {
-            *weights
-                .entry(common)
-                .or_default()
-                .entry((x.min(y), x.max(y)))
-                .or_default() += 1.0;
-        }
-    }
-    drop(rows);
 
     // Radii bottom-up: a file is 1; a parent fits its children. A stored radius is kept.
     let mut radius: Vec<f64> = vec![1.0; live.len()];
@@ -455,7 +412,10 @@ pub fn run(
         }
     }
 
-    // Top-down, one level at a time; the parents of a level in parallel.
+    // Top-down, one level at a time; the parents of a level in parallel. A parent whose children
+    // all keep their places is not laid out: `place` would return those places, whatever the
+    // springs. The links between siblings are read only when some parent has a child to place.
+    let mut weights: Option<Weights> = None;
     let mut placed: HashMap<i64, Circle> = HashMap::new();
     let mut moved: Vec<(usize, Circle)> = Vec::new();
     let mut laid = 0;
@@ -468,7 +428,7 @@ pub fn run(
     );
     let mut level: Vec<Option<i64>> = vec![None];
     while !level.is_empty() {
-        let jobs: Vec<(Option<i64>, String, Group)> = level
+        let mut jobs: Vec<(Option<i64>, String, Group)> = level
             .iter()
             .filter_map(|p| {
                 let kids = children.get(p)?;
@@ -492,38 +452,57 @@ pub fn run(
                         .filter(|c| inside(c))
                         .map(|c| (c.x, c.y))
                 };
-                let pos: HashMap<usize, usize> =
-                    kids.iter().enumerate().map(|(n, i)| (*i, n)).collect();
-                let springs = weights
-                    .get(p)
-                    .map(|w| {
-                        w.iter()
-                            .filter_map(|((a, b), w)| Some((pos[a], *pos.get(b)?, *w)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
                 let g = Group {
                     area,
                     children: kids
                         .iter()
                         .map(|i| (live[*i].key.clone(), radius[*i], pin(*i)))
                         .collect(),
-                    springs,
+                    springs: Vec::new(),
                 };
                 let key =
                     p.map_or_else(|| "workspace".to_owned(), |id| live[index[&id]].key.clone());
                 Some((*p, key, g))
             })
             .collect();
-        let results: Vec<Vec<(f64, f64)>> =
-            jobs.par_iter().map(|(_, key, g)| place(key, g)).collect();
+        let unpinned = |g: &Group| g.children.iter().any(|c| c.2.is_none());
+        if weights.is_none() && jobs.iter().any(|(_, _, g)| unpinned(g)) {
+            weights = Some(sibling_weights(conn, &live, &index)?);
+        }
+        for (p, _, g) in &mut jobs {
+            let Some(w) = weights.as_ref().and_then(|w| w.get(p)) else {
+                continue;
+            };
+            if !unpinned(g) {
+                continue;
+            }
+            let pos: HashMap<usize, usize> = children[p]
+                .iter()
+                .enumerate()
+                .map(|(n, i)| (*i, n))
+                .collect();
+            g.springs = w
+                .iter()
+                .filter_map(|((a, b), w)| Some((pos[a], *pos.get(b)?, *w)))
+                .collect();
+        }
+        let results: Vec<Vec<(f64, f64)>> = jobs
+            .par_iter()
+            .map(|(_, key, g)| {
+                if unpinned(g) {
+                    place(key, g)
+                } else {
+                    g.children.iter().filter_map(|c| c.2).collect()
+                }
+            })
+            .collect();
         let mut next = Vec::new();
         for ((p, key, g), pos) in jobs.iter().zip(results) {
-            let k = group_key(g);
-            if changed(conn, "layout", key, &k)? {
-                record(conn, "layout", key, &k)?;
-            }
-            if g.children.iter().any(|c| c.2.is_none()) {
+            if unpinned(g) {
+                let k = group_key(g);
+                if changed(conn, "layout", key, &k)? {
+                    record(conn, "layout", key, &k)?;
+                }
                 laid += 1;
             }
             for (n, i) in children[p].iter().enumerate() {
@@ -558,6 +537,59 @@ pub fn run(
         .execute(params![l.id, c.x, c.y, c.r, from])?;
     }
     Ok(laid)
+}
+
+/// Link counts between siblings, by parent (None: the workspace): (child, child) -> weight.
+type Weights = HashMap<Option<i64>, BTreeMap<(usize, usize), f64>>;
+
+/// Each open link counted once, at the deepest parent holding both ends apart.
+fn sibling_weights(
+    conn: &Connection,
+    live: &[Live],
+    index: &HashMap<i64, usize>,
+) -> rusqlite::Result<Weights> {
+    // The child of `parent` that holds node `i`, if any.
+    let ancestor_under = |mut i: usize, parent: Option<i64>| -> Option<usize> {
+        for _ in 0..4 {
+            let p = live[i].parent.filter(|p| index.contains_key(p));
+            if p == parent {
+                return Some(i);
+            }
+            i = index[&p?];
+        }
+        None
+    };
+    let mut weights: Weights = HashMap::new();
+    let mut st = conn.prepare(
+        "SELECT l.src, l.dst FROM interval i JOIN link l ON l.id = i.link WHERE i.to_seq IS NULL",
+    )?;
+    let mut rows = st.query([])?;
+    while let Some(r) = rows.next()? {
+        let (Some(&a), Some(&b)) = (index.get(&r.get(0)?), index.get(&r.get(1)?)) else {
+            continue;
+        };
+        let chain = |mut i: usize| {
+            let mut v = vec![i];
+            while let Some(p) = live[i].parent.and_then(|p| index.get(&p)) {
+                i = *p;
+                v.push(i);
+            }
+            v
+        };
+        let (ca, cb) = (chain(a), chain(b));
+        let common = ca.iter().find(|x| cb.contains(x)).map(|x| live[*x].id);
+        let (Some(x), Some(y)) = (ancestor_under(a, common), ancestor_under(b, common)) else {
+            continue;
+        };
+        if x != y {
+            *weights
+                .entry(common)
+                .or_default()
+                .entry((x.min(y), x.max(y)))
+                .or_default() += 1.0;
+        }
+    }
+    Ok(weights)
 }
 
 /// A parent's inputs key: its children (key and radius) and the weights between them.

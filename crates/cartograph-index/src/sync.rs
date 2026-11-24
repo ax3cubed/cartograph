@@ -44,7 +44,7 @@ use cartograph_parse::{BlobFacts, extractor_for, tracked};
 use cartograph_store::hash::store_fact_hash;
 use cartograph_store::rusqlite::{self, OptionalExtension, params};
 use cartograph_store::writer::{Batches, DIRTY_FILE, Progress, WriterLock, mark_dirty, recover};
-use cartograph_store::{Index, StoreError};
+use cartograph_store::{Index, PendingCheck, StoreError};
 
 use crate::derive::{DerivedStats, Inputs, RepoInput, coverage, refresh};
 use crate::extract::{ExtractStats, Facts, extract};
@@ -263,9 +263,12 @@ pub enum Upgrade {
 /// Brings an older index to this binary's format under the writer lock (IDX-16, B3): a migration
 /// when one is registered, otherwise [`Upgrade::Rebuild`], since the index is a cache.
 fn bring_current(lock: &WriterLock, path: &Path) -> Upgrade {
-    match Index::open_read(path) {
-        Ok(ix) if ix.state == cartograph_store::State::NeedsMigrate => {}
-        _ => return Upgrade::Current,
+    // The probe skips quick_check, which a sync runs alongside its first reads; the rare file that
+    // needs a migration is opened again with the check, which decides as it always has.
+    let needs_migrate =
+        |ix: Result<Index, _>| ix.is_ok_and(|ix| ix.state == cartograph_store::State::NeedsMigrate);
+    if !needs_migrate(Index::probe(path)) || !needs_migrate(Index::open_read(path)) {
+        return Upgrade::Current;
     }
     match cartograph_store::migrate::migrate(lock, path) {
         Ok(true) => Upgrade::Migrated,
@@ -538,12 +541,54 @@ fn round(
             .and_then(|ix| crate::layout::positions_by_key(&ix.conn).ok());
         discard(ws)?;
     }
-    let ix = if path.exists() {
-        Index::open_write(&path)?
+    let (ix, mut check) = if path.exists() {
+        Index::open_write_checking(&path)?
     } else {
-        Index::create(&path)?
+        (Index::create(&path)?, None)
     };
-    let conn = &ix.conn;
+    let r = round_on(
+        lock, ws, opts, cache, s, progress, &ix.conn, carried, &mut check,
+    );
+    // A damaged index is reported as such, whatever else failed on it.
+    if let Some(c) = check {
+        c.wait()?;
+    }
+    r
+}
+
+/// Waits for the index's quick_check, if it is still running.
+fn confirm(check: &mut Option<PendingCheck>) -> Result<(), SyncError> {
+    match check.take() {
+        Some(c) => Ok(c.wait()?),
+        None => Ok(()),
+    }
+}
+
+/// A round on the open index. `check` is its quick_check, still running: it is waited for before
+/// anything is committed.
+#[allow(clippy::too_many_arguments)]
+fn round_on(
+    lock: &WriterLock,
+    ws: &Workspace,
+    opts: &SyncOptions,
+    cache: &mut FactCache,
+    s: &mut SyncSummary,
+    progress: &mut dyn FnMut(u64, u64),
+    conn: &rusqlite::Connection,
+    mut carried: Option<HashMap<String, crate::layout::Circle>>,
+    check: &mut Option<PendingCheck>,
+) -> Result<(), SyncError> {
+    // `recover` commits at once, so the check comes first on an index that needs it.
+    let state: Option<String> = conn
+        .query_row(
+            "SELECT CAST(value AS TEXT) FROM meta WHERE key = 'state'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if matches!(state.as_deref(), Some("syncing" | "building")) {
+        confirm(check)?;
+    }
     recover(conn)?;
     let snapshot = take_snapshot(ws, conn)?;
     let mut batches = Batches::begin(conn)?;
@@ -827,7 +872,9 @@ fn round(
     }
     rows.facts(facts.iter().filter(|(k, _)| !indexed_facts.contains(*k)))?;
 
-    // 6. Replay the merged new steps, in batches.
+    // 6. Replay the merged new steps, in batches. The first batch may commit: the index must have
+    // passed its check by then.
+    confirm(check)?;
     let mut prefixes: Vec<Option<&str>> = parts
         .iter()
         .map(|p| prefixed.then_some(p.spec.name.as_str()))
@@ -938,6 +985,13 @@ fn round(
     s.watermark = seq;
     s.replay_ms += t.elapsed().as_millis();
     s.coverage = coverage(&replay);
+    // The replay is done with: its snapshot is encoded, and it and the facts are freed, on another
+    // thread while this one writes the derived rows. The file is written after the commit below.
+    let snapshot_body = std::thread::spawn(move || {
+        let body = (seq >= 0).then(|| replay.snapshot());
+        drop((replay, facts));
+        body
+    });
     let (files_total, files_parsed, imports_total, imports_resolved) = s.coverage;
     conn.execute(
         "INSERT INTO run (started_at, finished_at, writer_version, stats, files_total,
@@ -1001,7 +1055,9 @@ fn round(
     s.derived.search_rows += d.search_rows;
     s.derived.layouts += d.layouts;
     batches.finish(conn)?;
-    put_snapshot(ws, &hash.to_string(), seq, &replay);
+    if let Ok(Some(body)) = snapshot_body.join() {
+        put_snapshot(ws, &hash.to_string(), seq, &body);
+    }
     Ok(())
 }
 
@@ -1164,12 +1220,9 @@ fn take_snapshot(
 
 /// Best effort: without a snapshot the next sync resolves the tree again, which is slower, not
 /// wrong.
-fn put_snapshot(ws: &Workspace, fact_hash: &str, seq: i64, replay: &Replay) {
-    if seq < 0 {
-        return;
-    }
+fn put_snapshot(ws: &Workspace, fact_hash: &str, seq: i64, body: &[u8]) {
     let mut bytes = snapshot_header(fact_hash, seq).into_bytes();
-    bytes.extend(replay.snapshot());
+    bytes.extend_from_slice(body);
     // No fsync: the snapshot is a cache. A torn file fails its decode or the tree check in
     // `Replay::restore`, and the sync then resolves the tree again.
     if let Err(e) = write_cache(&ws.snapshot_path(), &bytes) {

@@ -4,8 +4,9 @@
 //! (AI-15, [`search`]).
 //!
 //! An index file is untrusted input (board G01): the application id is checked, `quick_check` runs
-//! before first use, the schema has no triggers or views, and every connection runs with
-//! `trusted_schema = OFF`, defensive mode on and extension loading off.
+//! before first use (a sync runs it alongside its first reads and commits nothing before it passes:
+//! [`Index::open_write_checking`]), the schema has no triggers or views, and every connection runs
+//! with `trusted_schema = OFF`, defensive mode on and extension loading off.
 
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -195,12 +196,44 @@ impl Index {
         Ok(ix)
     }
 
+    /// [`Index::open_write`], except that the file's `quick_check`, when this process hasn't run
+    /// it, runs on another thread with its own read-only connection while the caller reads. The
+    /// caller must [`PendingCheck::wait`] before it commits anything, and report the check's error
+    /// over its own. Any other failure to open is reported as `open_write` reports it.
+    pub fn open_write_checking(path: &Path) -> Result<(Self, Option<PendingCheck>), StoreError> {
+        let key = file_key(path);
+        let seen = key.is_some_and(|k| CHECKED.lock().is_ok_and(|c| c.contains(&k)));
+        if !seen
+            && let Ok(ix) = Self::open_with(path, true, false)
+            && ix.state == State::Current
+        {
+            let p = path.to_owned();
+            let check = std::thread::spawn(move || {
+                let conn = Connection::open_with_flags(
+                    &p,
+                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )
+                .map_err(sql(&p))?;
+                harden(&conn, true).map_err(|e| damaged(&p, e.to_string()))?;
+                quick_check(&conn, &p, key)
+            });
+            return Ok((ix, Some(PendingCheck(check))));
+        }
+        Self::open_write(path).map(|ix| (ix, None))
+    }
+
+    /// Opens for reading the format state, without `quick_check`: not for reading the facts.
+    pub fn probe(path: &Path) -> Result<Self, StoreError> {
+        Self::open_with(path, false, false)
+    }
+
     pub(crate) fn open(path: &Path, write: bool) -> Result<Self, StoreError> {
+        Self::open_with(path, write, true)
+    }
+
+    fn open_with(path: &Path, write: bool, check: bool) -> Result<Self, StoreError> {
         let shown = || path.display().to_string();
-        let damaged = |detail: String| StoreError::Damaged {
-            path: shown(),
-            detail,
-        };
+        let damaged = |detail: String| damaged(path, detail);
         // SQLite treats an empty or missing file as a new database; an index is never that.
         let mut header = [0u8; 100];
         let n = std::fs::File::open(path)
@@ -237,16 +270,8 @@ impl Index {
         // process, not once per pooled connection. A file renamed into place is a new file.
         let key = file_key(path);
         let seen = key.is_some_and(|k| CHECKED.lock().is_ok_and(|c| c.contains(&k)));
-        if !seen {
-            let check: String = conn
-                .query_row("PRAGMA quick_check", [], |r| r.get(0))
-                .map_err(|e| damaged(e.to_string()))?;
-            if check != "ok" {
-                return Err(damaged(check));
-            }
-            if let (Some(k), Ok(mut c)) = (key, CHECKED.lock()) {
-                c.insert(k);
-            }
+        if check && !seen {
+            quick_check(&conn, path, key)?;
         }
         let meta = |k: &str| -> Result<Option<i64>, StoreError> {
             conn.query_row("SELECT value FROM meta WHERE key = ?1", [k], |r| r.get(0))
@@ -295,6 +320,40 @@ pub fn summary_counts(conn: &Connection) -> rusqlite::Result<(i64, i64, i64)> {
         [],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )
+}
+
+fn damaged(path: &Path, detail: String) -> StoreError {
+    StoreError::Damaged {
+        path: path.display().to_string(),
+        detail,
+    }
+}
+
+/// Runs `quick_check` on `conn`, an open connection to `path`, and remembers a pass.
+fn quick_check(conn: &Connection, path: &Path, key: Option<FileKey>) -> Result<(), StoreError> {
+    let check: String = conn
+        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+        .map_err(|e| damaged(path, e.to_string()))?;
+    if check != "ok" {
+        return Err(damaged(path, check));
+    }
+    if let (Some(k), Ok(mut c)) = (key, CHECKED.lock()) {
+        c.insert(k);
+    }
+    Ok(())
+}
+
+/// The `quick_check` of [`Index::open_write_checking`], running.
+#[must_use = "wait for the check before committing"]
+pub struct PendingCheck(std::thread::JoinHandle<Result<(), StoreError>>);
+
+impl PendingCheck {
+    /// The check's outcome: `Err` when the file is damaged.
+    pub fn wait(self) -> Result<(), StoreError> {
+        self.0
+            .join()
+            .unwrap_or_else(|p| std::panic::resume_unwind(p))
+    }
 }
 
 /// Files whose `quick_check` passed in this process.
