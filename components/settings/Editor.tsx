@@ -69,7 +69,7 @@ export default function Editor() {
               </div></dd>
               {transport === "http" && <><dt>Address</dt><dd className="set-mono">http://127.0.0.1:4317/mcp</dd></>}
               <dt>Index</dt><dd>{ws?.name}{fresh?.builtAt ? <> · built {fmtDate(fresh.builtAt, "md", "local")}</> : null}</dd>
-              {live && ws && <><dt>Workspace</dt><dd className="set-mono">{ws.path}</dd></>}
+              {live && ws && <><dt>Workspace</dt><dd className="set-mono" title={ws.path}>{ws.path}</dd></>}
             </dl>
             {live && <p className="set-note">The index itself lives in Cartograph&apos;s data folder (<span className="set-mono">~/.cartograph/workspaces/{ws?.id ?? "<workspace>"}/index.cartograph</span>, or under <span className="set-mono">CARTOGRAPH_HOME</span> when that is set), never inside the workspace.</p>}
             <p className="set-note">{transport === "stdio" ? "Your editor starts cartograph mcp itself. Nothing listens on a port." : "Only this machine can connect. The server listens on 127.0.0.1, so other machines can't reach it."}</p>

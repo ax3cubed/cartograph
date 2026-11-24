@@ -1,6 +1,7 @@
-.set-ed-facts { display: grid; grid-template-columns: auto 1fr; gap: 0.5rem 1rem; margin: 0; font-size: 0.8125rem; align-items: center; }
+.set-ed-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.5rem 1rem; margin: 0; font-size: 0.8125rem; align-items: center; }
 .set-ed-facts dt { color: var(--muted); }
-.set-ed-facts dd { margin: 0; }
+.set-ed-facts dd { margin: 0; min-width: 0; }
+.set-ed-facts dd.set-mono { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .set-ed-tools { list-style: none; margin: 0; padding: 0; }
 .set-ed-tools li { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) auto; gap: 0.625rem; align-items: center; min-height: 2.25rem; border-top: 1px solid var(--line); font-size: 0.8125rem; }
 .set-ed-tools li:first-child { border-top: 0; }
