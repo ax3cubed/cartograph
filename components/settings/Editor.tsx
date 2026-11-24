@@ -120,7 +120,8 @@ function Agents({ list, error, loading }: { list?: AgentStatus[]; error?: Reques
                       {!a.installed && <button type="button" className="set-btn is-sm" aria-describedby={`set-ed-a-${a.id}`} disabled={mine?.busy} onClick={() => call(a.id, false)}>Preview set-up</button>}
                     </span>
                   </div>
-                  {a.config_path && <p className="set-note">Config: <span className="set-mono">{a.config_path}</span>{a.id === "claude-code" && " · with the Cartograph plugin installed, Claude Code needs no entry here"}</p>}
+                  {a.config_path && <p className="set-note set-ed-path">Config: <span className="set-mono" title={a.config_path}>{a.config_path}</span></p>}
+                  {a.config_path && a.id === "claude-code" && <p className="set-note">With the Cartograph plugin installed, Claude Code needs no entry here.</p>}
                   <details className="set-adv"><summary>Config snippet</summary><div><pre className="set-pre">{SNIPPET[a.id] ?? CONFIG}</pre><CopyButton text={SNIPPET[a.id] ?? CONFIG} label="Copy snippet" /></div></details>
                   {mine?.error && <p className="set-note" role="alert">{mine.error}</p>}
                   {mine?.diffs && !mine.done && (

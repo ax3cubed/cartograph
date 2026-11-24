@@ -10,3 +10,6 @@
 .set-ed-agents > li { display: flex; flex-direction: column; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
 .set-ed-agents > li:first-child { border-top: 0; padding-top: 0; }
 .set-ed-chips { display: inline-flex; align-items: center; gap: 0.5rem; }
+/* The path fills its own line and is cut with an ellipsis: a long home folder never reflows the row. */
+.set-ed-path { display: flex; gap: 0.25em; white-space: nowrap; }
+.set-ed-path > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
