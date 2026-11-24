@@ -5,6 +5,7 @@
 import { ArrowRight, Check, ChevronLeft, GitCommitHorizontal } from "lucide-react";
 import type { EvidenceKind, Layer, LinkDetail } from "@/lib/api";
 import { useWsRead } from "@/lib/api/live";
+import { opText, roles, siteLabel } from "./linkEvidence";
 import "./map.css";
 
 const EV: Record<EvidenceKind, string> = { parsed: "Parsed", contract: "Contract", name_match: "Name match", env: "Environment", history: "History", model: "Model" };
@@ -39,22 +40,45 @@ export default function LinkInspector({ ws, id, at, name, dateOf, onBack, onOpen
             {d.layer === "correction" && <span className="map-chip is-fixed">Overridden</span>}
           </div>
           <h2 className="map-insp-title"><span className="lm-mono">{name(d.link.from)}</span><ArrowRight size={16} aria-hidden /><span className="lm-mono">{name(d.link.to)}</span></h2>
-          <span className="map-k">Which answer the map shows</span>
-          <p className="map-sub">{LAYER[d.layer]}{d.replaced_by ? `; replaced by ${d.replaced_by}` : ""}.</p>
-          <span className="map-k">Evidence · {d.link.confidence.evidence.length} {d.link.confidence.evidence.length === 1 ? "source" : "sources"}</span>
-          <ul className="map-ev">
-            {d.link.confidence.evidence.map((e, i) => (
-              <li key={i}><Check size={15} aria-hidden />
-                <span><b>{EV[e.kind]}</b> {e.file && <code>{e.file}{e.line ? `:${e.line}` : ""}</code>}<br /><span className="map-note">{cut(e.note)}</span></span>
-              </li>
-            ))}
-          </ul>
+          {d.operation && <p className="map-sub"><code>{opText(d.operation)}</code></p>}
+          {d.layer && (
+            <>
+              <span className="map-k">Which answer the map shows</span>
+              <p className="map-sub">{LAYER[d.layer]}.</p>
+            </>
+          )}
+          {/* HTTP links give their evidence by role, with the code; the rest give a short list. */}
+          {roles(d).length > 0 ? roles(d).map((g) => (
+            <div key={g.role}>
+              <span className="map-k">{g.title}</span>
+              <ul className="map-ev">
+                {g.sites.map((s, i) => (
+                  <li key={i}><Check size={15} aria-hidden />
+                    <span><code>{siteLabel(s)}</code> <span className="map-note">{s.kind}</span>
+                      {s.snippet && <pre className="map-snip">{s.snippet}</pre>}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )) : (
+            <>
+              <span className="map-k">Evidence · {d.link.confidence.evidence.length} {d.link.confidence.evidence.length === 1 ? "source" : "sources"}</span>
+              <ul className="map-ev">
+                {d.link.confidence.evidence.map((e, i) => (
+                  <li key={i}><Check size={15} aria-hidden />
+                    <span><b>{EV[e.kind]}</b> {e.file && <code>{e.file}{e.line ? `:${e.line}` : ""}</code>}<br /><span className="map-note">{cut(e.note)}</span></span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <span className="map-k">History</span>
           <dl className="map-hist">
             <dt className="is-up">Opened</dt>
-            <dd><GitCommitHorizontal size={13} aria-hidden /> <code>{d.link.added.sha.slice(0, 7)}</code>{dateOf(d.link.added.sha) ? ` · ${dateOf(d.link.added.sha)}` : ""}</dd>
+            <dd><GitCommitHorizontal size={13} aria-hidden /> <code>{d.opened.sha.slice(0, 7)}</code> · {d.opened.author}{dateOf(d.opened.sha) ? ` · ${dateOf(d.opened.sha)}` : ""}</dd>
             <dt>Status</dt>
-            <dd>{d.link.removed ? <>Closed in <code>{d.link.removed.sha.slice(0, 7)}</code>{dateOf(d.link.removed.sha) ? `, ${dateOf(d.link.removed.sha)}` : ""}</> : "Live, not closed"}</dd>
+            <dd>{d.closed ? <>Closed in <code>{d.closed.sha.slice(0, 7)}</code> · {d.closed.author}{dateOf(d.closed.sha) ? ` · ${dateOf(d.closed.sha)}` : ""}</> : "Live, not closed"}</dd>
+            {d.replaced && <><dt>Replaces</dt><dd><code>{d.replaced}</code>, closed in the same commit</dd></>}
           </dl>
           <div className="map-actions">
             <button type="button" className="btn" onClick={() => onOpen(d.link.from)}>Open {name(d.link.from).split("/").pop()}</button>

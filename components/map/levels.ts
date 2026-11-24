@@ -63,7 +63,7 @@ export function owners(s: GraphSlice, st: Structure) {
 
 const empty = (lod: Lod, at: GraphSlice["at"]): GraphSlice => ({
   lod, at, nodes: { id: [], kind: [], name: [], parent: [], x: [], y: [], size: [], children: [] },
-  links: { id: [], from: [], to: [], kind: [], level: [], score: [], weight: [], added_seq: [], removed_seq: [] },
+  links: { id: [], from: [], to: [], kind: [], level: [], score: [], corrected: [], weight: [], added_seq: [], removed_seq: [] },
 });
 
 const RANK = { guessed: 0, likely: 1, exact: 2 } as const;
@@ -119,7 +119,7 @@ export function rollUp(s: GraphSlice, st: Structure, level: Level, own = owners(
     pair.set(k, out.links.id.length);
     out.links.id.push(`${out.nodes.id[a]}>${out.nodes.id[b]}`);
     out.links.from.push(a); out.links.to.push(b);
-    out.links.kind.push(s.links.kind[j]); out.links.level.push(s.links.level[j]); out.links.score.push(s.links.score[j]);
+    out.links.kind.push(s.links.kind[j]); out.links.level.push(s.links.level[j]); out.links.score.push(s.links.score[j]); out.links.corrected.push(s.links.corrected[j]);
     out.links.weight.push(s.links.weight[j]); out.links.added_seq.push(s.links.added_seq[j]); out.links.removed_seq.push(-1);
   }
   return out;
@@ -286,7 +286,7 @@ export function compare(a: GraphSlice, b: GraphSlice): Compared {
     out.links.id.push(s.links.id[j]);
     out.links.from.push(col.get(s.nodes.id[s.links.from[j]])!);
     out.links.to.push(col.get(s.nodes.id[s.links.to[j]])!);
-    out.links.kind.push(s.links.kind[j]); out.links.level.push(s.links.level[j]); out.links.score.push(s.links.score[j]);
+    out.links.kind.push(s.links.kind[j]); out.links.level.push(s.links.level[j]); out.links.score.push(s.links.score[j]); out.links.corrected.push(s.links.corrected[j]);
     out.links.weight.push(s.links.weight[j]); out.links.added_seq.push(s.links.added_seq[j]); out.links.removed_seq.push(s.links.removed_seq[j]);
     link.push(st);
   };
