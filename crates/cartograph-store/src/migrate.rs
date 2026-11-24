@@ -24,9 +24,10 @@ pub type Step = (i64, &'static str);
 
 /// The registered migrations. A version pair with no path through them means rebuild, since the
 /// index is a cache (B3).
-pub const MIGRATIONS: &[Step] = &[(
-    1,
-    "ALTER TABLE repo ADD COLUMN indexed_commit BLOB;
+pub const MIGRATIONS: &[Step] = &[
+    (
+        1,
+        "ALTER TABLE repo ADD COLUMN indexed_commit BLOB;
      ALTER TABLE repo ADD COLUMN indexed_seq INTEGER;
      ALTER TABLE repo ADD COLUMN removed INTEGER NOT NULL DEFAULT 0;
      UPDATE repo SET indexed_commit = head,
@@ -34,7 +35,79 @@ pub const MIGRATIONS: &[Step] = &[(
      DROP INDEX commits_sha;
      CREATE UNIQUE INDEX commits_repo_sha ON commits (repo, sha);
      CREATE INDEX commits_sha ON commits (sha);",
-)];
+    ),
+    // v3 adds what phase 3 writes. History indexed before keeps one lineage per path (renames in
+    // it read as a delete and an add); the derived rows (structure, counts, layout, search) are
+    // empty, so the next sync builds them.
+    (2, V3),
+];
+
+/// Takes a current file back to format 2 (test support: tests build an older file from a new one
+/// by undoing each format's additions, newest first).
+#[doc(hidden)]
+pub const UNDO_V3: &str =
+    "DROP TABLE search; DROP TABLE search_sub; DROP TABLE layout; DROP TABLE unresolved;
+     DROP TABLE scope_count; DROP TABLE derived; DROP TABLE alias; DROP TABLE archived_interval;
+     DROP TABLE rewrite; DROP TABLE note; DROP TABLE node_span;
+     DROP INDEX node_key; DROP INDEX node_parent; DROP INDEX node_service;
+     DELETE FROM interval WHERE link IN (SELECT l.id FROM link l JOIN node n
+       ON n.id IN (l.src, l.dst) WHERE n.file IS NULL);
+     DELETE FROM link WHERE src IN (SELECT id FROM node WHERE file IS NULL)
+       OR dst IN (SELECT id FROM node WHERE file IS NULL);
+     DELETE FROM node WHERE file IS NULL;
+     ALTER TABLE node DROP COLUMN key; ALTER TABLE node DROP COLUMN name;
+     ALTER TABLE node DROP COLUMN parent; ALTER TABLE node DROP COLUMN service;
+     ALTER TABLE node DROP COLUMN detected_by; ALTER TABLE node DROP COLUMN fan_in;
+     ALTER TABLE file_path DROP COLUMN via; ALTER TABLE file_path DROP COLUMN similarity;
+     ALTER TABLE run DROP COLUMN files_total; ALTER TABLE run DROP COLUMN files_parsed;
+     ALTER TABLE run DROP COLUMN imports_total; ALTER TABLE run DROP COLUMN imports_resolved;";
+
+/// The tables and columns format 3 adds, as `schema.sql` declares them.
+const V3: &str = "ALTER TABLE run ADD COLUMN files_total INTEGER;
+     ALTER TABLE run ADD COLUMN files_parsed INTEGER;
+     ALTER TABLE run ADD COLUMN imports_total INTEGER;
+     ALTER TABLE run ADD COLUMN imports_resolved INTEGER;
+     ALTER TABLE file_path ADD COLUMN via TEXT NOT NULL DEFAULT 'add';
+     ALTER TABLE file_path ADD COLUMN similarity INTEGER;
+     ALTER TABLE node ADD COLUMN key TEXT;
+     ALTER TABLE node ADD COLUMN name TEXT;
+     ALTER TABLE node ADD COLUMN parent INTEGER;
+     ALTER TABLE node ADD COLUMN service INTEGER;
+     ALTER TABLE node ADD COLUMN detected_by TEXT;
+     ALTER TABLE node ADD COLUMN fan_in INTEGER NOT NULL DEFAULT 0;
+     CREATE UNIQUE INDEX node_key ON node (key);
+     CREATE INDEX node_parent ON node (parent);
+     CREATE INDEX node_service ON node (service);
+     CREATE TABLE node_span (node INTEGER NOT NULL REFERENCES node (id), from_seq INTEGER NOT NULL,
+       to_seq INTEGER) STRICT;
+     CREATE INDEX node_span_node ON node_span (node);
+     CREATE TABLE note (seq INTEGER NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL) STRICT;
+     CREATE INDEX note_seq ON note (seq);
+     CREATE TABLE rewrite (id INTEGER PRIMARY KEY, repo INTEGER NOT NULL REFERENCES repo (id),
+       old_head BLOB NOT NULL, new_head BLOB NOT NULL, base BLOB, at INTEGER,
+       recorded_at INTEGER NOT NULL, archived INTEGER NOT NULL, dropped INTEGER NOT NULL) STRICT;
+     CREATE TABLE archived_interval (rewrite INTEGER NOT NULL REFERENCES rewrite (id),
+       link INTEGER NOT NULL REFERENCES link (id), from_sha BLOB NOT NULL, to_sha BLOB) STRICT;
+     CREATE INDEX archived_interval_rewrite ON archived_interval (rewrite);
+     CREATE TABLE alias (host TEXT NOT NULL, node INTEGER NOT NULL REFERENCES node (id),
+       source TEXT NOT NULL) STRICT;
+     CREATE TABLE derived (kind TEXT NOT NULL, scope TEXT NOT NULL, inputs_key BLOB NOT NULL,
+       stale INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (kind, scope)) STRICT, WITHOUT ROWID;
+     CREATE TABLE scope_count (node INTEGER PRIMARY KEY REFERENCES node (id),
+       modules INTEGER NOT NULL, files INTEGER NOT NULL, links_out INTEGER NOT NULL,
+       links_in INTEGER NOT NULL, links_inside INTEGER NOT NULL) STRICT;
+     CREATE TABLE unresolved (file INTEGER NOT NULL REFERENCES file (id), spec TEXT NOT NULL,
+       line INTEGER NOT NULL, stage TEXT NOT NULL, reason TEXT NOT NULL,
+       from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX unresolved_at ON unresolved (from_seq, to_seq);
+     CREATE INDEX unresolved_file ON unresolved (file, spec);
+     CREATE TABLE layout (node INTEGER NOT NULL REFERENCES node (id), x REAL NOT NULL,
+       y REAL NOT NULL, r REAL NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX layout_node ON layout (node, from_seq);
+     CREATE VIRTUAL TABLE search USING fts5 (name, split, path, docstring, summary,
+       content = '', contentless_delete = 1, prefix = '2 3', tokenize = 'unicode61');
+     CREATE VIRTUAL TABLE search_sub USING fts5 (name, path,
+       content = '', contentless_delete = 1, tokenize = 'trigram');";
 
 fn io_err(path: &Path) -> impl Fn(io::Error) -> StoreError + '_ {
     move |source| StoreError::Io {

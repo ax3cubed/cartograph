@@ -37,7 +37,7 @@
 .fr-code button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 8px; background: var(--slab); font-size: 0.75rem; }
 @media (max-width: 900px) { .fr-grid { grid-template-columns: minmax(0, 1fr); } .fr-primary { padding: 24px; } .fr-head h1 { font-size: 1.625rem; } }
 .fr-list { list-style: none; margin: 0; padding: 0; width: 100%; flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.fr-list a { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; color: var(--text); text-decoration: none; }
+.fr-list a { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 10px; color: var(--text); text-decoration: none; }
 .fr-list a:hover, .fr-list a:focus-visible { background: var(--accent-soft); }
 .fr-list b { font-size: 0.875rem; font-weight: 600; }
-.fr-list span { font-size: 0.75rem; color: var(--muted); overflow-wrap: anywhere; }
+.fr-list span { font-size: 0.75rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

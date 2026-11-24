@@ -94,7 +94,7 @@ export default function Models() {
                   </span>
                   <span className="set-actions">
                     <button type="button" className="set-btn is-sm is-line" aria-pressed={sel === id} aria-label={`Edit ${nameOf(id)}`} onClick={() => { setSel(id); setMsg(""); }}>Edit</button>
-                    {!active && <button type="button" className="set-btn is-sm" disabled={!usable} title={usable ? undefined : isCustom ? "Save an endpoint first" : "Add a key first"} aria-label={`Use ${nameOf(id)} for Ask`} onClick={() => useForAsk(id)}>Use for Ask</button>}
+                    {!active && <button type="button" className="set-btn is-sm" disabled={!usable} title={usable ? undefined : isCustom ? "Save an endpoint first" : "Add a key first"} aria-label={`Use for Ask: ${nameOf(id)}`} onClick={() => useForAsk(id)}>Use for Ask</button>}
                   </span>
                 </li>
               );

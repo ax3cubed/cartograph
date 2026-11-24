@@ -42,6 +42,43 @@ pub struct Manifest {
     /// The baseline file of known rule violations, relative to the manifest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<String>,
+    /// What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).
+    #[serde(default, skip_serializing_if = "Retrieval::is_empty")]
+    pub retrieval: Retrieval,
+}
+
+/// The kinds of text search indexes for Ask and MCP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChunkKind {
+    /// Node cards: name, path, summary and main links.
+    Cards,
+    /// Function and class bodies.
+    Symbols,
+    /// Code changes.
+    Changes,
+    /// API operations and event channels.
+    Contracts,
+    /// READMEs, ADRs and docs.
+    Docs,
+    /// Commit messages without their changes.
+    CommitMessages,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Retrieval {
+    /// The kinds searched; absent means all but commit messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<ChunkKind>>,
+    /// Leave anything that looks like a key or password out of search and prompts. On when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scan: Option<bool>,
+}
+
+impl Retrieval {
+    fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -370,6 +407,95 @@ pub fn config_hash(m: &Manifest) -> String {
     format!("sha256:{hex}")
 }
 
+/// C7, "Split" on board S4: adds a `services:` entry to the manifest's text and returns the new
+/// text with the diff. The edit is textual, so comments and the rest of the file stay as they are:
+/// the entry goes at the end of the `services:` block (or a new block at the end), in the block's
+/// indentation. The result is parsed again and must be the old manifest plus the entry.
+pub fn add_service(text: &str, service: &Service) -> Result<(String, String), Invalid> {
+    let old = parse(text)?.manifest;
+    if old
+        .services
+        .iter()
+        .any(|s| s.name == service.name && s.repo == service.repo)
+    {
+        return Err(invalid(
+            format!(
+                "{} already lists the service {}",
+                service.repo, service.name
+            ),
+            "choose another name",
+        ));
+    }
+    let entry = serde_norway::to_string(&vec![service.clone()]).expect("a service serialises");
+    let lines: Vec<&str> = text.lines().collect();
+    let top = |l: &str| !l.is_empty() && !l.starts_with([' ', '\t', '#', '-']);
+    let at = lines
+        .iter()
+        .position(|l| l.starts_with("services:") && l["services:".len()..].trim_start().is_empty());
+    let (mut out, added_at, added): (Vec<String>, usize, Vec<String>) = match at {
+        Some(i) => {
+            // The block runs to the next top-level key; the entry goes after its last item line.
+            let end = lines[i + 1..]
+                .iter()
+                .position(|l| top(l))
+                .map_or(lines.len(), |k| i + 1 + k);
+            let last = (i + 1..end)
+                .rev()
+                .find(|k| !lines[*k].trim().is_empty() && !lines[*k].trim_start().starts_with('#'))
+                .unwrap_or(i);
+            let indent: String = lines[i + 1..end]
+                .iter()
+                .find(|l| l.trim_start().starts_with('-'))
+                .map(|l| l.chars().take_while(|c| *c == ' ').collect())
+                .unwrap_or_default();
+            let added: Vec<String> = entry.lines().map(|l| format!("{indent}{l}")).collect();
+            let mut out: Vec<String> = lines[..=last].iter().map(|l| l.to_string()).collect();
+            out.extend(added.iter().cloned());
+            out.extend(lines[last + 1..].iter().map(|l| l.to_string()));
+            (out, last + 1, added)
+        }
+        None => {
+            let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+            let replaced = out
+                .iter()
+                .position(|l| l.split('#').next().unwrap_or("").trim() == "services: []");
+            let mut added = vec!["services:".to_owned()];
+            added.extend(entry.lines().map(str::to_owned));
+            let at = match replaced {
+                Some(k) => {
+                    out.remove(k);
+                    k
+                }
+                None => out.len(),
+            };
+            for (n, l) in added.iter().enumerate() {
+                out.insert(at + n, l.clone());
+            }
+            (out, at, added)
+        }
+    };
+    out.push(String::new());
+    let new = out.join("\n");
+    let mut want = old;
+    want.services.push(service.clone());
+    match parse(&new) {
+        Ok(p) if p.manifest == want => {}
+        _ => {
+            return Err(invalid(
+                "the services: block couldn't be edited in place",
+                "add the entry to cartograph.yaml by hand",
+            ));
+        }
+    }
+    let mut diff = format!("@@ -{added_at},0 +{},{} @@\n", added_at + 1, added.len());
+    for l in &added {
+        diff.push('+');
+        diff.push_str(l);
+        diff.push('\n');
+    }
+    Ok((new, diff))
+}
+
 /// `to` relative to the folder `from`, with `/` separators and `../` where needed. Both canonical.
 /// An absolute path when they share no root (another drive on Windows).
 pub fn relative_path(from: &Path, to: &Path) -> String {
@@ -428,12 +554,65 @@ services:
         parse(text).unwrap_err()
     }
 
+    /// C7: the diff adds the entry and nothing else, in the block's indentation.
+    #[test]
+    fn a_split_adds_one_entry_and_nothing_else() {
+        let svc = Service {
+            name: "events".into(),
+            repo: "platform".into(),
+            path: Some("packages/events".into()),
+            tags: vec![],
+        };
+        let (new, diff) = add_service(GOOD, &svc).unwrap();
+        assert_eq!(
+            diff,
+            "@@ -22,0 +23,3 @@\n+- name: events\n+  repo: platform\n+  path: packages/events\n"
+        );
+        let old: Vec<&str> = GOOD.lines().collect();
+        let mut kept: Vec<&str> = new.lines().collect();
+        kept.drain(22..25);
+        assert_eq!(kept, old, "every other line is untouched");
+        assert!(add_service(&new, &svc).is_err(), "twice is refused");
+        // No services block yet: one is added at the end.
+        let bare = GOOD.split("services:").next().unwrap();
+        let (new, diff) = add_service(bare, &svc).unwrap();
+        assert!(new.starts_with(bare));
+        assert!(diff.contains("+services:\n"));
+        // An indented block keeps its indentation.
+        let indented = GOOD.replace(
+            "- name: auth\n  repo: platform\n  path: packages/auth",
+            "  - name: auth\n    repo: platform\n    path: packages/auth",
+        );
+        let (new, _) = add_service(&indented, &svc).unwrap();
+        assert!(new.contains("\n  - name: events\n    repo: platform\n"));
+    }
+
     #[test]
     fn round_trip() {
         let p = parse(GOOD).unwrap();
         assert!(p.warnings.is_empty(), "{:?}", p.warnings);
         let again = parse(&to_yaml(&p.manifest)).unwrap();
         assert_eq!(again.manifest, p.manifest);
+    }
+
+    #[test]
+    fn retrieval_is_a_known_section_with_closed_kinds() {
+        let p = parse(&format!(
+            "{GOOD}retrieval:\n  include: [cards, changes, commit_messages]\n  secret_scan: false\n"
+        ))
+        .unwrap();
+        assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+        assert_eq!(
+            p.manifest.retrieval.include,
+            Some(vec![
+                ChunkKind::Cards,
+                ChunkKind::Changes,
+                ChunkKind::CommitMessages
+            ])
+        );
+        assert_eq!(p.manifest.retrieval.secret_scan, Some(false));
+        assert!(!to_yaml(&parse(GOOD).unwrap().manifest).contains("retrieval"));
+        assert!(err(&format!("{GOOD}retrieval:\n  include: [embeddings]\n")).line > 0);
     }
 
     #[test]
@@ -591,7 +770,7 @@ services:
                     scopes: vec![],
                 }).collect(),
                 options: Options::default(),
-                services: vec![], rules: vec![], baseline: None,
+                services: vec![], rules: vec![], baseline: None, retrieval: Default::default(),
             };
             let again = parse(&to_yaml(&m)).unwrap().manifest;
             proptest::prop_assert_eq!(again, m);

@@ -2,6 +2,7 @@
 // so the UI can show the evidence. These same functions are the tools an LLM agent would call later.
 
 import type { Link, LinkType, McpToolName } from "./model.ts";
+import { fmtDate } from "./date.ts";
 import {
   COMMITS, LINKS, NODES, byId, commitBySha, dayMs, descendants, isActive,
 } from "./workspace.ts";
@@ -90,7 +91,7 @@ const DAY = 86_400_000;
 export const linkKey = (l: Link) => `${l.from}>${l.to}`;
 const name = (id: string) => byId.get(id)!.name;
 const svc = (id: string) => byId.get(id)!.service;
-const fmt = (t: number) => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+const fmt = (t: number) => fmtDate(t, "dmy");
 
 const VERB: Record<LinkType, [string, string]> = {
   imports: ["imports", "importing"],

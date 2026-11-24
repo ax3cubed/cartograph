@@ -21,3 +21,7 @@ yarn.lock
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Playwright (HD-05): run output; the baselines under e2e/__screenshots__ are tracked
+/test-results
+/playwright-report

@@ -158,6 +158,16 @@ export type JobKind = "sync" | "rebuild";
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "LineageVia".
+ */
+export type LineageVia = "add" | "rename_exact" | "rename_similar";
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "Change".
+ */
+export type Change = "added" | "removed";
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Layer".
  */
 export type Layer = "base" | "config" | "contract" | "correction" | "overlay";
@@ -181,6 +191,11 @@ export type Lang = "ts" | "js" | "go" | "py" | "php" | "other";
  * via the `definition` "OwnerKind".
  */
 export type OwnerKind = "team" | "person";
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "PathDirection".
+ */
+export type PathDirection = "forward" | "backward" | "mixed";
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Contrast".
@@ -390,6 +405,12 @@ export type ServerEvent =
       event: "activity.new";
     }
   | {
+      data: {
+        ids: string[];
+      };
+      event: "activity.read";
+    }
+  | {
       data: {};
       event: "workspaces.changed";
     };
@@ -431,6 +452,7 @@ export interface CartographApi {
   Entrypoint: Entrypoint;
   Environment: Environment;
   ErrorBody: ErrorBody;
+  ExtractorInfo: ExtractorInfo;
   FileDiff: FileDiff;
   Freshness: Freshness;
   FsEntry: FsEntry;
@@ -438,11 +460,14 @@ export interface CartographApi {
   GraphSlice: GraphSlice;
   ImpactRequest: ImpactRequest;
   ImpactResult: ImpactResult;
+  IndexRun: IndexRun;
   IndexingSettings: IndexingSettings;
   Job: Job;
   JobRequest: JobRequest;
   KeyWrite: KeyWrite;
+  Lineage: Lineage;
   Link: Link;
+  LinkChange: LinkChange;
   LinkDetail: LinkDetail;
   McpTool: McpTool;
   Meta: Meta;
@@ -455,6 +480,7 @@ export interface CartographApi {
   Provider: Provider;
   ProviderTest: ProviderTest;
   ProviderWrite: ProviderWrite;
+  RankedNode: RankedNode;
   Reach: Reach;
   ReadParams: ReadParams;
   Repo: Repo;
@@ -463,6 +489,7 @@ export interface CartographApi {
   RunEvent: RunEvent;
   RunRequest: RunRequest;
   SearchResult: SearchResult;
+  SearchResults: SearchResults;
   Selection: Selection;
   ServerEvent: ServerEvent;
   Service: Service;
@@ -476,15 +503,34 @@ export interface CartographApi {
   WorkspaceSummary: WorkspaceSummary;
 }
 /**
+ * One row of the activity list (FE-16), kept in the workspace's ask.db. `text` and `detail` hold
+ * repo and author names, which are untrusted: the app renders them as text. Never file contents.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "ActivityItem".
  */
 export interface ActivityItem {
   at: string;
+  /**
+   * Who ran it and which version: "Indexed by the background sync · cartograph 0.4.0".
+   */
+  detail: string;
+  /**
+   * The app view the row opens, as a path and hash.
+   */
+  href: string;
+  /**
+   * `<workspace>:<row>`.
+   */
   id: string;
   kind: ActivityKind;
+  /**
+   * "billing-service synced to 3e0d7a2 · 3 commits by Tom Ellery and Jon Reyes", at most 120
+   * characters.
+   */
   text: string;
   unread: boolean;
+  ws: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -831,8 +877,17 @@ export interface DiscoveredFolder {
  * via the `definition` "Service".
  */
 export interface Service {
+  /**
+   * The C6 rule that found it: `manifest`, `scope`, `backstage`, `pnpm`, `npm-workspaces`,
+   * `go.work`, `nx`, `cargo`, `composer` or `repo` (board S04).
+   */
+  detected_by?: string | null;
   domain?: string | null;
   id: NodeId;
+  /**
+   * A workspace package with no deployable marker (C6).
+   */
+  library: boolean;
   name: string;
   paths: string[];
   repo: RepoId;
@@ -882,6 +937,20 @@ export interface ApiError {
   try: string;
   what: string;
   why: string;
+}
+/**
+ * An extractor the index holds facts from (IDX-21), with the live files it read.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ExtractorInfo".
+ */
+export interface ExtractorInfo {
+  files: number;
+  name: string;
+  /**
+   * The newest version that wrote facts.
+   */
+  version: string;
 }
 /**
  * What a write to a committed file did, or would do.
@@ -1038,13 +1107,45 @@ export interface ImpactRequest {
   working_tree?: boolean | null;
 }
 /**
+ * What depends on the changed nodes, directly or not. A node's level is the weakest link on its
+ * strongest path from a changed node.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "ImpactResult".
  */
 export interface ImpactResult {
+  /**
+   * The nodes the input named or changed.
+   */
+  changed: NodeId[];
   exact: NodeId[];
   guessed: NodeId[];
   likely: NodeId[];
+  /**
+   * The services the affected nodes belong to.
+   */
+  services: NodeId[];
+  /**
+   * A resource cap (50k visited nodes, depth 12, 5 s) stopped the walk.
+   */
+  truncated: boolean;
+}
+/**
+ * One index run (IDX-22): when it ran, the binary that wrote it, and its coverage totals. The
+ * totals are absent on a run that stopped before its end.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "IndexRun".
+ */
+export interface IndexRun {
+  files_parsed?: number | null;
+  files_total?: number | null;
+  finished_at?: string | null;
+  id: number;
+  imports_resolved?: number | null;
+  imports_total?: number | null;
+  started_at: string;
+  writer_version: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -1095,6 +1196,36 @@ export interface JobRequest {
  */
 export interface KeyWrite {
   key: string;
+}
+/**
+ * One row of `…/nodes/{id}/history` (board G10): a path the node had, and how it got it.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "Lineage".
+ */
+export interface Lineage {
+  from: CommitRef;
+  path: string;
+  /**
+   * Percent of content kept, for `rename_similar`.
+   */
+  similarity?: number | null;
+  /**
+   * Null while the node still has this path.
+   */
+  to?: CommitRef | null;
+  via: LineageVia;
+}
+/**
+ * One row of `…/nodes/{id}/changes`: a commit that added or removed a link touching the scope.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "LinkChange".
+ */
+export interface LinkChange {
+  change: Change;
+  commit: Commit;
+  link: Link;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -1200,6 +1331,7 @@ export interface Owner {
  * via the `definition` "PathResult".
  */
 export interface PathResult {
+  direction: PathDirection;
   hops: Link[];
   /**
    * A path's level is its weakest hop.
@@ -1283,12 +1415,38 @@ export interface ProviderWrite {
   name: string;
 }
 /**
+ * One row of `…/nodes/{id}/ranking`: a file in the scope and how much depends on it (blast
+ * radius), as `lib/workspace.ts` `ranking` computes it.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "RankedNode".
+ */
+export interface RankedNode {
+  /**
+   * `used_by` now minus `used_by` 90 days before `at`.
+   */
+  delta: number;
+  node: Node;
+  /**
+   * Live links into the file at `at`.
+   */
+  used_by: number;
+  /**
+   * Live links out of it at `at`.
+   */
+  uses: number;
+}
+/**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Reach".
  */
 export interface Reach {
   links: LinkId[];
   nodes: NodeId[];
+  /**
+   * A resource cap stopped the walk.
+   */
+  truncated: boolean;
 }
 /**
  * Common read parameters. Every read takes them; each route documents which it honours.
@@ -1402,6 +1560,17 @@ export interface SearchResult {
   service?: NodeId | null;
 }
 /**
+ * `GET …/search`: the hits best first (bm25, then fan-in, then shorter paths), and when nothing
+ * matched, the nearest name (board G05's "did you mean").
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "SearchResults".
+ */
+export interface SearchResults {
+  near?: SearchResult | null;
+  results: SearchResult[];
+}
+/**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Selection".
  */
@@ -1481,12 +1650,20 @@ export interface ToolCall {
 export interface TimelineDensity {
   bin: Bin;
   bins: DensityBin[];
+  /**
+   * The repos `by_repo` counts, in that order (board G04 stacks by repo).
+   */
+  repos: RepoId[];
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "DensityBin".
  */
 export interface DensityBin {
+  /**
+   * Commits per repo, in the order of `TimelineDensity.repos`; empty in a node's series.
+   */
+  by_repo: number[];
   commits: number;
   links_added: number;
   links_removed: number;
@@ -1524,12 +1701,19 @@ export interface ContextBlock {
   tokens: number;
 }
 /**
+ * A reference that didn't resolve (IDX-22). `text` is the raw specifier: untrusted text (F8),
+ * shown as text only.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Unresolved".
  */
 export interface Unresolved {
   file: NodeId;
   line: number;
+  /**
+   * The file's path now, repo-prefixed as node paths are.
+   */
+  path: string;
   reason: string;
   text: string;
 }

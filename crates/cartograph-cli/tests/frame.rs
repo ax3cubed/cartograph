@@ -46,7 +46,7 @@ fn error_class_usage_exits_2() {
 #[test]
 fn error_class_not_built_exits_1() {
     let d = tempfile::tempdir().unwrap();
-    let o = cartograph(d.path(), &["doctor"]);
+    let o = cartograph(d.path(), &["report"]);
     assert_eq!(o.status.code(), Some(1));
     assert!(o.stdout.is_empty());
     insta::assert_snapshot!(text(&o.stderr));

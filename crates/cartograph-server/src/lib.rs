@@ -11,8 +11,12 @@
 // Handlers return their error as a ready Response; it is built once per failed request.
 #![allow(clippy::result_large_err)]
 
+pub mod activity;
+pub mod agents;
 mod guard;
 mod live;
+pub mod mcp;
+mod reads;
 mod routes;
 mod sync;
 pub mod ui;
@@ -30,7 +34,7 @@ use cartograph_core::Explain;
 use serde::{Deserialize, Serialize};
 /// A registered workspace as sync and the freshness check see it (registry plus manifest); the
 /// CLI's `status` uses the same lookup.
-pub use sync::{workspace, workspace_checked};
+pub use sync::{workspace, workspace_checked, workspace_ids};
 
 /// What `cartograph open` passes in.
 #[derive(Debug, Clone)]
@@ -372,12 +376,14 @@ mod tests {
             let ix = cartograph_store::Index::create(&dir.join("index.cartograph")).unwrap();
             ix.conn
                 .execute_batch(&format!(
-                    "ALTER TABLE repo DROP COLUMN indexed_commit;
+                    "{undo}
+                     ALTER TABLE repo DROP COLUMN indexed_commit;
                      ALTER TABLE repo DROP COLUMN indexed_seq; ALTER TABLE repo DROP COLUMN removed;
                      DROP INDEX commits_repo_sha; DROP INDEX commits_sha;
                      CREATE UNIQUE INDEX commits_sha ON commits (sha);
                      UPDATE meta SET value = {format} WHERE key = 'format_version';
-                     PRAGMA user_version = {format};"
+                     PRAGMA user_version = {format};",
+                    undo = cartograph_store::migrate::UNDO_V3
                 ))
                 .unwrap();
         }

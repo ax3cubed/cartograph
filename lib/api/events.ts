@@ -4,8 +4,8 @@
 // backing off from 0.5 s to 15 s with jitter. Events reach the app coalesced per animation frame.
 //
 // Payloads carry ids and counts; any text in them (commit messages, names) is untrusted and renders as text only.
-import type { Freshness, ServerEvent } from "./types.gen.ts";
-import { authHeaders } from "./client.ts";
+import type { ActivityItem, Freshness, ServerEvent } from "./types.gen.ts";
+import { authHeaders, get, send } from "./client.ts";
 import { bump, setGeneration } from "./cache.ts";
 import { expire, setUp } from "./session.ts";
 import { SseParser } from "./sse.ts";
@@ -46,8 +46,61 @@ function apply(e: ServerEvent) {
     }
     case "index.changed": pushed.delete(e.data.ws); setGeneration(e.data.ws, e.data.generation); break;
     case "workspaces.changed": bump(""); break;
-    // ponytail: activity.new and config.changed wait on the activity store (FE-14) and settings (FE-13).
+    // config.changed reaches the settings pages through onEvent; it changes no cache entry here.
   }
+  record(e);
+}
+
+// ---------- activity (FE-16): the server's rows, kept current by the stream ----------
+//
+// The server records a row per repo per run in the workspace's ask.db and sends each new one as activity.new. Read
+// state lives there too (POST /api/v1/activity/read), and activity.read tells every tab, in any browser. Text is
+// untrusted (repo and author names): cut at 120 characters and rendered as text only.
+
+export type Row = ActivityItem;
+/** Untrusted text (names, error messages) is cut at 120 characters and rendered as text only. */
+export const cut = (t: string) => (t.length > 120 ? `${t.slice(0, 119)}…` : t);
+
+let rows: Row[] = [];
+let next: string | null = null;
+let loading = false;
+let loaded = false;
+const actSubs = new Set<() => void>();
+const changed = (r: Row[]) => { rows = r; actSubs.forEach((f) => f()); };
+/** The first page, or the page after `cursor`. */
+async function load(cursor?: string) {
+  if (loading) return;
+  loading = true;
+  try {
+    const got = await get<Row[]>("/api/v1/activity", { cursor });
+    next = got.next_cursor ?? null;
+    changed(cursor ? [...rows, ...got.data.filter((r) => !rows.some((x) => x.id === r.id))] : got.data);
+  } catch { /* offline or an older binary: the list stays as it was */ }
+  finally { loading = false; }
+}
+export const subscribeActivity = (f: () => void) => { actSubs.add(f); return () => { actSubs.delete(f); }; };
+/** The first page, once per tab; called only against a live server. */
+export const loadActivity = () => { if (!loaded) { loaded = true; void load(); } };
+export const activityRows = () => rows;
+export const hasMoreActivity = () => next !== null;
+/** The next page of 50. */
+export const moreActivity = () => (next ? load(next) : Promise.resolve());
+const readLocally = (ids: string[]) => changed(rows.map((r) => (!ids.length || ids.includes(r.id) ? { ...r, unread: false } : r)));
+/** Marks `ids` read on the server, or every row when none are given; other tabs follow through activity.read. */
+export function markRead(ids?: string[]) {
+  readLocally(ids ?? []);
+  send("POST", "/api/v1/activity/read", { ids: ids ?? [] }).catch(() => { /* the next load shows the server's state */ });
+}
+const newRow = new Set<(r: Row) => void>();
+/** Each new row as the stream announces it (the toast's cue). */
+export const onActivity = (f: (r: Row) => void) => { newRow.add(f); return () => { newRow.delete(f); }; };
+
+function record(e: ServerEvent) {
+  if (e.event === "activity.new") {
+    if (rows.some((r) => r.id === e.data.id)) return;
+    changed([e.data, ...rows]);
+    newRow.forEach((f) => f(e.data));
+  } else if (e.event === "activity.read") readLocally(e.data.ids);
 }
 
 /** Every event, after the app's own state has taken it in. For callers that follow one job (the wizard). */
@@ -65,7 +118,11 @@ function flush() {
   subs.forEach((f) => f());
 }
 function receive(e: Wire) {
-  if (e.event === "_up") { setUp(e.data.up); return; }
+  if (e.event === "_up") {
+    setUp(e.data.up);
+    if (e.data.up && loaded) void load(); // a reconnect: rows sent while the stream was down
+    return;
+  }
   queue.push(e);
   // a hidden tab gets no animation frames; a timer still delivers
   if (!frame) frame = document.hidden ? (setTimeout(flush, 100) as unknown as number) : requestAnimationFrame(flush);

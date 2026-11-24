@@ -8,6 +8,7 @@ import { byId } from "@/lib/workspace";
 import EmptyState from "@/components/shell/EmptyState";
 import { levelOf, type ConfidenceLevel } from "@/lib/model";
 import "./views.css";
+import { fmtDate as fmtDay } from "@/lib/date";
 
 const subscribe = (cb: () => void) => { window.addEventListener("hashchange", cb); return () => window.removeEventListener("hashchange", cb); };
 /** The URL hash without "#": view state that must survive a reload lives here (decision A2). */
@@ -18,7 +19,7 @@ export const Chip = ({ tone = "", children }: { tone?: Tone; children: ReactNode
 export const toneOf = (score: number): Tone => (levelOf(score) === "exact" ? "ok" : "");
 export const levelLabel = (l: ConfidenceLevel) => l[0].toUpperCase() + l.slice(1);
 
-export const fmtDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+export const fmtDate = (iso: string) => fmtDay(iso, "dmy");
 
 /** `#indexing` shows the first-index state on any view. */
 export const IndexingEmpty = () => (

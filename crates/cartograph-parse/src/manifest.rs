@@ -40,6 +40,9 @@ impl Extractor for ManifestJs {
     fn version(&self) -> &'static str {
         "1.0.0"
     }
+    fn kinds(&self) -> &'static [&'static str] {
+        &[PACKAGE, TSCONFIG]
+    }
     fn handles(&self, path: &str) -> Option<&'static str> {
         let base = path.rsplit('/').next().unwrap_or(path);
         if base == "package.json" {

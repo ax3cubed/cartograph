@@ -133,6 +133,16 @@ pub fn run(out: &Out, dir: &Path, no_index: bool, g: &Global) -> Result<(), Repo
                 .collect(),
             exclude: plan.manifest.options.exclude.clone(),
             config_hash: Some(cartograph_discovery::manifest::config_hash(&plan.manifest)),
+            services: plan
+                .manifest
+                .services
+                .iter()
+                .map(|s| cartograph_index::structure::ServiceSpec {
+                    name: s.name.clone(),
+                    repo: s.repo.clone(),
+                    path: s.path.clone(),
+                })
+                .collect(),
         };
         let cache_path = paths::facts_cache(&data);
         let mut cache = FactCache::open(&cache_path).map_err(|e| Report {

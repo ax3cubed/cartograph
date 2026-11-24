@@ -41,6 +41,10 @@
         "string",
         "null"
       ]
+    },
+    "retrieval": {
+      "description": "What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).",
+      "$ref": "#/$defs/Retrieval"
     }
   },
   "required": [
@@ -159,6 +163,63 @@
       "required": [
         "name",
         "repo"
+      ]
+    },
+    "Retrieval": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "description": "The kinds searched; absent means all but commit messages.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ChunkKind"
+          }
+        },
+        "secret_scan": {
+          "description": "Leave anything that looks like a key or password out of search and prompts. On when absent.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "ChunkKind": {
+      "description": "The kinds of text search indexes for Ask and MCP.",
+      "oneOf": [
+        {
+          "description": "Node cards: name, path, summary and main links.",
+          "type": "string",
+          "const": "cards"
+        },
+        {
+          "description": "Function and class bodies.",
+          "type": "string",
+          "const": "symbols"
+        },
+        {
+          "description": "Code changes.",
+          "type": "string",
+          "const": "changes"
+        },
+        {
+          "description": "API operations and event channels.",
+          "type": "string",
+          "const": "contracts"
+        },
+        {
+          "description": "READMEs, ADRs and docs.",
+          "type": "string",
+          "const": "docs"
+        },
+        {
+          "description": "Commit messages without their changes.",
+          "type": "string",
+          "const": "commit_messages"
+        }
       ]
     }
   }

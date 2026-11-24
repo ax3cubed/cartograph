@@ -117,3 +117,12 @@
 .tl-meta .tl-sha { font-size: 0.75rem; }
 .tl-jump { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tl-jump:hover { color: var(--text); }
+
+/* FE-09: server bins are placed by their start, and repo filters sit above the strips. */
+.tl-over > span { position: absolute; bottom: 0; flex: none; min-width: 1px; }
+.tl-repos { display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; }
+.tl-repos:empty { display: none; }
+.tl-repos button { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line2); font-size: 0.75rem; color: var(--muted); }
+.tl-repos button[aria-pressed="true"] { color: var(--text); }
+.tl-repos button[aria-pressed="false"] i { opacity: 0.25; }
+.tl-repos i { width: 8px; height: 8px; border-radius: 50%; }

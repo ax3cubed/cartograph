@@ -100,40 +100,14 @@ fn record(fields: &[&[u8]]) -> Vec<u8> {
     v
 }
 
-/// Accumulates one section.
-struct Builder {
-    sections: Vec<Section>,
-}
-
-impl Builder {
-    /// A section of already-ordered records.
-    fn ordered(&mut self, label: String, shown: String, records: impl Iterator<Item = Vec<u8>>) {
-        let mut h = Sha256::new();
-        for r in records {
-            field(&mut h, &r);
-        }
-        self.sections.push(Section {
-            label,
-            shown,
-            digest: h.finalize().into(),
-        });
-    }
-
-    /// A section of records in any order.
-    ///
-    /// ponytail: lineages and intervals are sorted in memory (about 200k small records at the 412 MB
-    /// scale). The plan's covering-index stream comes with the 2 s budget check in HD-09.
-    fn sorted(&mut self, label: String, shown: String, mut records: Vec<Vec<u8>>) {
-        records.sort_unstable();
-        self.ordered(label, shown, records.into_iter());
-    }
-}
-
 /// The fact hash of an open index.
 pub fn fact_hash(conn: &Connection) -> rusqlite::Result<FactHash> {
-    let mut b = Builder {
-        sections: Vec::new(),
+    let section = |label: &str, digest| Section {
+        label: label.into(),
+        shown: label.into(),
+        digest,
     };
+    let mut sections = Vec::new();
     let mut st = conn.prepare("SELECT name, version FROM extractor ORDER BY name, version")?;
     let rows: Vec<Vec<u8>> = st
         .query_map([], |r| {
@@ -143,7 +117,7 @@ pub fn fact_hash(conn: &Connection) -> rusqlite::Result<FactHash> {
             ]))
         })?
         .collect::<Result<_, _>>()?;
-    b.ordered("extractors".into(), "extractors".into(), rows.into_iter());
+    sections.push(section("extractors", digest(rows)));
 
     let config: Option<Vec<u8>> = conn
         .query_row(
@@ -152,33 +126,77 @@ pub fn fact_hash(conn: &Connection) -> rusqlite::Result<FactHash> {
             |r| r.get(0),
         )
         .optional()?;
-    b.ordered(
-        "config".into(),
-        "config".into(),
-        config.into_iter().map(|c| record(&[&c])),
-    );
+    sections.push(section(
+        "config",
+        digest(config.into_iter().map(|c| record(&[&c])).collect()),
+    ));
 
     let mut st = conn.prepare(
         "SELECT f.blob, e.name, e.version, f.payload FROM fact f JOIN extractor e ON e.id = f.extractor
          ORDER BY f.blob, e.name, e.version",
     )?;
-    let mut h = Sha256::new();
-    let mut rows = st.query([])?;
-    while let Some(r) = rows.next()? {
-        let rec = record(&[
-            r.get_ref(0)?.as_bytes()?,
-            r.get_ref(1)?.as_bytes()?,
-            r.get_ref(2)?.as_bytes()?,
-            r.get_ref(3)?.as_bytes()?,
-        ]);
-        field(&mut h, &rec);
-    }
-    b.sections.push(Section {
-        label: "facts".into(),
-        shown: "facts".into(),
-        digest: h.finalize().into(),
-    });
+    std::thread::scope(|scope| {
+        // Fact records stream to another thread in chunks (a bounded queue: the facts are the
+        // bulk of an index) and are hashed there in order, while the rest is read.
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<Vec<u8>>>(8);
+        let facts = scope.spawn(move || {
+            let mut h = Sha256::new();
+            for r in rx.iter().flatten() {
+                field(&mut h, &r);
+            }
+            h.finalize().into()
+        });
+        let mut chunk = Vec::with_capacity(FACT_CHUNK);
+        let mut rows = st.query([])?;
+        while let Some(r) = rows.next()? {
+            chunk.push(record(&[
+                r.get_ref(0)?.as_bytes()?,
+                r.get_ref(1)?.as_bytes()?,
+                r.get_ref(2)?.as_bytes()?,
+                r.get_ref(3)?.as_bytes()?,
+            ]));
+            if chunk.len() == FACT_CHUNK {
+                let full = std::mem::replace(&mut chunk, Vec::with_capacity(FACT_CHUNK));
+                tx.send(full)
+                    .expect("the hasher runs until the queue closes");
+            }
+        }
+        drop(rows);
+        tx.send(chunk)
+            .expect("the hasher runs until the queue closes");
+        drop(tx);
+        let rest = repo_sections(conn, scope)?;
+        sections.push(section("facts", facts.join().expect("no panic")));
+        for (label, shown, job) in rest {
+            sections.push(Section {
+                label,
+                shown,
+                digest: job.join().expect("no panic"),
+            });
+        }
+        Ok(FactHash { sections })
+    })
+}
 
+/// Fact records per message to the hashing thread.
+const FACT_CHUNK: usize = 256;
+
+/// The digest of records in this order.
+fn digest(records: Vec<Vec<u8>>) -> [u8; 32] {
+    let mut h = Sha256::new();
+    for r in records {
+        field(&mut h, &r);
+    }
+    h.finalize().into()
+}
+
+type Job<'scope> = std::thread::ScopedJoinHandle<'scope, [u8; 32]>;
+
+/// Each repository's sections, in order, as (label, shown, digest being computed).
+fn repo_sections<'scope>(
+    conn: &Connection,
+    scope: &'scope std::thread::Scope<'scope, '_>,
+) -> rusqlite::Result<Vec<(String, String, Job<'scope>)>> {
     // Repos in root-commit order; N is the position.
     let mut st = conn.prepare(
         "SELECT r.id, r.name, r.indexed_commit,
@@ -194,50 +212,70 @@ pub fn fact_hash(conn: &Connection) -> rusqlite::Result<FactHash> {
         .map(|(n, (id, ..))| (*id, n))
         .collect();
 
-    // Each file's key: its repo's position and its lineage's first path.
-    let mut st = conn.prepare(
-        "SELECT f.id, f.repo,
-                (SELECT path FROM file_path p WHERE p.file = f.id ORDER BY from_seq, path LIMIT 1)
-         FROM file f",
-    )?;
+    // Each step's sha. A row whose opening step has none is left out, as an inner join would;
+    // a closing step without one reads as open.
+    let shas: HashMap<i64, Vec<u8>> = conn
+        .prepare("SELECT seq, sha FROM commits")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+
+    // Each file's key: its repo's position and its lineage's first path (by step, then path).
+    let mut first: HashMap<i64, (i64, String)> = HashMap::new();
+    let mut st = conn.prepare("SELECT file, from_seq, path FROM file_path")?;
+    let mut rows = st.query([])?;
+    while let Some(r) = rows.next()? {
+        let (file, from): (i64, i64) = (r.get(0)?, r.get(1)?);
+        let path = r.get_ref(2)?.as_str()?;
+        match first.get_mut(&file) {
+            Some(f) if (from, path) < (f.0, f.1.as_str()) => *f = (from, path.to_owned()),
+            Some(_) => {}
+            None => {
+                first.insert(file, (from, path.to_owned()));
+            }
+        }
+    }
+    drop(rows);
+    let mut st = conn.prepare("SELECT id, repo FROM file")?;
     let mut files: HashMap<i64, (usize, Vec<u8>)> = HashMap::new();
     let mut rows = st.query([])?;
     while let Some(r) = rows.next()? {
+        let id: i64 = r.get(0)?;
         let repo = position
             .get(&r.get::<_, i64>(1)?)
             .copied()
             .unwrap_or(usize::MAX);
-        let path: Option<String> = r.get(2)?;
-        let key = format!("{repo}:{}", path.unwrap_or_default()).into_bytes();
-        files.insert(r.get(0)?, (repo, key));
+        let path = first.get(&id).map_or("", |f| f.1.as_str());
+        files.insert(id, (repo, format!("{repo}:{path}").into_bytes()));
     }
+    drop(rows);
 
     let mut lineages: Vec<Vec<Vec<u8>>> = vec![Vec::new(); repos.len()];
-    const SHAS: &str =
-        "JOIN commits cf ON cf.seq = x.from_seq LEFT JOIN commits ct ON ct.seq = x.to_seq";
     for (tag, sql) in [
         (
             b"path".as_slice(),
-            format!("SELECT x.file, CAST(x.path AS BLOB), cf.sha, ct.sha FROM file_path x {SHAS}"),
+            "SELECT file, CAST(path AS BLOB), from_seq, to_seq FROM file_path",
         ),
         (
             b"version".as_slice(),
-            format!("SELECT x.file, x.blob, cf.sha, ct.sha FROM file_version x {SHAS}"),
+            "SELECT file, blob, from_seq, to_seq FROM file_version",
         ),
     ] {
-        let mut st = conn.prepare(&sql)?;
+        let mut st = conn.prepare(sql)?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
+            let Some(from) = shas.get(&r.get::<_, i64>(2)?) else {
+                continue;
+            };
             let Some((repo, key)) = files.get(&r.get::<_, i64>(0)?) else {
                 continue;
             };
-            let to: Option<Vec<u8>> = r.get(3)?;
+            let to = r.get::<_, Option<i64>>(3)?.and_then(|s| shas.get(&s));
             let rec = record(&[
                 key,
                 tag,
                 r.get_ref(1)?.as_bytes()?,
-                r.get_ref(2)?.as_bytes()?,
-                to.as_deref().unwrap_or_default(),
+                from,
+                to.map_or(&[][..], Vec::as_slice),
             ]);
             if let Some(v) = lineages.get_mut(*repo) {
                 v.push(rec);
@@ -245,56 +283,76 @@ pub fn fact_hash(conn: &Connection) -> rusqlite::Result<FactHash> {
         }
     }
 
-    // A node's key is its file's; a node without a file (none yet) is keyed by its kind.
+    // A node's key is its file's; a node without a file (a Go package's folder) is keyed by its
+    // structure key, which names its path.
+    let mut nodes: HashMap<i64, (usize, Vec<u8>)> = HashMap::new();
+    let mut st = conn.prepare("SELECT id, coalesce(key, kind), file FROM node")?;
+    let mut rows = st.query([])?;
+    while let Some(r) = rows.next()? {
+        let node = match r.get::<_, Option<i64>>(2)?.and_then(|f| files.get(&f)) {
+            Some((repo, key)) => (*repo, key.clone()),
+            None => (usize::MAX, r.get::<_, String>(1)?.into_bytes()),
+        };
+        nodes.insert(r.get(0)?, node);
+    }
+    drop(rows);
     let mut intervals: Vec<Vec<Vec<u8>>> = vec![Vec::new(); repos.len()];
     let mut st = conn.prepare(
-        "SELECT l.kind, ns.kind, ns.file, nd.kind, nd.file, cf.sha, ct.sha
-         FROM interval x JOIN link l ON l.id = x.link
-         JOIN node ns ON ns.id = l.src JOIN node nd ON nd.id = l.dst
-         JOIN commits cf ON cf.seq = x.from_seq LEFT JOIN commits ct ON ct.seq = x.to_seq",
+        "SELECT l.kind, l.src, l.dst, x.from_seq, x.to_seq FROM interval x
+         JOIN link l ON l.id = x.link",
     )?;
     let mut rows = st.query([])?;
     while let Some(r) = rows.next()? {
-        let node = |kind: usize, file: usize| -> rusqlite::Result<(usize, Vec<u8>)> {
-            Ok(
-                match r.get::<_, Option<i64>>(file)?.and_then(|f| files.get(&f)) {
-                    Some((repo, key)) => (*repo, key.clone()),
-                    None => (usize::MAX, r.get::<_, String>(kind)?.into_bytes()),
-                },
-            )
+        let (Some((repo, src)), Some((_, dst)), Some(from)) = (
+            nodes.get(&r.get::<_, i64>(1)?),
+            nodes.get(&r.get::<_, i64>(2)?),
+            shas.get(&r.get::<_, i64>(3)?),
+        ) else {
+            continue;
         };
-        let (repo, src) = node(1, 2)?;
-        let (_, dst) = node(3, 4)?;
-        let to: Option<Vec<u8>> = r.get(6)?;
+        let to = r.get::<_, Option<i64>>(4)?.and_then(|s| shas.get(&s));
         let rec = record(&[
             r.get_ref(0)?.as_bytes()?,
-            &src,
-            &dst,
-            r.get_ref(5)?.as_bytes()?,
-            to.as_deref().unwrap_or_default(),
+            src,
+            dst,
+            from,
+            to.map_or(&[][..], Vec::as_slice),
         ]);
-        if let Some(v) = intervals.get_mut(repo) {
+        if let Some(v) = intervals.get_mut(*repo) {
             v.push(rec);
         }
     }
-
+    drop(rows);
+    let mut out = Vec::new();
     for (n, ((_, name, indexed), (lin, int))) in repos
         .iter()
         .zip(lineages.into_iter().zip(intervals))
         .enumerate()
     {
         let shown = |what: &str| format!("repo {n} ({name}) {what}");
-        b.ordered(
+        let commit = vec![record(&[indexed.as_deref().unwrap_or_default()])];
+        out.push((
             format!("repo {n} commit"),
             shown("indexed commit"),
-            std::iter::once(record(&[indexed.as_deref().unwrap_or_default()])),
-        );
-        b.sorted(format!("repo {n} lineages"), shown("files"), lin);
-        b.sorted(format!("repo {n} intervals"), shown("links"), int);
+            scope.spawn(move || digest(commit)),
+        ));
+        // ponytail: lineages and intervals are sorted in memory (about 200k small records at the
+        // 412 MB scale), each section on its own thread. The plan's covering-index stream comes
+        // with the 2 s budget check in HD-09.
+        for (what, shown_as, mut records) in
+            [("lineages", "files", lin), ("intervals", "links", int)]
+        {
+            out.push((
+                format!("repo {n} {what}"),
+                shown(shown_as),
+                scope.spawn(move || {
+                    records.sort_unstable();
+                    digest(records)
+                }),
+            ));
+        }
     }
-    Ok(FactHash {
-        sections: b.sections,
-    })
+    Ok(out)
 }
 
 /// Computes the fact hash and stores it in `meta.fact_hash`, in the caller's transaction.

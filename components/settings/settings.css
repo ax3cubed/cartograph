@@ -64,3 +64,7 @@
   .sh-settings .sh-snav { display: none; }
   .set-mobnav { display: flex; }
 }
+.set-bar-err { flex-basis: 100%; margin: 0; color: var(--down-text); }
+.set-bar-diff { flex-basis: 100%; }
+.set-bar-diff summary { cursor: pointer; color: var(--muted); min-height: 1.5rem; }
+.set-bar-diff pre { max-height: 40vh; margin-top: 0.5rem; }

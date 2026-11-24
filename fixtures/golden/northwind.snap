@@ -2,9 +2,11 @@
 source: fixtures/gen/tests/golden.rs
 expression: text
 ---
-sha256:a784dd7fb60cfaa8a30f3041c2a2d58e870c90addadb6db547799496e62850e2
+sha256:1fb6cee1a9c5c526495e477eb6545cedf530f2c881182dad459e39c558a6faad
 
+extractor go-imports/go 1.0.0
 extractor manifest-js/package 1.0.0
+extractor py-imports/py 1.0.0
 extractor ts-imports/ts 1.0.0
 commit 8d678bc77ab1862ab17c7b3ebda988e553a4b7b2 Maya Okafor: gateway: initial routes and auth guard
 commit fda302c012cb587288c0ef9f7c76a76d388160c0 Jon Reyes: auth: token issuance and JWT signer
@@ -37,6 +39,11 @@ path api-gateway/src/middleware/rateLimit.ts 7a5d15a08aa8 -
 path api-gateway/src/routes/checkout.ts d11095ec5958 -
 path api-gateway/src/routes/orders.ts 8d678bc77ab1 -
 path api-gateway/src/routes/products.ts 8f3068b62d1e -
+path auth-service/src/handlers/login.go fda302c012cb -
+path auth-service/src/handlers/token.go fda302c012cb -
+path auth-service/src/session/jwt.go fda302c012cb -
+path auth-service/src/session/store.go fda302c012cb -
+path auth-service/src/users/repo.go fda302c012cb -
 path billing-service/package.json 02b9441b26ff -
 path billing-service/src/events/publisher.ts f1fb1eff79fa -
 path billing-service/src/invoices/createInvoice.ts 02b9441b26ff -
@@ -44,6 +51,11 @@ path billing-service/src/invoices/pdf.ts 892e8032d1ad -
 path billing-service/src/payments/charge.ts 02b9441b26ff -
 path billing-service/src/payments/refund.ts f5a70a7dec5e -
 path billing-service/src/payments/stripeAdapter.ts 02b9441b26ff -
+path catalog-service/src/api/products.py 63a072c36673 -
+path catalog-service/src/api/search.py 1fc17c8a82ce -
+path catalog-service/src/pricing/rules.py 25eb1bb08f96 -
+path catalog-service/src/pricing/tax.py 02b9441b26ff -
+path catalog-service/src/store/postgres.py 63a072c36673 -
 path notifications/package.json 4796dcc66514 -
 path notifications/src/channels/email.ts 4796dcc66514 -
 path notifications/src/channels/sms.ts 348b7e0e32b2 -
@@ -68,6 +80,13 @@ version api-gateway/src/routes/orders.ts 25bc740c61cb 8d678bc77ab1 d11095ec5958
 version api-gateway/src/routes/orders.ts dc598196b0f7 d11095ec5958 -
 version api-gateway/src/routes/products.ts ca0bfd38ad5f 8f3068b62d1e 16cc0c399d40
 version api-gateway/src/routes/products.ts fd07311001ed 16cc0c399d40 -
+version auth-service/src/handlers/login.go a299574b8441 fda302c012cb -
+version auth-service/src/handlers/token.go 7afe1bcf5aee fda302c012cb -
+version auth-service/src/session/jwt.go a8bfb6c0a3e5 fda302c012cb -
+version auth-service/src/session/store.go 5008de4ecb47 73043b989517 -
+version auth-service/src/session/store.go 7bc9e73eddde fda302c012cb 73043b989517
+version auth-service/src/users/repo.go a4e53a484906 4d0148939934 -
+version auth-service/src/users/repo.go f54bcf4ee2d0 fda302c012cb 4d0148939934
 version billing-service/package.json 1d751ab32cda 02b9441b26ff -
 version billing-service/src/events/publisher.ts ef7897dd7c40 f1fb1eff79fa -
 version billing-service/src/invoices/createInvoice.ts 0f1ddcf53a3e 02b9441b26ff 29ae30f2c619
@@ -80,6 +99,13 @@ version billing-service/src/payments/charge.ts ee04e5c38cb0 f31fe1da3147 -
 version billing-service/src/payments/charge.ts f8971a6e5641 02b9441b26ff f1fb1eff79fa
 version billing-service/src/payments/refund.ts ff4f04dc3818 f5a70a7dec5e -
 version billing-service/src/payments/stripeAdapter.ts 6d86d9fb202b 02b9441b26ff -
+version catalog-service/src/api/products.py 5386bd3e54c6 63a072c36673 25eb1bb08f96
+version catalog-service/src/api/products.py 942cc384fcdc 25eb1bb08f96 -
+version catalog-service/src/api/search.py a68e4eac3942 1fc17c8a82ce -
+version catalog-service/src/pricing/rules.py aaced1b2120a 25eb1bb08f96 -
+version catalog-service/src/pricing/tax.py 03e4dafd2295 02b9441b26ff 334ff090de3d
+version catalog-service/src/pricing/tax.py 8dfb089a6276 334ff090de3d -
+version catalog-service/src/store/postgres.py a3e5feb07e1c 63a072c36673 -
 version notifications/package.json d53249d4694e 4796dcc66514 -
 version notifications/src/channels/email.ts 252d519a9c8b 4796dcc66514 -
 version notifications/src/channels/sms.ts 80728fc68eb3 348b7e0e32b2 -
@@ -91,6 +117,7 @@ version shared-libs/src/events/bus.ts 3b672c7b0077 345cfdec7658 -
 version shared-libs/src/events/schema.ts 10b99235997e 345cfdec7658 -
 version shared-libs/src/logger/index.ts cd1b28e0326e 8d678bc77ab1 -
 version shared-libs/src/money/currency.ts 164ec5132535 29ae30f2c619 -
+fact 03e4dafd2295 py-imports/py none
 fact 0f1ddcf53a3e ts-imports/ts import Esm "../payments/charge" 1:0-1:45
 fact 10b99235997e ts-imports/ts none
 fact 164ec5132535 ts-imports/ts none
@@ -108,9 +135,13 @@ fact 3b672c7b0077 ts-imports/ts import Esm "./schema" 1:0-1:35
 fact 435fe45000c6 ts-imports/ts import Esm "../payments/charge" 1:0-1:45
 fact 435fe45000c6 ts-imports/ts import Esm "./pdf" 4:0-4:29
 fact 435fe45000c6 ts-imports/ts import Esm "@northwind/shared-libs/money/currency" 3:0-3:66
+fact 5008de4ecb47 go-imports/go none
+fact 5386bd3e54c6 py-imports/py none
 fact 636e23c8dff9 ts-imports/ts none
 fact 6bbc0be7dbd0 manifest-js/package manifest name = "northwind"
 fact 6d86d9fb202b ts-imports/ts none
+fact 7afe1bcf5aee go-imports/go none
+fact 7bc9e73eddde go-imports/go none
 fact 7d8d80562a54 ts-imports/ts none
 fact 80728fc68eb3 ts-imports/ts none
 fact 8727117715ee ts-imports/ts import Esm "../payments/charge" 1:0-1:45
@@ -120,14 +151,22 @@ fact 87c7e68df3fa ts-imports/ts import Esm "../channels/email" 3:0-3:43
 fact 87c7e68df3fa ts-imports/ts import Esm "@northwind/shared-libs/events/bus" 1:0-1:57
 fact 87c7e68df3fa ts-imports/ts import Esm "@northwind/shared-libs/events/schema" 2:0-2:63
 fact 8c857930f980 ts-imports/ts none
+fact 8dfb089a6276 py-imports/py none
+fact 942cc384fcdc py-imports/py none
 fact 951428d3d169 manifest-js/package manifest exports = {"./*":"./src/*.ts"}
 fact 951428d3d169 manifest-js/package manifest name = "@northwind/api-gateway"
 fact 9bae0c70e8f3 ts-imports/ts import Esm "../channels/email" 3:0-3:43
 fact 9bae0c70e8f3 ts-imports/ts import Esm "../channels/sms" 2:0-2:39
 fact 9bae0c70e8f3 ts-imports/ts import Esm "@northwind/shared-libs/events/bus" 1:0-1:57
 fact 9c5666b6be72 ts-imports/ts import Esm "@northwind/shared-libs/logger/index" 2:0-2:61
+fact a299574b8441 go-imports/go none
+fact a3e5feb07e1c py-imports/py none
+fact a4e53a484906 go-imports/go none
 fact a58672869a8e ts-imports/ts import Esm "../payments/charge" 1:0-1:45
 fact a58672869a8e ts-imports/ts import Esm "@northwind/shared-libs/money/currency" 3:0-3:66
+fact a68e4eac3942 py-imports/py none
+fact a8bfb6c0a3e5 go-imports/go none
+fact aaced1b2120a py-imports/py none
 fact c69bbabd0c33 manifest-js/package manifest exports = {"./*":"./src/*.ts"}
 fact c69bbabd0c33 manifest-js/package manifest name = "@northwind/shared-libs"
 fact ca0bfd38ad5f ts-imports/ts import Esm "../clients/catalogClient" 1:0-1:58
@@ -145,6 +184,7 @@ fact ee04e5c38cb0 ts-imports/ts import Esm "./stripeAdapter" 1:0-1:49
 fact ee04e5c38cb0 ts-imports/ts import Esm "@northwind/shared-libs/money/currency" 3:0-3:66
 fact ef7897dd7c40 ts-imports/ts import Esm "@northwind/shared-libs/events/bus" 1:0-1:57
 fact ef7897dd7c40 ts-imports/ts import Esm "@northwind/shared-libs/events/schema" 2:0-2:63
+fact f54bcf4ee2d0 go-imports/go none
 fact f8971a6e5641 ts-imports/ts import Esm "./stripeAdapter" 1:0-1:49
 fact fd07311001ed ts-imports/ts import Esm "../clients/catalogClient" 1:0-1:58
 fact ff4f04dc3818 ts-imports/ts import Esm "../events/publisher" 2:0-2:49

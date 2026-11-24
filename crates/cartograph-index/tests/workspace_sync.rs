@@ -147,6 +147,8 @@ fn step(t: i64, n: u8) -> CommitStep {
         author: String::new(),
         summary: String::new(),
         changes: Vec::new(),
+        renames: Vec::new(),
+        rename_limit: false,
     }
 }
 
@@ -628,7 +630,16 @@ fn freshness_of_thirty_repos_is_under_100_ms() {
         .map(|_| {
             let t = Instant::now();
             let r = freshness::check(&w);
-            assert_eq!((r.state, r.repos[7].behind), (State::Behind, 40));
+            assert_eq!(r.state, State::Behind);
+            // The count has a 20 ms budget: on a loaded machine it stops early and says so
+            // (`behind_capped`, shown as "N+"); otherwise it is exact.
+            let r7 = &r.repos[7];
+            assert!(
+                r7.behind == 40 || (r7.behind_capped && r7.behind < 40),
+                "behind {} capped {}",
+                r7.behind,
+                r7.behind_capped
+            );
             t.elapsed()
         })
         .collect();
@@ -773,6 +784,7 @@ fn branch_scopes_and_excludes_decide_what_is_indexed() {
         }],
         exclude: vec!["**/dist".into()],
         config_hash: Some("sha256:test".into()),
+        ..Default::default()
     };
     let mut cache = FactCache::open(&d.path().join("facts.db")).unwrap();
     assert_eq!(run(&w, &mut cache).steps, 1);

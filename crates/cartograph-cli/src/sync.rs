@@ -18,11 +18,13 @@ pub struct Flags {
     pub fetch: bool,
     pub wait: bool,
     pub background: bool,
+    pub all_workspaces: bool,
+    pub hook_args: Option<String>,
 }
 
 /// The registered workspace covering `dir` (IDX-11): the registry is the allow-list, so only its
 /// repos are read or fetched (F8).
-fn workspace(data: &Path, dir: &Path) -> Result<Workspace, Report> {
+fn workspace(data: &Path, dir: &Path) -> Result<(String, Workspace), Report> {
     let applied = setup::locate(data, dir)
         .map_err(|e| Report::from_error(&e))?
         .ok_or_else(|| Report {
@@ -31,17 +33,37 @@ fn workspace(data: &Path, dir: &Path) -> Result<Workspace, Report> {
             action: "run `cartograph init` in the workspace folder".into(),
             exit_code: ExitCode::Usage,
         })?;
-    cartograph_server::workspace(data, &applied.workspace_id).map_err(|p| Report {
+    let ws = cartograph_server::workspace(data, &applied.workspace_id).map_err(|p| Report {
         what: p.what,
         why: p.why,
         action: p.action,
         exit_code: ExitCode::Error,
-    })
+    })?;
+    Ok((applied.workspace_id, ws))
+}
+
+/// FE-16: the run's activity rows. A failure to write them never fails the sync.
+fn record(data: &Path, id: &str) {
+    cartograph_server::activity::after_cli_sync(data, id);
 }
 
 pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
     let data = data_dir()?;
-    let ws = workspace(&data, dir)?;
+    if f.all_workspaces {
+        return all(out, &data, &f, g);
+    }
+    // A git hook (IDX-26): a file checkout or a rebase in progress starts nothing, not even the
+    // lock try.
+    if let Some(args) = &f.hook_args
+        && crate::hooks::skip(dir, args)
+    {
+        out.print(
+            "skipped: a file checkout or a rebase in progress",
+            json!({ "background": "skipped" }),
+        );
+        return Ok(());
+    }
+    let (id, ws) = workspace(&data, dir)?;
     let explain = |e: &dyn cartograph_core::Explain| Report::from_error(e);
     if f.background {
         // An explicit request (a hook): auto_sync = "never" governs only the syncs reads start.
@@ -72,7 +94,10 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
         ..SyncOptions::default()
     };
     let s = match sync(&ws, &opts, &mut cache).map_err(|e| explain(&e))? {
-        SyncOutcome::Synced(s) => s,
+        SyncOutcome::Synced(s) => {
+            record(&data, &id);
+            s
+        }
         SyncOutcome::AlreadyRunning => {
             out.print(
                 "a sync is already running; it will include this request",
@@ -103,6 +128,18 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
     if s.dirty_left {
         human += "\nmore commits arrived than one run takes; the next sync continues";
     }
+    let (files_total, files_parsed, imports_total, imports_resolved) = s.coverage;
+    if s.steps > 0 {
+        let pct = if imports_total == 0 {
+            100.0
+        } else {
+            imports_resolved as f64 * 100.0 / imports_total as f64
+        };
+        human += &format!(
+            "\nfiles parsed {files_parsed} / {files_total}, imports resolved {pct:.1}% \
+             (`cartograph status --unresolved` lists the rest)"
+        );
+    }
     out.print(
         &human,
         json!({
@@ -117,9 +154,54 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
             "duplicate_packages": s.duplicate_packages,
             "fetch_failed": s.fetch_failed,
             "dirty_left": s.dirty_left,
+            "coverage": { "files_total": files_total, "files_parsed": files_parsed,
+                          "imports_total": imports_total, "imports_resolved": imports_resolved },
+            "derived_rebuilt": s.derived.rebuilt(),
             "ms": { "total": s.total_ms, "rehydrate": s.rehydrate_ms, "walk": s.walk_ms,
                     "replay": s.replay_ms },
         }),
     );
+    Ok(())
+}
+
+/// `sync --all-workspaces` (IDX-27): every registered workspace, one after another. One that fails
+/// or whose writer is busy doesn't stop the rest; a busy one has its dirty flag set, so its running
+/// sync does one more round.
+fn all(out: &Out, data: &Path, f: &Flags, g: &Global) -> Result<(), Report> {
+    let _guard = logging::init(&data.join("logs"), g.verbose).ok();
+    let cache_path = paths::facts_cache(data);
+    let mut cache = FactCache::open(&cache_path).map_err(|e| Report {
+        what: format!("can't open the fact cache at {}", cache_path.display()),
+        why: e.to_string(),
+        action: format!("delete {}; it is only a cache", cache_path.display()),
+        exit_code: ExitCode::Error,
+    })?;
+    let opts = SyncOptions {
+        fetch: f.fetch,
+        wait: false,
+        ..SyncOptions::default()
+    };
+    let mut lines = Vec::new();
+    let mut rows = Vec::new();
+    for id in cartograph_server::workspace_ids(data) {
+        let (word, detail) = match cartograph_server::workspace(data, &id) {
+            Err(p) => ("failed", p.what),
+            Ok(ws) => match sync(&ws, &opts, &mut cache) {
+                Ok(SyncOutcome::AlreadyRunning) => ("busy", String::new()),
+                Ok(SyncOutcome::Synced(s)) => {
+                    record(data, &id);
+                    let mut detail = format!("{} commits", s.steps);
+                    if !s.fetch_failed.is_empty() {
+                        detail += &format!("; fetch failed: {}", s.fetch_failed.join(", "));
+                    }
+                    ("synced", detail)
+                }
+                Err(e) => ("failed", cartograph_core::Explain::what(&e)),
+            },
+        };
+        lines.push(format!("{id}: {word} {detail}").trim_end().to_owned());
+        rows.push(json!({ "workspace": id, "outcome": word, "detail": detail }));
+    }
+    out.print(&lines.join("\n"), json!({ "workspaces": rows }));
     Ok(())
 }

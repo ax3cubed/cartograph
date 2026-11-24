@@ -18,6 +18,23 @@ const API: &[&str] = &[
     "/api/v1/w/{ws}/freshness",
     "/api/v1/w/{ws}/repos",
     "/api/v1/w/{ws}/graph",
+    "/api/v1/w/{ws}/nodes/workspace",
+    "/api/v1/w/{ws}/nodes/workspace/neighbors",
+    "/api/v1/w/{ws}/links/l1",
+    "/api/v1/w/{ws}/source?node=n1",
+    "/api/v1/w/{ws}/search?q=a",
+    "/api/v1/w/{ws}/commits",
+    "/api/v1/w/{ws}/timeline/density",
+    "/api/v1/w/{ws}/impact?node=n1",
+    "/api/v1/w/{ws}/path?from=n1&to=n2",
+    "/api/v1/w/{ws}/coverage",
+    "/api/v1/w/{ws}/coverage/imports/unresolved",
+    "/api/v1/w/{ws}/runs",
+    "/api/v1/w/{ws}/extractors",
+    "/api/v1/w/{ws}/services",
+    "/api/v1/mcp/tools",
+    "/api/v1/agents",
+    "/api/v1/activity",
 ];
 
 #[test]

@@ -14,9 +14,17 @@ import { useRouter } from "next/navigation";
 import { usePath } from "../shell/usePath";
 import { Check } from "lucide-react";
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS } from "@/lib/settings";
+import { useLive, useWorkspaces } from "@/lib/api/live";
+import { onEvent } from "@/lib/api/events";
+import { RequestError } from "@/lib/api/client";
+import { getConfig, previewConfig, putConfig, type ConfigFile } from "@/lib/api/settings";
 import "./settings.css";
 
-export interface FileBar { count: number; onSave: () => void; onDiscard: () => void; target?: string }
+export interface FileBar {
+  count: number; onSave: () => void; onDiscard: () => void; target?: string;
+  /** FE-13: the unified diff the save would write (text only), a 412 conflict and its two ways out, a failed save. */
+  diff?: string; conflict?: boolean; onReload?: () => void; onOverwrite?: () => void; error?: string;
+}
 
 const SCOPE = {
   app: "Changes here apply as you make them and stay on this machine.",
@@ -88,13 +96,25 @@ export function SettingsPage({ title, intro, saves, scope, saved, actions, file,
             </span>
           </div>
         ) : (
+          file.conflict ? (
+            <div className="set-bar is-leave" role="alert">
+              <span><b>cartograph.yaml changed on disk</b> <span className="set-muted">· it was edited after this page read it. Reload to see it, or overwrite it with your {count} {count === 1 ? "change" : "changes"}.</span></span>
+              <span className="set-actions">
+                <button type="button" className="set-btn is-sm is-line" onClick={file.onReload}>Reload</button>
+                <button type="button" className="set-btn is-sm is-primary" onClick={file.onOverwrite}>Overwrite</button>
+              </span>
+            </div>
+          ) : (
           <div className="set-bar" role="region" aria-label="Unsaved changes">
             <span><b>{count} unsaved {count === 1 ? "change" : "changes"}</b> <span className="set-muted">· writes {file.target ?? "cartograph.yaml"}</span></span>
             <span className="set-actions">
               <button type="button" className="set-btn is-sm is-line" onClick={file.onDiscard}>Discard</button>
               <button type="button" className="set-btn is-sm is-primary" onClick={file.onSave}>Save</button>
             </span>
+            {file.error && <p className="set-bar-err" role="alert">{file.error}</p>}
+            {file.diff && <details className="set-bar-diff"><summary>Preview the change to cartograph.yaml</summary><pre className="set-pre" aria-label="Diff of cartograph.yaml">{file.diff}</pre></details>}
           </div>
+          )
         )
       )}
     </div>
@@ -109,9 +129,9 @@ export function useFlash(): [boolean, () => void] {
   return [on, () => { setOn(true); clearTimeout(t.current); t.current = setTimeout(() => setOn(false), 2500); }];
 }
 
-export function Switch({ on, onChange, label, labelledBy }: { on: boolean; onChange: (v: boolean) => void; label?: string; labelledBy?: string }) {
+export function Switch({ on, onChange, label, labelledBy, disabled }: { on: boolean; onChange: (v: boolean) => void; label?: string; labelledBy?: string; disabled?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} aria-labelledby={labelledBy} className="set-sw" onClick={() => onChange(!on)}><span /></button>
+    <button type="button" role="switch" aria-checked={on} aria-label={label} aria-labelledby={labelledBy} className="set-sw" disabled={disabled} onClick={() => onChange(!on)}><span /></button>
   );
 }
 
@@ -134,28 +154,105 @@ export const Advanced = ({ label = "Advanced", children }: { label?: string; chi
   <details className="set-adv"><summary>{label}</summary><div>{children}</div></details>
 );
 
-/** State that lives in this browser only. Reads after mount so the first paint matches the server. */
+/** State that lives in this browser only. Reads after mount so the first paint matches the server. "" keeps it in memory. */
 export function useStored<T>(key: string, initial: T): [T, (v: T) => void] {
   const [v, setV] = useState(initial);
   useEffect(() => {
+    if (!key) return;
     try { const raw = localStorage.getItem(key); if (raw !== null) setV(JSON.parse(raw)); } catch { /* storage unavailable */ }
   }, [key]);
-  return [v, (n) => { setV(n); try { localStorage.setItem(key, JSON.stringify(n)); } catch { /* storage unavailable */ } }];
+  return [v, (n) => { setV(n); if (key) try { localStorage.setItem(key, JSON.stringify(n)); } catch { /* storage unavailable */ } }];
 }
 
-/** A draft over a saved object. `count` is how many top-level fields differ from what was saved. */
-export function useFileDraft<T extends object>(key: string, initial: T) {
-  const [saved, setSaved] = useStored<T>(key, initial);
+/** How a page's draft maps onto cartograph.yaml: the fields it reads from the text, and the text with them written. */
+export interface YamlMap<T> { read: (yaml: string) => Partial<T>; write: (yaml: string, value: T) => string }
+const errText = (e: unknown) => (e instanceof RequestError ? `${e.what}. ${e.try_}.` : "The change couldn't be saved.");
+
+/**
+ * A draft over a saved object. `count` is how many top-level fields differ from what was saved.
+ * Without `yaml` the saved object lives in localStorage under `key` (this app only). With `yaml` and the binary (FE-13)
+ * it is read from the workspace's cartograph.yaml: GET once per visit, a preview diff 300 ms after each edit, PUT with
+ * If-Match on save, and on 412 the bar offers Reload or Overwrite. A config.changed event reloads a page with no draft.
+ */
+export function useFileDraft<T extends object>(key: string, initial: T, yaml?: YamlMap<T>) {
+  const live = useLive();
+  const { current } = useWorkspaces();
+  const ws = yaml && live ? current?.id : undefined;
+  const [stored, setStored] = useStored<T>(yaml ? "" : key, initial);
   const [draft, setDraft] = useState<T | null>(null);
+  const [cfg, setCfg] = useState<{ file?: ConfigFile; missing?: boolean; error?: string; loading: boolean }>({ loading: !!ws });
+  const [diff, setDiff] = useState("");
+  const [conflict, setConflict] = useState(false);
+  const [error, setError] = useState("");
+  const yamlRef = useRef(yaml);
+  yamlRef.current = yaml;
+  const drafting = useRef(false);
+  drafting.current = draft !== null;
+
+  const reload = useCallback(async () => {
+    if (!ws) return;
+    try { setCfg({ file: await getConfig(ws), loading: false }); }
+    catch (e) { setCfg(e instanceof RequestError && e.code === "not_found" ? { missing: true, loading: false } : { error: errText(e), loading: false }); }
+  }, [ws]);
+  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => (ws ? onEvent((e) => { if (e.event === "config.changed" && e.data.ws === ws && !drafting.current) void reload(); }) : undefined), [ws, reload]);
+
+  const fromFile = ws && cfg.file && yaml ? { ...initial, ...yaml.read(cfg.file.yaml) } : null;
+  const saved = (fromFile ?? stored) as T;
   const value = draft ?? saved;
   const keys = new Set([...Object.keys(saved), ...Object.keys(value)]);
   let count = 0;
   for (const k of keys) if (JSON.stringify((saved as Record<string, unknown>)[k]) !== JSON.stringify((value as Record<string, unknown>)[k])) count++;
+
+  // the preview diff, 300 ms after the last edit; rendered as text
+  const text = ws && cfg.file && draft && count ? yamlRef.current!.write(cfg.file.yaml, draft) : null;
+  useEffect(() => {
+    if (!ws || text === null) { setDiff(""); return; }
+    let live = true;
+    const t = setTimeout(() => { previewConfig(ws, text).then((d) => live && setDiff(d.diff), () => live && setDiff("")); }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [ws, text]);
+
+  const write = async (file: ConfigFile) => {
+    if (!ws || !draft) return;
+    setError("");
+    try {
+      await putConfig(ws, yamlRef.current!.write(file.yaml, draft), file.etag);
+      setDraft(null); setConflict(false);
+      await reload();
+    } catch (e) {
+      if (e instanceof RequestError && e.status === 412) setConflict(true);
+      else setError(errText(e));
+    }
+  };
   return {
     value, count,
     edit: (patch: Partial<T>) => setDraft({ ...value, ...patch }),
     set: (next: T) => setDraft(next),
-    save: () => { if (draft) setSaved(draft); setDraft(null); },
-    discard: () => setDraft(null),
+    save: () => {
+      if (ws) { if (cfg.file) void write(cfg.file); return; }
+      if (draft) setStored(draft);
+      setDraft(null);
+    },
+    discard: () => { setDraft(null); setConflict(false); setError(""); },
+    /** For SettingsPage's `file` bar. `readOnly` while the workspace's cartograph.yaml can't be read. */
+    file: {
+      live: !!ws, readOnly: !!ws && !cfg.file, missing: !!cfg.missing, loading: cfg.loading, loadError: cfg.error,
+      diff, conflict, error,
+      onReload: () => { setDraft(null); setConflict(false); void reload(); },
+      onOverwrite: async () => { try { await write(await getConfig(ws!)); } catch (e) { setError(errText(e)); } },
+    },
   };
+}
+
+/** What a file-backed page says when it can't read the workspace's cartograph.yaml; its controls are read-only then. */
+export function FileState({ f }: { f: { live: boolean; missing: boolean; loading: boolean; loadError?: string } }) {
+  if (!f.live || (!f.missing && !f.loadError && !f.loading)) return null;
+  return (
+    <p className="set-note set-file-state" role={f.loading ? undefined : "status"}>
+      {f.loading ? "Reading cartograph.yaml…" : f.missing
+        ? <>This workspace has no <span className="set-mono">cartograph.yaml</span>, so these settings can&apos;t be saved. Run <span className="set-mono">cartograph init</span> in the workspace folder to add one.</>
+        : f.loadError}
+    </p>
+  );
 }

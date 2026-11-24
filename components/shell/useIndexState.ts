@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Freshness } from "@/lib/model";
-import { freshnessFor } from "@/lib/demo/shell";
+import { getDemoFreshness } from "@/lib/source";
 import { useFreshness, useLive, useUp, useWorkspaces } from "@/lib/api/live";
 
 export type DemoIndexState = "loading" | "failed" | "stale" | null;
@@ -44,7 +44,7 @@ export function useIndexState() {
     history.replaceState(null, "", location.pathname + location.search + (rest ? `#${rest}` : ""));
     setV({ state: null, why: null });
   };
-  const demoFreshness = useMemo<Freshness | undefined>(() => (v.state === "stale" || v.state === "failed" ? freshnessFor(v.state) : undefined), [v.state]);
+  const demoFreshness = useMemo<Freshness | undefined>(() => (v.state === "stale" || v.state === "failed" ? getDemoFreshness(v.state) : undefined), [v.state]);
 
   if (!live) return { ...v, freshness: demoFreshness, clear, loading: v.state === "loading", offline: false };
   const freshness = !up ? failed("Cartograph isn't running", "Start it again from the terminal.")

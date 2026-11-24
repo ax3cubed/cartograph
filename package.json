@@ -24,25 +24,31 @@
     "dev": "next dev",
     "build": "next build && node scripts/csp.mjs",
     "check:export": "node scripts/check-export.mjs",
-    "check": "node --experimental-strip-types lib/workspace.check.ts && node --experimental-strip-types lib/api/sse.check.ts && node --experimental-strip-types lib/api/live.check.ts",
+    "check": "node --experimental-strip-types lib/workspace.check.ts && node --experimental-strip-types lib/api/sse.check.ts && node --experimental-strip-types lib/api/live.check.ts && node --experimental-strip-types components/map/table.check.ts && node --experimental-strip-types components/map/levels.check.ts && node --experimental-strip-types components/timeline/bins.check.ts && node --experimental-strip-types lib/date.check.ts && node --experimental-strip-types lib/api/yaml.check.ts && node scripts/check-plugin.mjs",
     "gen:types": "json2ts --input crates/cartograph-api/schema.json --output lib/api/types.gen.ts --bannerComment \"// Generated from crates/cartograph-api (INT-01) by pnpm gen:types. Do not edit.\" --unreachableDefinitions --additionalProperties=false",
     "lint:commits": "commitlint --from origin/main --to HEAD --verbose",
-    "lint:branch": "node scripts/check-branch.mjs"
+    "lint:branch": "node scripts/check-branch.mjs",
+    "test:e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
     "@assistant-ui/react": "0.15.37",
     "clsx": "^2.1.1",
     "d3-force": "^3.0.1",
+    "graphology": "0.26.0",
+    "graphology-types": "0.24.8",
     "lucide-react": "^1.73.0",
     "next": "16.4.6",
     "radix-ui": "^1.8.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "sigma": "4.0.5",
     "tailwind-merge": "^3.7.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@commitlint/cli": "21.2.4",
     "@commitlint/config-conventional": "21.2.4",
+    "@playwright/test": "1.65.1",
     "@tailwindcss/postcss": "^4.3.5",
     "@types/d3-force": "^3.0.10",
     "@types/node": "^26",

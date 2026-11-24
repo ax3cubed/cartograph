@@ -29,28 +29,45 @@
         "type": "string"
       },
       "ActivityItem": {
+        "description": "One row of the activity list (FE-16), kept in the workspace's ask.db. `text` and `detail` hold\nrepo and author names, which are untrusted: the app renders them as text. Never file contents.",
         "properties": {
           "at": {
             "type": "string"
           },
+          "detail": {
+            "description": "Who ran it and which version: \"Indexed by the background sync · cartograph 0.4.0\".",
+            "type": "string"
+          },
+          "href": {
+            "description": "The app view the row opens, as a path and hash.",
+            "type": "string"
+          },
           "id": {
+            "description": "`<workspace>:<row>`.",
             "type": "string"
           },
           "kind": {
             "$ref": "#/components/schemas/ActivityKind"
           },
           "text": {
+            "description": "\"billing-service synced to 3e0d7a2 · 3 commits by Tom Ellery and Jon Reyes\", at most 120\ncharacters.",
             "type": "string"
           },
           "unread": {
             "type": "boolean"
+          },
+          "ws": {
+            "type": "string"
           }
         },
         "required": [
           "id",
+          "ws",
           "at",
           "kind",
           "text",
+          "detail",
+          "href",
           "unread"
         ],
         "type": "object"
@@ -334,6 +351,13 @@
           "confidence"
         ],
         "type": "object"
+      },
+      "Change": {
+        "enum": [
+          "added",
+          "removed"
+        ],
+        "type": "string"
       },
       "Citation": {
         "properties": {
@@ -868,6 +892,15 @@
       },
       "DensityBin": {
         "properties": {
+          "by_repo": {
+            "description": "Commits per repo, in the order of `TimelineDensity.repos`; empty in a node's series.",
+            "items": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
           "commits": {
             "format": "uint32",
             "minimum": 0,
@@ -891,7 +924,8 @@
           "start",
           "commits",
           "links_added",
-          "links_removed"
+          "links_removed",
+          "by_repo"
         ],
         "type": "object"
       },
@@ -1184,6 +1218,29 @@
         ],
         "type": "string"
       },
+      "ExtractorInfo": {
+        "description": "An extractor the index holds facts from (IDX-21), with the live files it read.",
+        "properties": {
+          "files": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "description": "The newest version that wrote facts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "files"
+        ],
+        "type": "object"
+      },
       "ExtractorSetting": {
         "additionalProperties": false,
         "properties": {
@@ -1430,7 +1487,15 @@
         "type": "object"
       },
       "ImpactResult": {
+        "description": "What depends on the changed nodes, directly or not. A node's level is the weakest link on its\nstrongest path from a changed node.",
         "properties": {
+          "changed": {
+            "description": "The nodes the input named or changed.",
+            "items": {
+              "$ref": "#/components/schemas/NodeId"
+            },
+            "type": "array"
+          },
           "exact": {
             "items": {
               "$ref": "#/components/schemas/NodeId"
@@ -1448,12 +1513,86 @@
               "$ref": "#/components/schemas/NodeId"
             },
             "type": "array"
+          },
+          "services": {
+            "description": "The services the affected nodes belong to.",
+            "items": {
+              "$ref": "#/components/schemas/NodeId"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "A resource cap (50k visited nodes, depth 12, 5 s) stopped the walk.",
+            "type": "boolean"
           }
         },
         "required": [
+          "changed",
           "exact",
           "likely",
-          "guessed"
+          "guessed",
+          "services",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "IndexRun": {
+        "description": "One index run (IDX-22): when it ran, the binary that wrote it, and its coverage totals. The\ntotals are absent on a run that stopped before its end.",
+        "properties": {
+          "files_parsed": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "files_total": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "imports_resolved": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "imports_total": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "writer_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "started_at",
+          "writer_version"
         ],
         "type": "object"
       },
@@ -1642,6 +1781,66 @@
         ],
         "type": "string"
       },
+      "Lineage": {
+        "description": "One row of `…/nodes/{id}/history` (board G10): a path the node had, and how it got it.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/CommitRef"
+          },
+          "path": {
+            "type": "string"
+          },
+          "similarity": {
+            "description": "Percent of content kept, for `rename_similar`.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "to": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommitRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null while the node still has this path."
+          },
+          "via": {
+            "$ref": "#/components/schemas/LineageVia"
+          }
+        },
+        "required": [
+          "path",
+          "from",
+          "via"
+        ],
+        "type": "object"
+      },
+      "LineageVia": {
+        "oneOf": [
+          {
+            "const": "add",
+            "description": "The path first appeared, or a structure node's span began.",
+            "type": "string"
+          },
+          {
+            "const": "rename_exact",
+            "description": "Moved with the same blob.",
+            "type": "string"
+          },
+          {
+            "const": "rename_similar",
+            "description": "Moved with similar content; `similarity` says how similar.",
+            "type": "string"
+          }
+        ]
+      },
       "Link": {
         "description": "`lib/workspace.ts` Link: `type` becomes `kind`, and commits are given with their timeline step.",
         "properties": {
@@ -1682,6 +1881,26 @@
           "kind",
           "added",
           "confidence"
+        ],
+        "type": "object"
+      },
+      "LinkChange": {
+        "description": "One row of `…/nodes/{id}/changes`: a commit that added or removed a link touching the scope.",
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/Change"
+          },
+          "commit": {
+            "$ref": "#/components/schemas/Commit"
+          },
+          "link": {
+            "$ref": "#/components/schemas/Link"
+          }
+        },
+        "required": [
+          "commit",
+          "link",
+          "change"
         ],
         "type": "object"
       },
@@ -2265,8 +2484,30 @@
         ],
         "type": "string"
       },
+      "PathDirection": {
+        "oneOf": [
+          {
+            "const": "forward",
+            "description": "Each hop goes from a node to what it depends on.",
+            "type": "string"
+          },
+          {
+            "const": "backward",
+            "description": "Each hop goes from a node to what depends on it.",
+            "type": "string"
+          },
+          {
+            "const": "mixed",
+            "description": "Hops in both directions.",
+            "type": "string"
+          }
+        ]
+      },
       "PathResult": {
         "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/PathDirection"
+          },
           "hops": {
             "items": {
               "$ref": "#/components/schemas/Link"
@@ -2280,7 +2521,8 @@
         },
         "required": [
           "hops",
-          "level"
+          "level",
+          "direction"
         ],
         "type": "object"
       },
@@ -2464,6 +2706,38 @@
         ],
         "type": "object"
       },
+      "RankedNode": {
+        "description": "One row of `…/nodes/{id}/ranking`: a file in the scope and how much depends on it (blast\nradius), as `lib/workspace.ts` `ranking` computes it.",
+        "properties": {
+          "delta": {
+            "description": "`used_by` now minus `used_by` 90 days before `at`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "node": {
+            "$ref": "#/components/schemas/Node"
+          },
+          "used_by": {
+            "description": "Live links into the file at `at`.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "uses": {
+            "description": "Live links out of it at `at`.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node",
+          "used_by",
+          "uses",
+          "delta"
+        ],
+        "type": "object"
+      },
       "Reach": {
         "properties": {
           "links": {
@@ -2477,11 +2751,16 @@
               "$ref": "#/components/schemas/NodeId"
             },
             "type": "array"
+          },
+          "truncated": {
+            "description": "A resource cap stopped the walk.",
+            "type": "boolean"
           }
         },
         "required": [
           "nodes",
-          "links"
+          "links",
+          "truncated"
         ],
         "type": "object"
       },
@@ -3113,6 +3392,31 @@
         ],
         "type": "object"
       },
+      "SearchResults": {
+        "description": "`GET …/search`: the hits best first (bm25, then fan-in, then shorter paths), and when nothing\nmatched, the nearest name (board G05's \"did you mean\").",
+        "properties": {
+          "near": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "type": "object"
+      },
       "Selection": {
         "additionalProperties": false,
         "properties": {
@@ -3414,6 +3718,34 @@
             "type": "object"
           },
           {
+            "description": "Rows marked read in one tab, so every other tab clears them too. Empty: every row.",
+            "properties": {
+              "data": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "ids"
+                ],
+                "type": "object"
+              },
+              "event": {
+                "const": "activity.read",
+                "type": "string"
+              }
+            },
+            "required": [
+              "event",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
             "properties": {
               "data": {
                 "type": "object"
@@ -3433,6 +3765,13 @@
       },
       "Service": {
         "properties": {
+          "detected_by": {
+            "description": "The C6 rule that found it: `manifest`, `scope`, `backstage`, `pnpm`, `npm-workspaces`,\n`go.work`, `nx`, `cargo`, `composer` or `repo` (board S04).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "domain": {
             "type": [
               "string",
@@ -3441,6 +3780,10 @@
           },
           "id": {
             "$ref": "#/components/schemas/NodeId"
+          },
+          "library": {
+            "description": "A workspace package with no deployable marker (C6).",
+            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -3466,7 +3809,8 @@
           "name",
           "repo",
           "paths",
-          "tags"
+          "tags",
+          "library"
         ],
         "type": "object"
       },
@@ -3546,10 +3890,18 @@
               "$ref": "#/components/schemas/DensityBin"
             },
             "type": "array"
+          },
+          "repos": {
+            "description": "The repos `by_repo` counts, in that order (board G04 stacks by repo).",
+            "items": {
+              "$ref": "#/components/schemas/RepoId"
+            },
+            "type": "array"
           }
         },
         "required": [
           "bin",
+          "repos",
           "bins"
         ],
         "type": "object"
@@ -3645,6 +3997,7 @@
         "type": "object"
       },
       "Unresolved": {
+        "description": "A reference that didn't resolve (IDX-22). `text` is the raw specifier: untrusted text (F8),\nshown as text only.",
         "properties": {
           "file": {
             "$ref": "#/components/schemas/NodeId"
@@ -3653,6 +4006,10 @@
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
+          },
+          "path": {
+            "description": "The file's path now, repo-prefixed as node paths are.",
+            "type": "string"
           },
           "reason": {
             "type": "string"
@@ -3663,6 +4020,7 @@
         },
         "required": [
           "file",
+          "path",
           "line",
           "text",
           "reason"
@@ -8285,6 +8643,91 @@
         "x-cartograph-kind": "read"
       }
     },
+    "/api/v1/w/{ws}/extractors": {
+      "get": {
+        "operationId": "getWsExtractors",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/ExtractorInfo"
+                      },
+                      "type": "array"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Extractors in the index and the live files each read",
+        "tags": [
+          "IDX-21"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
     "/api/v1/w/{ws}/freshness": {
       "get": {
         "operationId": "getWsFreshness",
@@ -9082,7 +9525,7 @@
                   "properties": {
                     "data": {
                       "items": {
-                        "$ref": "#/components/schemas/Commit"
+                        "$ref": "#/components/schemas/LinkChange"
                       },
                       "type": "array"
                     },
@@ -9139,7 +9582,7 @@
             "description": "Error"
           }
         },
-        "summary": "Commits that changed this node's links",
+        "summary": "Commits that added or removed a link touching the scope",
         "tags": [
           "SRV-08"
         ],
@@ -9332,7 +9775,7 @@
                   "properties": {
                     "data": {
                       "items": {
-                        "$ref": "#/components/schemas/Interval"
+                        "$ref": "#/components/schemas/Lineage"
                       },
                       "type": "array"
                     },
@@ -9704,7 +10147,7 @@
                   "properties": {
                     "data": {
                       "items": {
-                        "$ref": "#/components/schemas/Node"
+                        "$ref": "#/components/schemas/RankedNode"
                       },
                       "type": "array"
                     },
@@ -9761,7 +10204,7 @@
             "description": "Error"
           }
         },
-        "summary": "Children ranked by fan-in",
+        "summary": "Files in the scope ranked by fan-in",
         "tags": [
           "SRV-08"
         ],
@@ -10312,7 +10755,10 @@
                 "schema": {
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/PathResult"
+                      "items": {
+                        "$ref": "#/components/schemas/PathResult"
+                      },
+                      "type": "array"
                     },
                     "generation": {
                       "minimum": 0,
@@ -10367,7 +10813,7 @@
             "description": "Error"
           }
         },
-        "summary": "Shortest path between two nodes",
+        "summary": "Up to 3 shortest paths between two nodes",
         "tags": [
           "SRV-11"
         ],
@@ -10807,6 +11253,123 @@
         "x-cartograph-kind": "read"
       }
     },
+    "/api/v1/w/{ws}/runs": {
+      "get": {
+        "operationId": "getWsRuns",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/IndexRun"
+                      },
+                      "type": "array"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Index runs, newest first, with their coverage totals",
+        "tags": [
+          "IDX-22"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
     "/api/v1/w/{ws}/search": {
       "get": {
         "operationId": "getWsSearch",
@@ -10845,6 +11408,14 @@
           },
           {
             "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -10859,10 +11430,7 @@
                 "schema": {
                   "properties": {
                     "data": {
-                      "items": {
-                        "$ref": "#/components/schemas/SearchResult"
-                      },
-                      "type": "array"
+                      "$ref": "#/components/schemas/SearchResults"
                     },
                     "generation": {
                       "minimum": 0,

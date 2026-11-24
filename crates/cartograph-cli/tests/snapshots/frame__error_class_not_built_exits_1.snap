@@ -2,6 +2,6 @@
 source: crates/cartograph-cli/tests/frame.rs
 expression: text(&o.stderr)
 ---
-error: `cartograph doctor` is not built yet
+error: `cartograph report` is not built yet
   why: this early build registers every command, but only some of them work
   try: run `cartograph index <dir>` to index one repository

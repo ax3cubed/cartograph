@@ -14,19 +14,34 @@
 //! # Ok(()) }
 //! ```
 
+mod adjacency;
 mod at;
+mod coverage;
+mod detail;
 mod error;
+mod find;
 mod graph;
+mod page;
 mod read;
 mod resolve;
 mod store;
+mod timeline;
+mod traverse;
 
 pub use at::{At, parse_instant, rfc3339};
 pub use cartograph_store::FORMAT_VERSION;
+pub use coverage::IMPORTS_ROW;
+pub use detail::{WORKSPACE, level};
 pub use error::QueryError;
+pub use find::{MAX_QUERY, SearchQuery};
 pub use graph::{GraphQuery, MAX_LINKS, MAX_NODES};
+pub use page::{Page, Paged};
 pub use resolve::{link_id, node_id};
 pub use store::{DEFAULT_DEADLINE, HARD_DEADLINE, Limits, Snapshot, Store, valid_workspace_id};
+pub use timeline::{MAX_BINS, bin_start};
+pub use traverse::{
+    DEADLINE as TRAVERSAL_DEADLINE, ImpactInput, MAX_DEPTH, MAX_VISITED, Neighbor, NeighborQuery,
+};
 
 #[cfg(test)]
 mod tests;

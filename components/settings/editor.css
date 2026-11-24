@@ -1,8 +1,16 @@
-.set-ed-facts { display: grid; grid-template-columns: auto 1fr; gap: 0.5rem 1rem; margin: 0; font-size: 0.8125rem; align-items: center; }
+.set-ed-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.5rem 1rem; margin: 0; font-size: 0.8125rem; align-items: center; }
 .set-ed-facts dt { color: var(--muted); }
-.set-ed-facts dd { margin: 0; }
+.set-ed-facts dd { margin: 0; min-width: 0; }
+.set-ed-facts dd.set-mono { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .set-ed-tools { list-style: none; margin: 0; padding: 0; }
 .set-ed-tools li { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) auto; gap: 0.625rem; align-items: center; min-height: 2.25rem; border-top: 1px solid var(--line); font-size: 0.8125rem; }
 .set-ed-tools li:first-child { border-top: 0; }
 .set-ed-tools code { font-family: var(--font-mono, ui-monospace, monospace); color: var(--text); }
 .set-ed-tools span { color: var(--muted); }
+.set-ed-agents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.set-ed-agents > li { display: flex; flex-direction: column; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
+.set-ed-agents > li:first-child { border-top: 0; padding-top: 0; }
+.set-ed-chips { display: inline-flex; align-items: center; gap: 0.5rem; }
+/* The path fills its own line and is cut with an ellipsis: a long home folder never reflows the row. */
+.set-ed-path { display: flex; gap: 0.25em; white-space: nowrap; }
+.set-ed-path > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

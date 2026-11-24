@@ -159,3 +159,56 @@ fn rewritten_history_syncs_in_the_background() {
         assert!(t.elapsed() < Duration::from_secs(30), "never current again");
     }
 }
+
+/// FE-16's done-when, server half: a sync from the CLI becomes an unread `activity.new` row on
+/// every open stream, and marking it read on one stream reaches the others.
+#[test]
+fn a_cli_sync_raises_activity_and_read_state_is_shared() {
+    let r = start();
+    // Only the CLI syncs here: no background sync may take the commit first.
+    std::fs::write(r.data.join("config.toml"), "auto_sync = \"never\"\n").unwrap();
+    let (mut a, mut b) = (Events::open(&r), Events::open(&r));
+    a.wait("freshness", 10);
+    b.wait("freshness", 10);
+    // The ticker's first look has passed: rows already there aren't announced again.
+    std::thread::sleep(Duration::from_millis(1500));
+    let mut f = Fixture::init(&r.data.parent().unwrap().join("repo"));
+    f.set_clock(1_700_000_000);
+    f.author.0 = "Tom Ellery".into();
+    f.write("src/d.ts", "export const d = 1;\n");
+    f.commit("three");
+    // `cartograph sync`, in this process: the sync, then its activity rows.
+    sync(&r.data, &r.ws);
+    cartograph_server::activity::after_cli_sync(&r.data, &r.ws);
+    let row = a.wait("activity.new", 30);
+    assert_eq!(b.wait("activity.new", 30), row, "every stream gets the row");
+    assert_eq!(row["kind"], "sync", "{row}");
+    assert_eq!(row["unread"], true);
+    assert!(
+        row["text"]
+            .as_str()
+            .unwrap()
+            .ends_with("· 1 commit by Tom Ellery"),
+        "{row}"
+    );
+    assert!(
+        row["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with("Indexed from the CLI · cartograph "),
+        "{row}"
+    );
+
+    let list = get(&r, "/api/v1/activity").json();
+    assert_eq!(list["data"][0]["id"], row["id"], "{list}");
+    let read = write(
+        &r,
+        "POST",
+        "/api/v1/activity/read",
+        Some(&format!(r#"{{"ids":[{}]}}"#, row["id"])),
+    );
+    assert_eq!(read.status, 204, "{}", read.body);
+    assert_eq!(b.wait("activity.read", 10)["ids"][0], row["id"]);
+    let list = get(&r, "/api/v1/activity").json();
+    assert_eq!(list["data"][0]["unread"], false, "{list}");
+}

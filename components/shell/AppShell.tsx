@@ -79,8 +79,8 @@ export default function AppShell({ onPick, extra }: { onPick?: (id: string, kind
         </select>
         <ChevronDown size={14} aria-hidden />
       </label>
-      <button type="button" className="sh-search" onClick={() => setSearching(true)} aria-label="Search the workspace" aria-keyshortcuts="Control+K Meta+K">
-        <Search size={16} aria-hidden /><span>Search services, files, concepts or operations</span><kbd>⌘K</kbd>
+      <button type="button" className="sh-search" onClick={() => setSearching(true)} aria-keyshortcuts="Control+K Meta+K">
+        <Search size={16} aria-hidden /><span>Search services, files, concepts or operations</span><kbd aria-hidden>⌘K</kbd>
       </button>
       <div className="sh-right">
         <IndexStatus freshness={idx.freshness} loading={idx.loading} offline={idx.offline} />

@@ -19,4 +19,4 @@
 .cov-ref:first-child { border-top: 0; min-height: 26px; }
 .cov-mets { width: 100%; }
 .cov-ref .view-link { font-size: 0.75rem; }
-@media (max-width: 600px) { .cov-gap { grid-template-columns: 40px minmax(0, 1fr); } .cov-gap > .btn { grid-column: 2; justify-self: start; } }
+@media (max-width: 600px) { .cov-gap { grid-template-columns: 40px minmax(0, 1fr); } .cov-gap > [role="gridcell"]:last-child { grid-column: 2; justify-self: start; } }

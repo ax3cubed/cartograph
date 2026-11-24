@@ -50,3 +50,33 @@ export function saveKeymap(list: Shortcut[]) {
   for (const s of list) if (s.keys.join() !== DEFAULT_SHORTCUTS.find((d) => d.id === s.id)!.keys.join()) over[s.id] = s.keys;
   try { localStorage.setItem(KEYMAP_KEY, JSON.stringify(over)); } catch { /* storage unavailable */ }
 }
+
+// ---------- service detection (IDX-20, board S04) ----------
+/** The C6 rule that found a service, as `Service.detected_by` names it, in words. */
+const DETECTED_BY: Record<string, string> = {
+  manifest: "A services entry in cartograph.yaml",
+  scope: "A scope in the workspace file",
+  backstage: "Backstage catalog-info.yaml",
+  pnpm: "pnpm workspace package",
+  "npm-workspaces": "npm workspaces package",
+  "go.work": "go.work module",
+  nx: "Nx project",
+  cargo: "Cargo workspace member",
+  composer: "Composer package",
+  repo: "The whole repository",
+};
+export const foundVia = (rule: string | null | undefined, library = false) =>
+  `${(rule && DETECTED_BY[rule]) || rule || "Not recorded"}${library ? ", no deployable: a library" : ""}`;
+
+// ---------- extractors (IDX-21) ----------
+/** What each built-in extractor reads, by `ExtractorInfo.name`. */
+export const EXTRACTOR_LABEL: Record<string, { name: string; note: string }> = {
+  "ts-imports": { name: "TypeScript and JavaScript", note: "imports and exports" },
+  "go-imports": { name: "Go", note: "imports" },
+  "py-imports": { name: "Python", note: "imports" },
+  "php-imports": { name: "PHP", note: "use, require and include" },
+  "manifest-js": { name: "package.json and tsconfig", note: "packages and path aliases" },
+  "manifest-go": { name: "go.mod and go.work", note: "modules" },
+  "manifest-py": { name: "pyproject.toml and setup.cfg", note: "packages" },
+  "manifest-php": { name: "composer.json", note: "packages and autoload paths" },
+};

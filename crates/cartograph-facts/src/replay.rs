@@ -22,6 +22,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::fs::{FsState, ReplayFs, to_abs, to_rel};
+use crate::lang::{LangIndex, lang_key};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LinkKind {
@@ -111,13 +112,26 @@ pub struct Replay {
     waiting: FxHashMap<Arc<str>, FxHashSet<usize>>,
     /// Package name -> the package.json paths declaring it.
     pkgs: FxHashMap<String, BTreeSet<String>>,
+    /// Go, Python and PHP manifests (IDX-23).
+    langs: LangIndex,
     counts: FxHashMap<Link, u32>,
     open_at: FxHashMap<Link, u64>,
-    touched: HashMap<Link, bool>,
+    touched: FxHashMap<Link, bool>,
+    /// References whose unresolved state may have changed this step: (importer, specifier) -> was
+    /// unresolved before the step.
+    unres_touched: FxHashMap<(String, String), bool>,
     /// Intervals closed so far; the writer drains them.
     pub closed: Vec<Interval>,
+    /// Links opened so far, each with the step it opened at; the writer drains them.
+    pub opened: Vec<(Link, u64)>,
+    /// References that became unresolved (importer, specifier, line) and that stopped being
+    /// unresolved (importer, specifier), with the step; the writer drains them (IDX-22).
+    pub unresolved_opened: Vec<(String, String, u32, u64)>,
+    pub unresolved_closed: Vec<(String, String, u64)>,
     pub stats: Stats,
     reverse: bool,
+    /// Set while [`Replay::restore`] stages a tree: that is not a step, so it notes no events.
+    restoring: bool,
 }
 
 impl Default for Replay {
@@ -142,13 +156,27 @@ impl Replay {
             by_file: FxHashMap::default(),
             waiting: FxHashMap::default(),
             pkgs: FxHashMap::default(),
+            langs: LangIndex::default(),
             counts: FxHashMap::default(),
             open_at: FxHashMap::default(),
-            touched: HashMap::new(),
+            touched: FxHashMap::default(),
+            unres_touched: FxHashMap::default(),
             closed: Vec::new(),
+            opened: Vec::new(),
+            unresolved_opened: Vec::new(),
+            unresolved_closed: Vec::new(),
             stats: Stats::default(),
             reverse,
+            restoring: false,
         }
+    }
+
+    /// Forgets the events not yet drained: after a rehydrate, what is open is already written.
+    pub fn clear_events(&mut self) {
+        self.closed.clear();
+        self.opened.clear();
+        self.unresolved_opened.clear();
+        self.unresolved_closed.clear();
     }
 
     /// The links live after the last step.
@@ -206,6 +234,17 @@ impl Replay {
     /// Takes `changes` into the tree, the file system and the references, and returns the live
     /// references to resolve again, sorted by importer then specifier. Resolves nothing.
     fn stage(&mut self, changes: &[Change]) -> Vec<usize> {
+        let mut pending = self.stage_unordered(changes);
+        pending.sort_by(|a, b| {
+            let (x, y) = (self.refs[*a].as_ref(), self.refs[*b].as_ref());
+            x.map(|r| (&r.from, &r.spec))
+                .cmp(&y.map(|r| (&r.from, &r.spec)))
+        });
+        pending
+    }
+
+    /// [`Replay::stage`], with the references in no particular order.
+    fn stage_unordered(&mut self, changes: &[Change]) -> Vec<usize> {
         let mut dirty: Vec<String> = Vec::new();
         let mut pending: Vec<usize> = Vec::new();
         for (path, new) in changes {
@@ -225,18 +264,27 @@ impl Replay {
                 None => self.tree.remove(path),
             };
             let package = is_package_json(path);
-            let manifest = kind.starts_with("manifest-js");
+            let manifest = kind.starts_with("manifest-");
             {
                 let mut st = self.fs.lock().expect("not poisoned");
                 let served: Option<Arc<str>> = new
                     .as_ref()
                     .filter(|_| manifest)
-                    .map(|f| Arc::from(resolution_json(f.facts(), package)));
-                if old.is_some() != new.is_some() {
+                    .map(|f| Arc::from(served_json(kind, f.facts(), package)));
+                let changed = if old.is_some() != new.is_some() {
                     dirty.push(path.clone());
                     st.count_dirs(path, if new.is_some() { 1 } else { -1 }, &mut dirty);
+                    true
                 } else if manifest && st.files.get(path) != Some(&served) {
                     dirty.push(path.clone());
+                    true
+                } else {
+                    false
+                };
+                if changed && let Some(k) = lang_key(kind) {
+                    dirty.push(k.to_owned());
+                    self.langs
+                        .update(path, kind, new.as_deref().map(BlobFacts::facts));
                 }
                 if new.is_some() {
                     st.files.insert(path.clone(), served);
@@ -282,11 +330,6 @@ impl Replay {
         pending.sort_unstable();
         pending.dedup();
         pending.retain(|id| self.refs[*id].is_some());
-        pending.sort_by(|a, b| {
-            let (x, y) = (self.refs[*a].as_ref(), self.refs[*b].as_ref());
-            x.map(|r| (&r.from, &r.spec))
-                .cmp(&y.map(|r| (&r.from, &r.spec)))
-        });
         pending
     }
 
@@ -305,9 +348,53 @@ impl Replay {
                     to: seq,
                 });
             } else if !was && is {
-                self.open_at.insert(link, seq);
+                self.open_at.insert(link.clone(), seq);
+                self.opened.push((link, seq));
             }
         }
+        let mut touched: Vec<_> = std::mem::take(&mut self.unres_touched)
+            .into_iter()
+            .collect();
+        touched.sort();
+        for ((from, spec), was) in touched {
+            let is = self
+                .find_ref(&from, &spec)
+                .is_some_and(|r| r.outcome == Outcome::Unresolved);
+            if was && !is {
+                self.unresolved_closed.push((from, spec, seq));
+            } else if !was && is {
+                let line = self.tree.get(&from).map_or(0, |f| {
+                    f.facts()
+                        .iter()
+                        .find_map(|x| match x {
+                            Fact::Import { spec: s, span, .. } if *s == spec => {
+                                Some(span.start_line)
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or(0)
+                });
+                self.unresolved_opened.push((from, spec, line, seq));
+            }
+        }
+    }
+
+    fn find_ref(&self, from: &str, spec: &str) -> Option<&Ref> {
+        self.by_file
+            .get(from)?
+            .iter()
+            .filter_map(|i| self.refs[*i].as_ref())
+            .find(|r| r.spec == spec)
+    }
+
+    /// Notes that a reference's unresolved state may change this step.
+    fn touch_ref(&mut self, from: &str, spec: &str, was_unresolved: bool) {
+        if self.restoring {
+            return;
+        }
+        self.unres_touched
+            .entry((from.to_owned(), spec.to_owned()))
+            .or_insert(was_unresolved);
     }
 
     /// Each live reference's outcome and the reverse index, encoded. With the tree, that is
@@ -353,63 +440,130 @@ impl Replay {
 
     /// The replay at step `at` over `tree` (every live path and its facts), with the outcomes and
     /// reverse index of a [`Replay::snapshot`] taken at that step instead of resolving every
-    /// reference. Every link opens at `at`. `None` when the bytes don't decode or don't hold
+    /// reference. Every link opens at `at`, with no event left to drain: what is open there is
+    /// already written. `None` when the bytes don't decode or don't hold
     /// exactly the tree's references: the caller replays the tree instead.
     pub fn restore(tree: &[Change], at: u64, snapshot: &[u8]) -> Option<Self> {
         let snap: Snapshot = postcard::from_bytes(snapshot).ok()?;
+        let n = snap.refs.len();
         let s = |i: u32| snap.strings.get(i as usize).map(String::as_str);
-        let mut saved: FxHashMap<(&str, &str), usize> =
-            FxHashMap::with_capacity_and_hasher(snap.refs.len(), Default::default());
-        for (p, r) in snap.refs.iter().enumerate() {
-            saved.insert((s(r.from)?, s(r.spec)?), p);
-        }
-        let mut replay = Self::new(true);
-        let pending = replay.stage(tree);
-        if pending.len() != snap.refs.len() || saved.len() != snap.refs.len() {
+        // A restored reference's id is its position in the snapshot, so the reverse index and each
+        // reference's keys are built from the snapshot alone, on two threads, while this one
+        // stages the tree. Ids only name references: what a step resolves, and in what order,
+        // comes from (importer, specifier).
+        let keys: Vec<Arc<str>> = snap
+            .waiting
+            .iter()
+            .map(|(k, _)| s(*k).map(Arc::from))
+            .collect::<Option<_>>()?;
+        if snap
+            .waiting
+            .iter()
+            .flat_map(|(_, ps)| ps)
+            .any(|p| *p as usize >= n)
+        {
             return None;
         }
-        // Snapshot position -> reference id.
-        let mut id_of = vec![0; snap.refs.len()];
+        std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| {
+                let mut w: FxHashMap<Arc<str>, FxHashSet<usize>> =
+                    FxHashMap::with_capacity_and_hasher(keys.len(), Default::default());
+                for (key, (_, ps)) in keys.iter().zip(&snap.waiting) {
+                    w.insert(Arc::clone(key), ps.iter().map(|p| *p as usize).collect());
+                }
+                w
+            });
+            let per_ref = scope.spawn(|| {
+                let mut count = vec![0usize; n];
+                for p in snap.waiting.iter().flat_map(|(_, ps)| ps) {
+                    count[*p as usize] += 1;
+                }
+                let mut v: Vec<Vec<Arc<str>>> = count.into_iter().map(Vec::with_capacity).collect();
+                for (key, (_, ps)) in keys.iter().zip(&snap.waiting) {
+                    for p in ps {
+                        v[*p as usize].push(Arc::clone(key));
+                    }
+                }
+                v
+            });
+            let saved = scope.spawn(|| {
+                let mut saved: FxHashMap<(&str, &str), usize> =
+                    FxHashMap::with_capacity_and_hasher(n, Default::default());
+                for (p, r) in snap.refs.iter().enumerate() {
+                    saved.insert((s(r.from)?, s(r.spec)?), p);
+                }
+                (saved.len() == n).then_some(saved)
+            });
+            let mut replay = Self::new(true);
+            // Restoring is not a step: what is open at `at` is already written, so no events.
+            replay.restoring = true;
+            let pending = replay.stage_unordered(tree);
+            replay.restoring = false;
+            let restored = saved
+                .join()
+                .expect("no panic")
+                .and_then(|saved| replay.restore_refs(pending, &saved, &snap));
+            let waiting = waiting.join().expect("no panic");
+            let per_ref = per_ref.join().expect("no panic");
+            restored?;
+            replay.waiting = waiting;
+            for (r, keys) in replay.refs.iter_mut().zip(per_ref) {
+                r.as_mut()?.keys = keys;
+            }
+            replay.open_at = replay.counts.keys().map(|l| (l.clone(), at)).collect();
+            Some(replay)
+        })
+    }
+
+    /// Gives each staged reference the id and outcome it has in `snap`, whose references by
+    /// (importer, specifier) are `saved`. `None` when they aren't exactly the snapshot's.
+    fn restore_refs(
+        &mut self,
+        pending: Vec<usize>,
+        saved: &FxHashMap<(&str, &str), usize>,
+        snap: &Snapshot,
+    ) -> Option<()> {
+        let n = snap.refs.len();
+        let s = |i: u32| snap.strings.get(i as usize).map(String::as_str);
+        if pending.len() != n || self.refs.len() != n {
+            return None;
+        }
+        // Reference id -> snapshot position.
+        let mut position = vec![usize::MAX; n];
+        let mut refs: Vec<Option<Ref>> = (0..n).map(|_| None).collect();
         for id in pending {
-            let r = replay.refs[id].as_ref()?;
+            let mut r = self.refs[id].take()?;
             let p = *saved.get(&(r.from.as_str(), r.spec.as_str()))?;
-            id_of[p] = id;
+            if refs[p].is_some() {
+                return None;
+            }
             let link =
                 |kind, to: u32| Some(Outcome::Link((kind, r.from.clone(), s(to)?.to_owned())));
-            let outcome = match snap.refs[p].outcome {
+            r.outcome = match snap.refs[p].outcome {
                 SnapOutcome::Import(to) => link(LinkKind::Import, to)?,
                 SnapOutcome::Package(to) => link(LinkKind::Package, to)?,
                 SnapOutcome::External => Outcome::External,
                 SnapOutcome::Builtin => Outcome::Builtin,
                 SnapOutcome::Unresolved => Outcome::Unresolved,
             };
-            if let Outcome::Link(l) = &outcome {
-                replay.bump(l.clone(), 1);
+            if let Outcome::Link(l) = &r.outcome {
+                match self.counts.get_mut(l) {
+                    Some(c) => *c += 1,
+                    None => {
+                        self.counts.insert(l.clone(), 1);
+                    }
+                }
             }
-            replay.refs[id].as_mut()?.outcome = outcome;
+            position[id] = p;
+            refs[p] = Some(r);
         }
-        let mut per_ref = vec![0usize; snap.refs.len()];
-        for (_, ps) in &snap.waiting {
-            for p in ps {
-                *per_ref.get_mut(*p as usize)? += 1;
+        self.refs = refs;
+        for ids in self.by_file.values_mut() {
+            for id in ids {
+                *id = position[*id];
             }
         }
-        for (p, n) in per_ref.into_iter().enumerate() {
-            replay.refs[id_of[p]].as_mut()?.keys.reserve_exact(n);
-        }
-        replay.waiting.reserve(snap.waiting.len());
-        for (k, ps) in &snap.waiting {
-            let key: Arc<str> = Arc::from(s(*k)?);
-            let mut ids = FxHashSet::with_capacity_and_hasher(ps.len(), Default::default());
-            for p in ps {
-                let id = *id_of.get(*p as usize)?;
-                replay.refs[id].as_mut()?.keys.push(Arc::clone(&key));
-                ids.insert(id);
-            }
-            replay.waiting.insert(key, ids);
-        }
-        replay.settle_step(at);
-        Some(replay)
+        Some(())
     }
 
     /// Points `node_modules/<name>` at the package with the smallest manifest path.
@@ -442,6 +596,7 @@ impl Replay {
     }
 
     fn add_ref(&mut self, from: &str, spec: &str) -> usize {
+        self.touch_ref(from, spec, false);
         let r = Ref {
             from: from.to_owned(),
             spec: spec.to_owned(),
@@ -473,6 +628,7 @@ impl Replay {
             self.by_file.remove(from);
         }
         let r = self.refs[id].take().expect("live");
+        self.touch_ref(from, spec, r.outcome == Outcome::Unresolved);
         self.unwait(id, &r.keys);
         if let Outcome::Link(l) = r.outcome {
             self.bump(l, -1);
@@ -501,7 +657,15 @@ impl Replay {
         let mut seen: Vec<String> = Vec::new();
         for &id in ids {
             let r = self.refs[id].as_ref().expect("live");
-            let res = self.resolver.resolve_file(to_abs(&r.from), &r.spec);
+            let kind = extractor_for(&r.from).map_or("", |(_, k)| k);
+            let lang = (!kind.starts_with("ts-imports")).then(|| {
+                let mut st = self.fs.lock().expect("not poisoned");
+                self.langs.resolve(kind, &mut st, &r.from, &r.spec)
+            });
+            let res = match lang {
+                Some(_) => None,
+                None => Some(self.resolver.resolve_file(to_abs(&r.from), &r.spec)),
+            };
             let mut st = self.fs.lock().expect("not poisoned");
             seen.append(st.log.as_mut().expect("recording"));
             drop(st);
@@ -509,7 +673,11 @@ impl Replay {
             seen.dedup();
             let mut keys = seen.clone();
             let r = self.refs[id].as_ref().expect("live");
-            let outcome = outcome(&r.from, &r.spec, res, &self.pkgs, &mut keys);
+            let outcome = match (lang, res) {
+                (Some(o), _) => o,
+                (None, Some(res)) => outcome(&r.from, &r.spec, res, &self.pkgs, &mut keys),
+                (None, None) => Outcome::Unresolved,
+            };
             keys.sort_unstable();
             keys.dedup();
             self.settle(id, outcome, keys);
@@ -536,6 +704,7 @@ impl Replay {
             r.keys = keys.into_iter().map(Arc::from).collect();
         }
         if outcome != r.outcome {
+            self.touch_ref(&r.from, &r.spec, r.outcome == Outcome::Unresolved);
             if let Outcome::Link(l) = &r.outcome {
                 self.bump(l.clone(), -1);
             }
@@ -561,7 +730,7 @@ impl Replay {
 
 /// Bump when what a snapshot means changes: the resolve options, how keys are recorded, or the
 /// encoding. A snapshot of another version is not restored.
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
@@ -680,15 +849,19 @@ fn outcome(
 pub fn from_scratch(tree: &HashMap<String, Arc<BlobFacts>>) -> BTreeSet<Link> {
     let mut st = FsState::default();
     let mut pkgs: FxHashMap<String, BTreeSet<String>> = FxHashMap::default();
+    let mut langs = LangIndex::default();
     let mut scratch = Vec::new();
     for (path, f) in tree {
         let Some((_, kind)) = extractor_for(path) else {
             continue;
         };
         let package = is_package_json(path);
+        if lang_key(kind).is_some() {
+            langs.update(path, kind, Some(f.facts()));
+        }
         let served = kind
-            .starts_with("manifest-js")
-            .then(|| Arc::from(resolution_json(f.facts(), package)));
+            .starts_with("manifest-")
+            .then(|| Arc::from(served_json(kind, f.facts(), package)));
         st.files.insert(path.clone(), served);
         st.count_dirs(path, 1, &mut scratch);
         if package && let Some(n) = package_name(f.facts()) {
@@ -704,21 +877,43 @@ pub fn from_scratch(tree: &HashMap<String, Arc<BlobFacts>>) -> BTreeSet<Link> {
         );
         st.count_dirs(&link, 1, &mut scratch);
     }
-    let resolver = ResolverGeneric::new_with_file_system(
-        ReplayFs(Arc::new(Mutex::new(st))),
-        resolve_options(),
-    );
+    let fs = Arc::new(Mutex::new(st));
+    let resolver =
+        ResolverGeneric::new_with_file_system(ReplayFs(Arc::clone(&fs)), resolve_options());
     let mut out = BTreeSet::new();
     for (path, f) in tree {
-        if !extractor_for(path).is_some_and(|(_, k)| k.starts_with("ts-imports")) {
+        let Some(kind) = extractor_for(path)
+            .map(|(_, k)| k)
+            .filter(|k| !k.starts_with("manifest-"))
+        else {
             continue;
-        }
+        };
         for spec in specs(f.facts()) {
-            let res = resolver.resolve_file(to_abs(path), spec);
-            if let Outcome::Link(l) = outcome(path, spec, res, &pkgs, &mut scratch) {
+            let o = if kind.starts_with("ts-imports") {
+                let res = resolver.resolve_file(to_abs(path), spec);
+                outcome(path, spec, res, &pkgs, &mut scratch)
+            } else {
+                langs.resolve(kind, &mut fs.lock().expect("not poisoned"), path, spec)
+            };
+            if let Outcome::Link(l) = o {
                 out.insert(l);
             }
         }
     }
     out
+}
+
+/// What the replay's file system serves for a manifest: package.json and tsconfig as their
+/// resolution fields (phase 0), other manifests as the object of their facts.
+fn served_json(kind: &str, facts: &[Fact], package: bool) -> String {
+    if kind.starts_with("manifest-js") {
+        return resolution_json(facts, package);
+    }
+    let mut o = serde_json::Map::new();
+    for f in facts {
+        if let Fact::Manifest { field, value } = f {
+            o.insert(field.clone(), serde_json::Value::String(value.clone()));
+        }
+    }
+    serde_json::Value::Object(o).to_string()
 }

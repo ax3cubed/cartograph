@@ -365,6 +365,13 @@ fn only_the_listed_write_routes_accept_a_state_changing_method() {
         "DELETE /api/v1/jobs/x".into(),
         format!("POST /api/v1/w/{ws}/config/preview"),
         format!("PUT /api/v1/w/{ws}/config"),
+        // A read that carries a body (SRV-11): it changes nothing, and refuses unknown fields.
+        format!("POST /api/v1/w/{ws}/impact"),
+        // SRV-21: the preview changes nothing; the install writes the user's agent config.
+        "POST /api/v1/agents/preview".into(),
+        "POST /api/v1/agents/install".into(),
+        // FE-16: read state is on the server, so every tab agrees.
+        "POST /api/v1/activity/read".into(),
     ];
     want.sort();
     served.sort();

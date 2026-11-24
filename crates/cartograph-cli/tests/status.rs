@@ -227,3 +227,39 @@ fn line_exits_0_with_no_workspace_and_plain_status_exits_2() {
     let o = cartograph(d.path(), &["status", d.path().to_str().unwrap()]);
     assert_eq!(o.status.code(), Some(2));
 }
+
+/// IDX-22's done-when: the CLI prints "files parsed x / y" and "imports resolved z%", and lists
+/// every unresolved import with its file and line.
+#[test]
+fn status_prints_coverage_and_lists_unresolved_imports() {
+    let d = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(d.path()).unwrap();
+    let data = root.join("data");
+    let mut f = Fixture::init(&root.join("repo"));
+    f.write(
+        "a.ts",
+        "import './b';\nimport './missing';\nimport 'react';\n",
+    );
+    f.write("b.ts", "export {};\n");
+    f.write("big.ts", "// @generated\nexport {};\n");
+    f.commit("one");
+    init(&data, &f.dir);
+    let o = cartograph(&data, &["status", "--unresolved", f.dir.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(0));
+    let text = String::from_utf8(o.stdout).unwrap();
+    assert!(
+        text.contains("files parsed 2 / 3, imports resolved 66.7% (2 of 3)"),
+        "{text}"
+    );
+    assert!(text.contains("\n  a.ts:2  ./missing"), "{text}");
+    let o = cartograph(
+        &data,
+        &["status", "--unresolved", "--json", f.dir.to_str().unwrap()],
+    );
+    let j: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(
+        j["coverage"]["unresolved"][0]["untrusted_text"],
+        "./missing"
+    );
+    assert_eq!(j["coverage"]["unresolved"][0]["line"], 2);
+}

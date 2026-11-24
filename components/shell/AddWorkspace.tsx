@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, FolderX, X } from "lucide-react";
 import type { CreatedWorkspace, Discovery, Problem, ServerEvent } from "@/lib/api";
-import { getCurrentWorkspace } from "@/lib/source";
-import { SERVICES } from "@/lib/workspace";
-import { FOUND_VIA, NORTHWIND_FILE, NORTHWIND_FOLDERS } from "@/lib/demo/shell";
+import { DEMO_WORKSPACE_FILE, getCurrentWorkspace, getDemoDiscovery } from "@/lib/source";
+import { foundVia } from "@/lib/settings";
 import { openWorkspace, useLive } from "@/lib/api/live";
 import { queueToast, toast } from "./toast";
 import { takeOrigin } from "./origin";
@@ -20,7 +19,7 @@ import "./addWorkspace.css";
 
 /** Decision D1 / board S01, item FE-15: pick a folder or workspace file, review discovery, review services, build the first index. */
 interface Row { folder: string; result: "repo" | "scope" | "skipped"; repo?: string; detail: string }
-interface Svc { id: string; name: string; repo: string; via: string; color?: string; lang?: string }
+interface Svc { id: string; name: string; repo: string; via: string }
 interface Source { path: string; file: string | null; name: string; rows: Row[]; services: Svc[]; estimate?: number | null; demo: boolean }
 interface Job { id: string; ws: string; done: number; total: number; stage: string; repo?: string | null; eta?: number | null }
 const STEPS = ["Source", "Repositories", "Services", "First index"];
@@ -28,26 +27,18 @@ const DEMO_STAGES = ["Find each repository's default branch", "Replay first-pare
 const CANCELLED = "Cancelled. Nothing was added. Files already parsed stay in the cache, so the next try starts where this one stopped.";
 const base = (p: string) => p.replace(/\/$/, "").split("/").pop() || p;
 
-const fromDiscovery = (path: string, file: string | null, d: Discovery): Source => ({
-  path, file, name: file ? file.replace(/\.code-workspace$/, "") : base(path), estimate: d.estimate_s, demo: false,
+const fromDiscovery = (path: string, file: string | null, d: Discovery, demo = false): Source => ({
+  path, file, name: file ? file.replace(/\.code-workspace$/, "") : base(path).replace(/\.code-workspace$/, ""), estimate: d.estimate_s, demo,
   rows: d.folders.map((f) => ({
     folder: f.folder, result: f.result, repo: f.repo ?? undefined,
     detail: f.reason ?? (f.result === "scope" ? `A scope of ${f.repo}` : "Repository"),
   })),
-  // Service detection lands with IDX-20; until then /discover names none, and a repo with none is one service.
-  services: d.services.length
-    ? d.services.map((s) => ({ id: s.id, name: s.name, repo: s.repo, via: s.paths.length ? s.paths.join(", ") : "The whole repository" }))
-    : [...new Set(d.folders.filter((f) => f.repo).map((f) => f.repo!))].map((id) => ({ id, name: id, repo: id, via: "No Dockerfile or chart checked yet: one service per repository" })),
+  // IDX-20's rules at each repo's branch tip; a repo with no packages and no deployable is one service.
+  services: d.services.map((s) => ({ id: s.id, name: s.name, repo: s.repo, via: `${foundVia(s.detected_by, s.library)}${s.paths.length ? ` (${s.paths.join(", ")})` : ""}` })),
 });
 
-const northwind = (empty: boolean): Source => {
-  const rows: Row[] = empty ? [{ folder: "notes", result: "skipped", detail: "Skipped: not a git repository" }] : NORTHWIND_FOLDERS;
-  const ids = [...new Set(rows.filter((r) => r.repo).map((r) => r.repo!))];
-  return {
-    path: NORTHWIND_FILE, file: null, name: "northwind", rows, demo: true,
-    services: ids.map((id) => { const s = SERVICES.find((x) => x.id === id)!; return { id, name: s.name, repo: s.name, via: FOUND_VIA[id], color: s.color, lang: s.lang }; }),
-  };
-};
+/** The walkthrough without the binary: the same steps over a canned /discover answer. */
+const northwind = (empty: boolean): Source => fromDiscovery(DEMO_WORKSPACE_FILE, null, getDemoDiscovery(empty), true);
 
 export default function AddWorkspace() {
   const router = useRouter();
@@ -183,7 +174,7 @@ export default function AddWorkspace() {
             {!live && (
               <div className="aw-demo">
                 <span className="sh-k">Demo</span>
-                <p>Walk through the steps with <code>{NORTHWIND_FILE}</code>.</p>
+                <p>Walk through the steps with <code>{DEMO_WORKSPACE_FILE}</code>.</p>
                 <div><button type="button" className="btn" onClick={() => { setSrc(northwind(false)); setStep(1); }}>Use the northwind example</button><button type="button" className="btn" onClick={() => { setSrc(northwind(true)); setStep(1); }}>Try a folder with no repositories</button></div>
               </div>
             )}
@@ -242,7 +233,7 @@ export default function AddWorkspace() {
                 <tbody>
                   {src.services.map((s) => (
                     <tr key={s.id}>
-                      <td><span className="aw-dot" style={s.color ? ({ "--c": s.color } as React.CSSProperties) : undefined} aria-hidden /><b>{s.name}</b>{s.lang && <span className="aw-lang">{s.lang}</span>}</td>
+                      <td><span className="aw-dot" aria-hidden /><b>{s.name}</b></td>
                       <td><code>{s.repo}</code></td>
                       <td>{s.via}</td>
                     </tr>

@@ -119,11 +119,18 @@ fn remotion_six_checks_and_the_stage_1_gate() {
         assert_eq!(got, want, "intervals at step {s}");
         // The gate: links as of <sha>, queried from the file, equal the from-scratch index.
         let seq = seq_of(&ix.conn, sha).unwrap().unwrap();
-        assert_eq!(
-            links_at(&ix.conn, seq).unwrap(),
-            as_rows(&want),
-            "index as of {sha}"
-        );
+        let (have, want_rows) = (links_at(&ix.conn, seq).unwrap(), as_rows(&want));
+        if have != want_rows {
+            let (h, w): (BTreeSet<_>, BTreeSet<_>) =
+                (have.iter().collect(), want_rows.iter().collect());
+            panic!(
+                "index as of {sha} (step {s}, seq {seq}): {} rows not in from-scratch {:?}; {} missing {:?}",
+                h.difference(&w).count(),
+                h.difference(&w).take(5).collect::<Vec<_>>(),
+                w.difference(&h).count(),
+                w.difference(&h).take(5).collect::<Vec<_>>(),
+            );
+        }
     }
     let head_tree = repo.tree_at(to, tracked).unwrap();
     let replayed: BTreeSet<&String> = replay.tree().keys().collect();

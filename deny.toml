@@ -24,6 +24,7 @@ ignore = [
   { id = "RUSTSEC-2026-0580", reason = "heapless 0.8 via gix → faster-hex 0.10; no gix release fixes it yet" },
   { id = "RUSTSEC-2026-0581", reason = "heapless 0.8 via gix → faster-hex 0.10; no gix release fixes it yet" },
   { id = "RUSTSEC-2026-0582", reason = "heapless 0.8 via gix → faster-hex 0.10; no gix release fixes it yet" },
+  { id = "RUSTSEC-2026-0543", reason = "chrono, unmaintained, not a vulnerability: only via rmcp (official MCP SDK) server → schemars/chrono04; revisit when rmcp drops it" },
 ]
 
 [licenses]

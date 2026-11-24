@@ -126,12 +126,12 @@ export default function AskFloat(props: AskProps & { onMap?: boolean }) {
   return <Panel {...props} onMap={!!props.onMap} />;
 }
 
-/** The floating chat on every route but the map (which mounts its own, wired to the map) and the chat's page. */
+/** The floating chat on every route but the chat's page and the welcome screens. On the map it is the Ask place (FE-08 took the sidebar away). */
 export function AskFloatHost() {
   const raw = usePath();
   const path = raw.length > 1 ? raw.replace(/\/$/, "") : raw;
   const router = useRouter();
-  if (path === "/" || path === "/ask" || path.startsWith("/welcome")) return null;
+  if (path === "/ask" || path.startsWith("/welcome")) return null;
   const back = `&back=${encodeURIComponent(path)}`;
   const hrefFor = (id: string) => `/#focus=${encodeURIComponent(id)}${back}`;
   return (

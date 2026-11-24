@@ -1,4 +1,4 @@
-//! Facts and extractors (IDX-05, H1). A fact is what one file says, from its bytes alone, so it is
+//! Facts and extractors (IDX-05, H1; Go, Python and PHP, IDX-23). A fact is what one file says, from its bytes alone, so it is
 //! extracted once per blob id and cached by (blob, extractor, version).
 //!
 //! Parser input is hostile: blobs over 1 MB, binary blobs, LFS pointers and generated files are
@@ -8,10 +8,15 @@
 use cartograph_core as _;
 use serde::{Deserialize, Serialize};
 
+mod lang;
 pub mod manifest;
+mod manifest_lang;
+mod syntax;
 mod ts;
 
+pub use lang::{GoImports, PhpImports, PyImports};
 pub use manifest::ManifestJs;
+pub use manifest_lang::{ManifestGo, ManifestPhp, ManifestPy};
 pub use ts::TsImports;
 
 /// Blobs over this size are skipped without being read.
@@ -33,6 +38,11 @@ pub enum ImportStyle {
     Cjs,
     Dynamic,
     TypeOnly,
+    /// IDX-23. New styles go at the end: the encoding of cached facts stays the same.
+    Go,
+    Python,
+    PhpUse,
+    PhpInclude,
 }
 
 /// One fact. Strings in a fact come from the repository and are untrusted text (F8).
@@ -91,12 +101,23 @@ pub trait Extractor: Sync {
     /// The cache key's extractor part for this path (the extractor and its grammar or file kind),
     /// or `None` when this extractor doesn't handle the path.
     fn handles(&self, path: &str) -> Option<&'static str>;
+    /// Every kind [`Extractor::handles`] can return.
+    fn kinds(&self) -> &'static [&'static str];
     /// Facts for one blob. `kind` is what [`Extractor::handles`] returned.
     fn extract(&self, kind: &'static str, bytes: &[u8]) -> BlobFacts;
 }
 
 /// The built-in extractors.
-pub static EXTRACTORS: [&dyn Extractor; 2] = [&TsImports, &ManifestJs];
+pub static EXTRACTORS: [&dyn Extractor; 8] = [
+    &TsImports,
+    &ManifestJs,
+    &GoImports,
+    &PyImports,
+    &PhpImports,
+    &ManifestGo,
+    &ManifestPy,
+    &ManifestPhp,
+];
 
 /// The extractor for a path, with its kind. Paths under node_modules, dist, build, vendor or .next
 /// are not tracked (as in the research).

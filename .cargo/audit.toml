@@ -7,4 +7,7 @@ ignore = [
   "RUSTSEC-2026-0574", "RUSTSEC-2026-0575", "RUSTSEC-2026-0576",
   "RUSTSEC-2026-0577", "RUSTSEC-2026-0578", "RUSTSEC-2026-0579",
   "RUSTSEC-2026-0580", "RUSTSEC-2026-0581", "RUSTSEC-2026-0582",
+  # chrono, unmaintained (not a vulnerability): only through rmcp, whose server feature turns on
+  # schemars/chrono04. rmcp is the official MCP SDK; revisit when it drops chrono.
+  "RUSTSEC-2026-0543",
 ]

@@ -88,6 +88,18 @@ Other commands:
 | `pnpm check` | Run the assertions in `lib/workspace.check.ts` over the demo data and the Ask engine |
 | `pnpm exec tsc --noEmit` | Type-check |
 
+### Use it from Claude Code
+
+With the `cartograph` binary on your PATH, add the plugin. It gives a session the eight MCP tools
+over your local index and a one-line freshness note at start. Nothing leaves your machine.
+
+```
+/plugin install cartograph --marketplace ax3cubed/cartograph
+```
+
+On Claude Code before 2.1.275, run `/plugin marketplace add ax3cubed/cartograph` first, then
+`/plugin install cartograph@cartograph`.
+
 ## Project layout
 
 | Path | Contents |

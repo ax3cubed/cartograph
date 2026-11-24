@@ -78,6 +78,16 @@ pub fn workspace_checked(data: &Path, ws: &str) -> Result<(Workspace, Vec<String
             repos,
             exclude: parsed.manifest.options.exclude.clone(),
             config_hash: Some(manifest::config_hash(&parsed.manifest)),
+            services: parsed
+                .manifest
+                .services
+                .iter()
+                .map(|s| cartograph_index::structure::ServiceSpec {
+                    name: s.name.clone(),
+                    repo: s.repo.clone(),
+                    path: s.path.clone(),
+                })
+                .collect(),
         },
         not_added,
     ))
@@ -239,20 +249,6 @@ pub fn repos(data: &Path, ws: &str, snap: &Snapshot<'_>) -> Result<Vec<Repo>, Qu
     Ok(repos)
 }
 
-/// Each rewritten repo of a workspace with the tip it was rewritten to, as (repo, sha): what the
-/// background sync tries once (by the same check as [`freshness`]).
-pub fn rewritten_tips(data: &Path, ws: &str) -> Vec<(String, String)> {
-    let Ok(w) = workspace(data, ws) else {
-        return Vec::new();
-    };
-    cartograph_index::freshness::freshness(&w)
-        .repos
-        .into_iter()
-        .filter(|r| r.rewritten)
-        .filter_map(|r| Some((r.name, r.head?.to_string())))
-        .collect()
-}
-
 /// `auto_sync` from the machine settings (config.toml). Background unless set to never; a file
 /// that doesn't parse starts nothing, since it may be a mistyped "never".
 pub fn auto_sync(data: &Path) -> bool {
@@ -274,8 +270,35 @@ pub fn run(
     data: &Path,
     ws: &str,
     kind: JobKind,
+    progress: impl FnMut(&str, u64, u64),
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<u64, Problem> {
+    run_with(data, ws, kind, progress, cancel, SyncOptions::default())
+}
+
+/// [`run`] that waits for a writer holding the lock, then runs its own round: MCP `sync` promises
+/// a result, and a lock held for a moment (a freshness probe takes it shared) must not end the
+/// job with nothing synced (SRV-16).
+pub fn run_waiting(
+    data: &Path,
+    ws: &str,
+    progress: impl FnMut(&str, u64, u64),
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<u64, Problem> {
+    let opts = SyncOptions {
+        wait: true,
+        ..SyncOptions::default()
+    };
+    run_with(data, ws, JobKind::Sync, progress, cancel, opts)
+}
+
+fn run_with(
+    data: &Path,
+    ws: &str,
+    kind: JobKind,
     mut progress: impl FnMut(&str, u64, u64),
     cancel: &std::sync::atomic::AtomicBool,
+    opts: SyncOptions,
 ) -> Result<u64, Problem> {
     let mut w = workspace(data, ws)?;
     let index = w.index_path();
@@ -292,13 +315,11 @@ pub fn run(
         action: "delete the cache folder in the data folder; it is only a cache".into(),
     })?;
     // Every step reports, between the start and the end; the live channel throttles.
-    let outcome = cartograph_index::sync::sync_with_progress(
-        &w,
-        &SyncOptions::default(),
-        &mut cache,
-        &mut |done, total| progress("sync", done, total.max(1)),
-    )
-    .map_err(|e| problem(&e))?;
+    let outcome =
+        cartograph_index::sync::sync_with_progress(&w, &opts, &mut cache, &mut |done, total| {
+            progress("sync", done, total.max(1))
+        })
+        .map_err(|e| problem(&e))?;
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
         if rebuild {
             let _ = std::fs::remove_dir_all(&w.dir);

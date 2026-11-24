@@ -1,28 +1,15 @@
 //! ts-imports: import facts from TypeScript and JavaScript, on tree-sitter.
 
-use std::cell::RefCell;
-use std::ops::ControlFlow;
-use std::time::{Duration, Instant};
+use tree_sitter::{Language, Node};
 
-use tree_sitter::{Language, Node, Parser};
-
-use crate::{BlobFacts, Extractor, Fact, ImportStyle, SkipReason, Span};
+use crate::syntax::{parse, span, walk};
+use crate::{BlobFacts, Extractor, Fact, ImportStyle, SkipReason};
 
 pub struct TsImports;
-
-/// Per-blob parse time limit (proposed).
-const TIME_LIMIT: Duration = Duration::from_secs(2);
-/// The syntax walk doesn't descend deeper than this (proposed).
-const MAX_DEPTH: usize = 2_000;
 
 const TS: &str = "ts-imports/ts";
 const TSX: &str = "ts-imports/tsx";
 const JS: &str = "ts-imports/js";
-
-thread_local! {
-    /// One parser per grammar per thread, reused.
-    static PARSERS: RefCell<Vec<(&'static str, Parser)>> = const { RefCell::new(Vec::new()) };
-}
 
 fn language(kind: &str) -> Language {
     match kind {
@@ -39,6 +26,9 @@ impl Extractor for TsImports {
     fn version(&self) -> &'static str {
         "1.0.0"
     }
+    fn kinds(&self) -> &'static [&'static str] {
+        &[TS, TSX, JS]
+    }
     fn handles(&self, path: &str) -> Option<&'static str> {
         let ext = path.rsplit_once('.')?.1;
         match ext {
@@ -52,63 +42,13 @@ impl Extractor for TsImports {
         if let Some(r) = crate::skip_reason(bytes) {
             return BlobFacts::Skipped(r);
         }
-        let tree = PARSERS.with_borrow_mut(|ps| {
-            let i = match ps.iter().position(|(k, _)| *k == kind) {
-                Some(i) => i,
-                None => {
-                    let mut p = Parser::new();
-                    p.set_language(&language(kind)).expect("grammar matches");
-                    ps.push((kind, p));
-                    ps.len() - 1
-                }
-            };
-            let start = Instant::now();
-            let mut over = |_: &tree_sitter::ParseState| {
-                if start.elapsed() > TIME_LIMIT {
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
-                }
-            };
-            let opts = tree_sitter::ParseOptions::new().progress_callback(&mut over);
-            let mut read = |i: usize, _| bytes.get(i..).unwrap_or_default();
-            let tree = ps[i].1.parse_with_options(&mut read, None, Some(opts));
-            ps[i].1.reset();
-            tree
-        });
-        let Some(tree) = tree else {
+        let Some(tree) = parse(kind, language, bytes) else {
             return BlobFacts::Skipped(SkipReason::Timeout);
         };
         let mut facts = Vec::new();
-        let mut cursor = tree.walk();
-        let mut depth = 0usize;
-        loop {
-            visit(cursor.node(), bytes, &mut facts);
-            if depth < MAX_DEPTH && cursor.goto_first_child() {
-                depth += 1;
-                continue;
-            }
-            loop {
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    facts.sort();
-                    return BlobFacts::Facts(facts);
-                }
-                depth -= 1;
-            }
-        }
-    }
-}
-
-fn span(n: Node) -> Span {
-    let (s, e) = (n.start_position(), n.end_position());
-    Span {
-        start_line: s.row as u32 + 1,
-        start_col: s.column as u32,
-        end_line: e.row as u32 + 1,
-        end_col: e.column as u32,
+        walk(&tree, |n| visit(n, bytes, &mut facts));
+        facts.sort();
+        BlobFacts::Facts(facts)
     }
 }
 

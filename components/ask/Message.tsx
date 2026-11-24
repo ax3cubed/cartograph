@@ -7,6 +7,7 @@ import { AiMark } from "@/components/brand/AiMark";
 import type { Answer, Handle, Part } from "@/lib/ask";
 import { byId, commitBySha, dayMs, serviceColor } from "@/lib/workspace";
 import { fmtDay, isoDay, partsText } from "./format";
+import { fmtNum } from "@/lib/date";
 
 /** Where a node or an answer opens. On the map these are callbacks; elsewhere they are links to the map. */
 export interface Nav {
@@ -67,7 +68,7 @@ function Steps({ a, working, model }: { a: Answer; working: boolean; model?: str
   const [open, setOpen] = useState(false);
   const id = useId();
   const items = [...a.steps];
-  if (a.context) items.push(`Gathered ${a.context.handles.length} pieces of evidence, ${a.context.tokens.toLocaleString("en-GB")} tokens.`);
+  if (a.context) items.push(`Gathered ${a.context.handles.length} pieces of evidence, ${fmtNum(a.context.tokens)} tokens.`);
   if (working) items.push(`Wording the answer with ${model ?? "the model"}`);
   else if (a.checked && a.by) items.push(`Checked ${a.checked.stats.cited} citations and kept ${a.checked.stats.kept}.`);
   if (!items.length) return null;

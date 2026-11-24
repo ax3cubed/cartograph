@@ -360,6 +360,116 @@ fn graph_equals_brute_force_at_every_commit() {
     }
 }
 
+/// FE-08 and IDX-25's gate: the same index read twice places every node alike, the positions are
+/// the `layout` rows live at the step, and a rolled-up link counts the file links it stands for.
+#[test]
+fn graph_levels_read_the_stored_layout_and_count_member_links() {
+    use cartograph_api::types::{GraphSlice, Lod};
+    use std::collections::BTreeMap;
+    let b = built();
+    let q = |sha: &str, lod: Lod| GraphQuery { lod, ..at(sha) };
+    let read = |sha: &str, lod: Lod| -> std::sync::Arc<GraphSlice> {
+        // A store of its own each time: nothing is shared but the file.
+        let store = Store::open_path(&b.index).unwrap();
+        let snap = store.snapshot(Limits::default()).unwrap();
+        snap.graph(&q(sha, lod)).unwrap()
+    };
+    let conn = Connection::open(&b.index).unwrap();
+    let layout_at = |node: &str, seq: u64| -> Option<(f32, f32, f32)> {
+        let id: i64 = node.trim_start_matches('n').parse().unwrap();
+        conn.query_row(
+            "SELECT x, y, r FROM layout WHERE node = ?1 AND from_seq <= ?2
+               AND (to_seq IS NULL OR to_seq > ?2)",
+            params![id, seq as i64],
+            |r| {
+                Ok((
+                    r.get::<_, f64>(0)? as f32,
+                    r.get::<_, f64>(1)? as f32,
+                    r.get::<_, f64>(2)? as f32,
+                ))
+            },
+        )
+        .ok()
+    };
+    // Each file node's (module or service, service), from the node table.
+    let holders: BTreeMap<String, (String, String)> = conn
+        .prepare(
+            "SELECT id, coalesce(parent, service), service FROM node
+             WHERE kind = 'file' AND service IS NOT NULL",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                format!("n{}", r.get::<_, i64>(0)?),
+                (
+                    format!("n{}", r.get::<_, i64>(1)?),
+                    format!("n{}", r.get::<_, i64>(2)?),
+                ),
+            ))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let mut placed = 0;
+    let mut rolled = 0;
+    for sha in &b.shas {
+        for lod in [Lod::File, Lod::Module, Lod::Service] {
+            let (one, two) = (read(sha, lod), read(sha, lod));
+            assert_eq!(one.lod, lod);
+            assert_eq!(one.nodes.id, two.nodes.id);
+            assert_eq!(one.nodes.x, two.nodes.x, "same x twice at {sha} {lod:?}");
+            assert_eq!(one.nodes.y, two.nodes.y, "same y twice at {sha} {lod:?}");
+            assert_eq!(one.nodes.size, two.nodes.size);
+            let seq = one.at.as_ref().unwrap().seq;
+            for i in 0..one.nodes.id.len() {
+                let got = (one.nodes.x[i], one.nodes.y[i], one.nodes.size[i]);
+                match layout_at(&one.nodes.id[i].0, seq) {
+                    Some(want) => {
+                        assert_eq!(got, want, "{} at {seq}", one.nodes.name[i]);
+                        placed += 1;
+                    }
+                    None => assert_eq!(got, (0.0, 0.0, 1.0)),
+                }
+            }
+        }
+        // Rolled-up counts: every file link between two holders, once, under its pair.
+        let files = read(sha, Lod::File);
+        for (lod, pick) in [
+            (
+                Lod::Service,
+                (|h: &(String, String)| h.1.clone()) as fn(&_) -> String,
+            ),
+            (Lod::Module, |h: &(String, String)| h.0.clone()),
+        ] {
+            let mut want: BTreeMap<(String, String), u32> = BTreeMap::new();
+            for j in 0..files.links.id.len() {
+                let end = |n: u32| holders.get(&files.nodes.id[n as usize].0).map(pick);
+                if let (Some(a), Some(b)) = (end(files.links.from[j]), end(files.links.to[j]))
+                    && a != b
+                {
+                    *want.entry((a, b)).or_default() += files.links.weight[j];
+                }
+            }
+            let s = read(sha, lod);
+            let have: BTreeMap<(String, String), u32> = (0..s.links.id.len())
+                .map(|j| {
+                    let id = |n: u32| s.nodes.id[n as usize].0.clone();
+                    ((id(s.links.from[j]), id(s.links.to[j])), s.links.weight[j])
+                })
+                .collect();
+            assert_eq!(have.len(), s.links.id.len(), "one link per pair");
+            assert_eq!(have, want, "{lod:?} link counts at {sha}");
+            rolled += have.len();
+            // A parent index points at a node of the slice.
+            for p in &s.nodes.parent {
+                assert!(*p >= -1 && (*p as i64) < s.nodes.id.len() as i64);
+            }
+        }
+    }
+    assert!(placed > 0, "the fixture has stored positions");
+    assert!(rolled > 0, "the fixture has rolled-up links");
+}
+
 #[test]
 fn at_resolves_dates_short_shas_and_now() {
     let b = built();
@@ -391,7 +501,7 @@ fn at_resolves_dates_short_shas_and_now() {
         ErrorCode::NotFound
     );
     let date = rfc3339(1_600_000_000 + 60 * 5);
-    assert_eq!(snap.graph(&at(&date)).unwrap().at.unwrap().seq, 4);
+    assert_eq!(snap.graph(&at(&date)).unwrap().at.as_ref().unwrap().seq, 4);
 }
 
 #[test]
@@ -456,7 +566,7 @@ fn graph_filters_and_refusals() {
     use cartograph_api::types::Lod;
     assert_eq!(
         refused(GraphParams {
-            lod: Some(Lod::Service),
+            lod: Some(Lod::Workspace),
             ..Default::default()
         }),
         ErrorCode::BadRequest
@@ -653,4 +763,215 @@ fn a_two_repo_workspace_filters_counts_and_names_by_repo() {
         snap.graph(&web_then).is_ok(),
         "a removed repo is still a known name"
     );
+}
+
+/// IDX-20 to IDX-22's reads: coverage from the last run's totals, the open unresolved imports as of
+/// a commit, runs newest first, extractors with their live files, and services with their rule.
+#[test]
+fn coverage_runs_extractors_and_services_read_what_the_index_stored() {
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("index.cartograph");
+    let w = empty_index(&path, 1);
+    w.execute_batch(
+        "INSERT INTO commits (seq, repo, sha, time, corrected_time, author, summary)
+           VALUES (1, 1, x'aa01', 100, 100, 'a', 'one'), (2, 1, x'aa02', 200, 200, 'a', 'two');
+         INSERT INTO file (id, repo) VALUES (1, 1), (2, 1);
+         INSERT INTO file_path (file, path, from_seq, to_seq) VALUES
+           (1, 'r/src/a.ts', 1, NULL), (2, 'r/src/b.ts', 1, NULL);
+         INSERT INTO file_version (file, blob, from_seq, to_seq) VALUES
+           (1, x'b1', 1, NULL), (2, x'b2', 1, 2), (2, x'b3', 2, NULL);
+         INSERT INTO extractor (id, name, version) VALUES
+           (1, 'ts-imports', '0.9.0'), (2, 'ts-imports/ts', '1.0.0'), (3, 'go-imports/go', '1.0.0');
+         INSERT INTO fact (blob, extractor, payload) VALUES
+           (x'b1', 2, x''), (x'b2', 2, x''), (x'b3', 1, x'');
+         INSERT INTO node (id, kind, file, key, name, detected_by) VALUES
+           (10, 'service', NULL, 'service:r:', 'r', 'repo'),
+           (11, 'library', NULL, 'service:r:packages/ui', '@r/ui', 'pnpm'),
+           (12, 'service', NULL, 'service:r:old', 'old', 'repo'),
+           (20, 'file', 1, NULL, NULL, NULL);
+         INSERT INTO node_span (node, from_seq, to_seq) VALUES (10, 1, NULL), (11, 1, NULL), (12, 1, 2);
+         INSERT INTO unresolved (file, spec, line, stage, reason, from_seq, to_seq) VALUES
+           (1, '@shared/money', 3, 'resolve', 'not-found', 1, NULL),
+           (1, './gone', 9, 'resolve', 'not-found', 1, 2);
+         INSERT INTO run (id, started_at, finished_at, writer_version, files_total, files_parsed,
+                          imports_total, imports_resolved) VALUES
+           (1, 1000, 1041, '0.1.0', 2, 2, 5, 3),
+           (2, 2000, NULL, '0.2.0', NULL, NULL, NULL, NULL);
+         PRAGMA wal_checkpoint(TRUNCATE);",
+    )
+    .unwrap();
+    drop(w);
+    let store = Store::open_path(&path).unwrap();
+    let s = store.snapshot(Limits::default()).unwrap();
+
+    let rows = s.coverage().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        (rows[0].id.as_str(), rows[0].done, rows[0].total),
+        ("files", 2, 2)
+    );
+    assert!(rows[0].gap.is_none());
+    assert_eq!(
+        (rows[1].id.as_str(), rows[1].done, rows[1].total),
+        ("imports", 3, 5)
+    );
+    assert_eq!(rows[1].gap.as_ref().unwrap().what, "2 unresolved imports");
+
+    let now = s
+        .unresolved(IMPORTS_ROW, &At::parse("now").unwrap(), Page::default())
+        .unwrap();
+    assert_eq!(now.rows.len(), 1);
+    let u = &now.rows[0];
+    assert_eq!(
+        (u.file.0.as_str(), u.path.as_str(), u.line, u.text.as_str()),
+        (node_id(20).as_str(), "r/src/a.ts", 3, "@shared/money")
+    );
+    let then = s
+        .unresolved(IMPORTS_ROW, &At::parse("aa01").unwrap(), Page::default())
+        .unwrap();
+    assert_eq!(
+        then.rows.len(),
+        2,
+        "a closed interval is listed as of a commit inside it"
+    );
+    assert!(matches!(
+        s.unresolved("calls", &At::parse("now").unwrap(), Page::default()),
+        Err(QueryError::NotFound { .. })
+    ));
+
+    let runs = s.runs(Page::default()).unwrap().rows;
+    assert_eq!(runs.iter().map(|r| r.id).collect::<Vec<_>>(), [2, 1]);
+    assert_eq!(runs[1].files_parsed, Some(2));
+    assert!(runs[0].finished_at.is_none() && runs[0].files_total.is_none());
+
+    let ex = s.extractors().unwrap();
+    let ex: Vec<_> = ex
+        .iter()
+        .map(|e| (e.name.as_str(), e.version.as_str(), e.files))
+        .collect();
+    assert_eq!(ex, [("go-imports", "1.0.0", 0), ("ts-imports", "1.0.0", 2)]);
+
+    let svc = s.services().unwrap();
+    let svc: Vec<_> = svc
+        .iter()
+        .map(|x| {
+            (
+                x.name.as_str(),
+                x.repo.0.as_str(),
+                x.paths.clone(),
+                x.library,
+                x.detected_by.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        svc,
+        [
+            ("r", "r", vec![], false, Some("repo")),
+            (
+                "@r/ui",
+                "r",
+                vec!["packages/ui".to_owned()],
+                true,
+                Some("pnpm")
+            ),
+        ]
+    );
+}
+
+/// SRV-04: the module and service slices roll up from the generation's in-memory graph. At every
+/// step, with and without repo=, they equal the roll-up read from the tables: the same nodes in
+/// the same order, the same links, ids, weights and added_seq.
+#[test]
+fn in_memory_roll_ups_equal_the_sql_ones_at_every_step_and_repo() {
+    use cartograph_api::types::Lod;
+    let d = tempfile::tempdir().unwrap();
+    let mut api = Fixture::init(&d.path().join("api"));
+    api.write(
+        "package.json",
+        r#"{"name":"api","private":true,"workspaces":["lib"]}"#,
+    );
+    api.write("src/a.ts", "export const a = 1;\n");
+    api.write("src/m/b.ts", "import { a } from '../a';\n");
+    api.write(
+        "lib/package.json",
+        r#"{"name":"lib","main":"src/index.ts"}"#,
+    );
+    api.write("lib/src/index.ts", "import { a } from '../../src/a';\n");
+    api.commit("api one");
+    let mut web = Fixture::init(&d.path().join("web"));
+    web.write("package.json", r#"{"name":"web","private":true}"#);
+    web.write("src/w.ts", "export const w = 1;\n");
+    web.write("src/v/x.ts", "import { w } from '../w';\n");
+    web.commit("web one");
+    api.write(
+        "src/m/c.ts",
+        "import { a } from '../a';\nimport l from 'lib';\n",
+    );
+    api.write(
+        "src/n/d.ts",
+        "import { c } from '../m/c';\nimport { b } from '../m/b';\n",
+    );
+    api.commit("api two");
+    api.remove("src/m/b.ts");
+    api.write("lib/src/e.ts", "import { c } from '../../src/m/c';\n");
+    api.commit("api three");
+    web.write(
+        "src/v/y.ts",
+        "import { x } from './x';\nimport { w } from '../w';\n",
+    );
+    web.commit("web two");
+    let dir = d.path().join("data/workspaces/0000000b");
+    let spec = |f: &Fixture| cartograph_index::timeline::RepoSpec {
+        name: f.dir.file_name().unwrap().to_string_lossy().into_owned(),
+        path: f.dir.clone(),
+        ..Default::default()
+    };
+    let w = cartograph_index::sync::Workspace {
+        dir: dir.clone(),
+        repos: vec![spec(&api), spec(&web)],
+        ..Default::default()
+    };
+    let mut cache = FactCache::open(&d.path().join("facts.db")).unwrap();
+    cartograph_index::sync::sync(&w, &Default::default(), &mut cache).unwrap();
+    let store = Store::open_path(&dir.join("index.cartograph")).unwrap();
+    let snap = store.snapshot(Limits::default()).unwrap();
+    // Every step by its sha: all but the last are past ones.
+    let shas: Vec<String> = snap
+        .conn()
+        .prepare("SELECT lower(hex(sha)) FROM commits ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(shas.len() >= 5, "{} steps", shas.len());
+    let (mut modules, mut links) = (0, 0);
+    for (seq, sha) in shas.iter().enumerate() {
+        for repo in [None, Some("api"), Some("web")] {
+            for lod in [Lod::Module, Lod::Service] {
+                let q = GraphQuery {
+                    lod,
+                    repo: repo.map(Into::into),
+                    ..at(sha)
+                };
+                let mem = snap.graph(&q).unwrap();
+                let sql = snap.rolled_up_sql(&q).unwrap();
+                assert_eq!(
+                    serde_json::to_value(&*mem).unwrap(),
+                    serde_json::to_value(&sql).unwrap(),
+                    "{lod:?} at {seq}, repo {repo:?}"
+                );
+                modules += mem
+                    .nodes
+                    .kind
+                    .iter()
+                    .filter(|k| **k == cartograph_api::types::NodeKind::Module)
+                    .count();
+                links += mem.links.id.len();
+            }
+        }
+    }
+    assert!(modules > 0, "the fixture has modules");
+    assert!(links > 0, "the fixture has rolled-up links");
 }

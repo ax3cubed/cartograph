@@ -1,8 +1,12 @@
 //! Orchestration: sync, rebuild, overlays, layout and freshness (D1).
 
 pub mod build;
+pub mod derive;
 pub mod extract;
 pub mod freshness;
+pub mod layout;
+mod rows;
+pub mod structure;
 pub mod sync;
 pub mod timeline;
 
@@ -23,8 +27,12 @@ pub fn rebuild_single(
     cache: &mut FactCache,
     workers: usize,
 ) -> Result<Summary, BuildError> {
+    // Positions carry over by node key, so a rebuilt index opens with the same layout (IDX-25).
+    let carried = cartograph_store::Index::open_read(index)
+        .ok()
+        .and_then(|ix| layout::positions_by_key(&ix.conn).ok());
     cartograph_store::migrate::rebuild(lock, index, |tmp| {
-        build_single(repo, to, tmp, cache, workers)
+        build::build_single_with(repo, to, tmp, cache, workers, carried)
     })
 }
 

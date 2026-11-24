@@ -37,6 +37,19 @@ pnpm build
 
 If you change behaviour in `lib/`, add or update an assertion in `lib/workspace.check.ts`.
 
+### End-to-end and visual tests
+
+`pnpm test:e2e` builds the app, the `cartograph` binary that embeds it and the golden fixture, then runs Playwright against the real binary in Chromium, Firefox and WebKit: each route's smoke test and axe scan, and the journeys in `e2e/journeys.spec.ts`. Any browser request off 127.0.0.1 is aborted and fails the test. Run `pnpm exec playwright install chromium firefox webkit` once first. Add `--no-build` to reuse `out/` and `target/debug`, and pass Playwright arguments after it (`pnpm test:e2e --no-build -g "keyboard"`).
+
+Screenshots depend on the host's fonts and rasteriser, so they are only taken in one pinned image, `mcr.microsoft.com/playwright` for linux/amd64 (the digest is in `scripts/e2e.mjs`). On any other browser the visual tests are skipped, not failed. With Docker running:
+
+```sh
+pnpm test:e2e --visual            # compare with the baselines in e2e/__screenshots__
+pnpm test:e2e --visual --update   # rewrite them after an intended change; review and commit the PNGs
+```
+
+CI runs the same image. A failed comparison uploads the expected, actual and diff images as the `e2e-results` artifact. When you bump `@playwright/test`, change the image tag and digest in `scripts/e2e.mjs` to the same version and update the baselines.
+
 ## Branches
 
 Branch from `main`. Never push to `main`: every change lands through a pull request.

@@ -55,7 +55,7 @@ export default function FirstRun() {
                 : list instanceof RequestError ? <p role="status">{list.what}. Start it from a terminal, then open the address it prints.</p>
                 : list.length ? (
                   <ul className="fr-list">
-                    {list.map((w) => <li key={w.id}><Link href={`/#ws=${w.id}`} onClick={() => openWorkspace(w.id)}><b>{w.name}</b><span>{w.repos} {w.repos === 1 ? "repo" : "repos"} · {w.path}</span></Link></li>)}
+                    {list.map((w) => <li key={w.id}><Link href={`/#ws=${w.id}`} onClick={() => openWorkspace(w.id)}><b>{w.name}</b><span title={w.path}>{w.repos} {w.repos === 1 ? "repo" : "repos"} · {w.path}</span></Link></li>)}
                   </ul>
                 ) : <p>No workspaces yet. Ones you add here or with <code>cartograph init</code> are listed here.</p>}
               {!(Array.isArray(list) && list.length) && (
