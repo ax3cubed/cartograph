@@ -1,5 +1,6 @@
 -- Index schema, format version 4 (IDX-03; v2 adds the repo's indexed commit, IDX-13; v3 adds lineage
--- across renames, rewrites, structure nodes, derived rows, coverage, layout and search, phase 3; v4 adds cross-service tables, phase 4).
+-- across renames, rewrites, structure nodes, derived rows, coverage, layout and search, phase 3; v4
+-- adds the cross-service tables, phase 4: one block per item, each marked XS-nn).
 -- Every table is STRICT. Everything that changes over time
 -- is an interval [from_seq, to_seq) on the first-parent timeline; to_seq NULL means still open.
 -- No triggers and no views: an index file is untrusted input (board G01).
@@ -199,7 +200,9 @@ CREATE TABLE scope_count (
 ) STRICT;
 
 -- An import that didn't resolve (IDX-22), while it was there. spec is untrusted text (F8), cut to
--- 512 bytes.
+-- 512 bytes, with anything that looks like a secret masked (XS-10). XS-01 extends it to every
+-- reference an adapter couldn't resolve: fact_kind is the kind of the fact (NULL for an import), raw
+-- the reference as the source spells it, masked and cut the same way.
 CREATE TABLE unresolved (
   file INTEGER NOT NULL REFERENCES file (id),
   spec TEXT NOT NULL,
@@ -207,7 +210,9 @@ CREATE TABLE unresolved (
   stage TEXT NOT NULL,
   reason TEXT NOT NULL,
   from_seq INTEGER NOT NULL,
-  to_seq INTEGER
+  to_seq INTEGER,
+  fact_kind TEXT,
+  raw TEXT
 ) STRICT;
 CREATE INDEX unresolved_at ON unresolved (from_seq, to_seq);
 CREATE INDEX unresolved_file ON unresolved (file, spec);
@@ -261,3 +266,22 @@ CREATE TABLE ownership (
 CREATE INDEX ownership_file ON ownership (file, from_seq);
 CREATE INDEX ownership_owner ON ownership (owner);
 -- ---- XS-23 owners: end ----
+
+-- >>> XS-01 (format 4): what a link stands on. One row per piece of source text, for a link (NULL
+-- while it is only a fact). text is the source cut to 200 characters with secrets masked (XS-10);
+-- kind is literal, template or inferred; extractor is `name@version`.
+CREATE TABLE evidence (
+  id INTEGER PRIMARY KEY,
+  link INTEGER REFERENCES link (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  start_line INTEGER NOT NULL,
+  start_col INTEGER NOT NULL,
+  end_line INTEGER NOT NULL,
+  end_col INTEGER NOT NULL,
+  extractor TEXT NOT NULL
+) STRICT;
+CREATE INDEX evidence_link ON evidence (link);
+CREATE INDEX evidence_file ON evidence (file);
+-- <<< XS-01

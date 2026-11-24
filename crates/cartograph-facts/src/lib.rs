@@ -4,6 +4,7 @@ pub mod cache;
 pub mod fs;
 pub mod lang;
 pub mod replay;
+pub mod schema;
 
 pub use cache::FactCache;
 use cartograph_core as _;

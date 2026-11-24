@@ -40,22 +40,31 @@ pub const MIGRATIONS: &[Step] = &[
     // it read as a delete and an add); the derived rows (structure, counts, layout, search) are
     // empty, so the next sync builds them.
     (2, V3),
-    // v4 adds what phase 4 writes: tables only, empty until the next sync derives them.
+    // v4 adds phase 4's cross-service tables; each item's SQL is its own block in `V4`.
     (3, V4),
 ];
 
-/// Takes a current file back to format 3 (test support). Each phase-4 item adds its own block.
+/// Takes a current file back to format 3 (test support): each item's undo is its own block, in the
+/// reverse order of `V4`.
 #[doc(hidden)]
-#[allow(clippy::useless_concat)] // one block per phase-4 item; concat! joins them
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-01 facts: begin ----
+    "DROP TABLE evidence;
+     ALTER TABLE unresolved DROP COLUMN fact_kind; ALTER TABLE unresolved DROP COLUMN raw;\n",
+    // ---- XS-01 facts: end ----
     // ---- XS-23 owners: begin ----
     "DROP TABLE ownership; DROP TABLE codeowners;\n",
     // ---- XS-23 owners: end ----
 );
 
-/// The tables and columns format 4 adds, as `schema.sql` declares them. Each phase-4 item adds its
-/// own delimited block.
-#[allow(clippy::useless_concat)] // one block per phase-4 item; concat! joins them
+/// Takes a current file back to format 2: format 4's additions, then format 3's.
+#[doc(hidden)]
+pub fn undo_to_v2() -> String {
+    format!("{UNDO_V4} {UNDO_V3}")
+}
+
+/// The tables and columns format 4 adds, as `schema.sql` declares them; one delimited block per
+/// phase-4 item.
 const V4: &str = concat!(
     // ---- XS-23 owners: begin ----
     "CREATE TABLE codeowners (repo INTEGER NOT NULL REFERENCES repo (id), blob BLOB NOT NULL,
@@ -67,9 +76,19 @@ const V4: &str = concat!(
      CREATE INDEX ownership_file ON ownership (file, from_seq);
      CREATE INDEX ownership_owner ON ownership (owner);\n",
     // ---- XS-23 owners: end ----
+    // ---- XS-01 facts: begin ----
+    "ALTER TABLE unresolved ADD COLUMN fact_kind TEXT;
+     ALTER TABLE unresolved ADD COLUMN raw TEXT;
+     CREATE TABLE evidence (id INTEGER PRIMARY KEY, link INTEGER REFERENCES link (id),
+       file INTEGER NOT NULL REFERENCES file (id), kind TEXT NOT NULL, text TEXT NOT NULL,
+       start_line INTEGER NOT NULL, start_col INTEGER NOT NULL, end_line INTEGER NOT NULL,
+       end_col INTEGER NOT NULL, extractor TEXT NOT NULL) STRICT;
+     CREATE INDEX evidence_link ON evidence (link);
+     CREATE INDEX evidence_file ON evidence (file);\n",
+    // ---- XS-01 facts: end ----
 );
 
-/// Takes a current file back to format 2 (test support: tests build an older file from a new one
+/// Takes a format 3 file back to format 2 (test support: tests build an older file from a new one
 /// by undoing each format's additions, newest first).
 #[doc(hidden)]
 pub const UNDO_V3: &str =

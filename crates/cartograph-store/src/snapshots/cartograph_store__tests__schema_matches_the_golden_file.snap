@@ -35,6 +35,18 @@ CREATE TABLE derived (
   stale INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (kind, scope)
 ) STRICT, WITHOUT ROWID;
+CREATE TABLE evidence (
+  id INTEGER PRIMARY KEY,
+  link INTEGER REFERENCES link (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  start_line INTEGER NOT NULL,
+  start_col INTEGER NOT NULL,
+  end_line INTEGER NOT NULL,
+  end_col INTEGER NOT NULL,
+  extractor TEXT NOT NULL
+) STRICT;
 CREATE TABLE extractor (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -181,13 +193,17 @@ CREATE TABLE unresolved (
   stage TEXT NOT NULL,
   reason TEXT NOT NULL,
   from_seq INTEGER NOT NULL,
-  to_seq INTEGER
+  to_seq INTEGER,
+  fact_kind TEXT,
+  raw TEXT
 ) STRICT;
 CREATE INDEX archived_interval_rewrite ON archived_interval (rewrite);
 CREATE INDEX codeowners_repo ON codeowners (repo, from_seq);
 CREATE UNIQUE INDEX commits_repo_sha ON commits (repo, sha);
 CREATE INDEX commits_sha ON commits (sha);
 CREATE INDEX commits_time ON commits (corrected_time);
+CREATE INDEX evidence_file ON evidence (file);
+CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX file_path_file ON file_path (file, from_seq);
 CREATE INDEX file_path_path ON file_path (path);
 CREATE INDEX file_version_file ON file_version (file, from_seq);

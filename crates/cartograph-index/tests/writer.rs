@@ -210,15 +210,14 @@ fn a_v1_index_migrates_to_v2_with_the_fresh_build_s_fact_hash() {
     Connection::open(&v1)
         .unwrap()
         .execute_batch(&format!(
-            "{} {}
+            "{}
              ALTER TABLE repo DROP COLUMN indexed_commit; ALTER TABLE repo DROP COLUMN indexed_seq;
              ALTER TABLE repo DROP COLUMN removed;
              DROP INDEX commits_repo_sha; DROP INDEX commits_sha;
              CREATE UNIQUE INDEX commits_sha ON commits (sha);
              UPDATE meta SET value = 1 WHERE key = 'format_version';
              PRAGMA user_version = 1;",
-            migrate::UNDO_V4,
-            migrate::UNDO_V3
+            migrate::undo_to_v2()
         ))
         .unwrap();
     assert_eq!(
