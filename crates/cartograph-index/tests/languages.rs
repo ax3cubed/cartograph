@@ -205,6 +205,16 @@ fn a_mixed_language_workspace_indexes_onto_one_timeline() {
             "import app/main.go -> module:shared/util",
         ]
     );
+    // Read back as of a step, the package end keeps replay's `dir/` name (the remotion gate's form).
+    let seq: i64 = ix
+        .conn
+        .query_row("SELECT max(seq) FROM commits", [], |r| r.get(0))
+        .unwrap();
+    let at = cartograph_index::build::links_at(&ix.conn, seq as u64).unwrap();
+    assert!(
+        at.contains(&("import".into(), "app/main.go".into(), "shared/util/".into())),
+        "{at:?}"
+    );
 }
 
 /// The from-scratch oracle on a real history, for a repo in any of the four languages: every

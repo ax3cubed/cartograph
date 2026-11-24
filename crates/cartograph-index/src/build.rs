@@ -253,12 +253,15 @@ pub fn links_at(
     seq: u64,
 ) -> rusqlite::Result<Vec<(String, String, String)>> {
     let mut st = conn.prepare_cached(
-        "SELECT l.kind, ps.path, pd.path
+        // A Go package import ends at a module node (`module:dir`), written back as `dir/` the way
+        // replay names it; any other end is a file live at that step.
+        "SELECT l.kind, ps.path, coalesce(pd.path, substr(nd.key, 8) || '/')
          FROM interval i JOIN link l ON l.id = i.link
          JOIN node ns ON ns.id = l.src JOIN node nd ON nd.id = l.dst
          JOIN file_path ps ON ps.file = ns.file AND ps.from_seq <= ?1 AND (ps.to_seq IS NULL OR ps.to_seq > ?1)
-         JOIN file_path pd ON pd.file = nd.file AND pd.from_seq <= ?1 AND (pd.to_seq IS NULL OR pd.to_seq > ?1)
-         WHERE i.from_seq <= ?1 AND (i.to_seq IS NULL OR i.to_seq > ?1)",
+         LEFT JOIN file_path pd ON pd.file = nd.file AND pd.from_seq <= ?1 AND (pd.to_seq IS NULL OR pd.to_seq > ?1)
+         WHERE i.from_seq <= ?1 AND (i.to_seq IS NULL OR i.to_seq > ?1)
+           AND (pd.path IS NOT NULL OR (nd.file IS NULL AND nd.key LIKE 'module:%'))",
     )?;
     let rows = st.query_map([seq as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
     let mut v: Vec<_> = rows.collect::<Result<_, _>>()?;
