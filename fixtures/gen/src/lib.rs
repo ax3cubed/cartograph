@@ -197,6 +197,11 @@ fn fact(f: &Fact) -> String {
             span.start_line, span.start_col, span.end_line, span.end_col
         ),
         Fact::Manifest { field, value } => format!("manifest {field} = {value}"),
+        Fact::Host {
+            host,
+            port,
+            context,
+        } => format!("host {host} {port:?} {context:?}"),
     }
 }
 

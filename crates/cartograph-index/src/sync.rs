@@ -80,7 +80,9 @@ impl Workspace {
     fn walk_config(&self) -> String {
         let mut ex = self.exclude.clone();
         ex.sort();
-        let mut lines = vec![ex.join("\0")];
+        // `deploy` marks the compose and k8s files the walk tracks (XS-02): an index from before
+        // them has none of their history, so it is walked again.
+        let mut lines = vec![format!("{}\0deploy", ex.join("\0"))];
         for r in &self.repos {
             let mut s = r.scopes.clone();
             s.sort();

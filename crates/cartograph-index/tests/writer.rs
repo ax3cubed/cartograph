@@ -217,7 +217,7 @@ fn a_v1_index_migrates_to_v2_with_the_fresh_build_s_fact_hash() {
              CREATE UNIQUE INDEX commits_sha ON commits (sha);
              UPDATE meta SET value = 1 WHERE key = 'format_version';
              PRAGMA user_version = 1;",
-            migrate::UNDO_V3
+            migrate::undo_to_v2()
         ))
         .unwrap();
     assert_eq!(

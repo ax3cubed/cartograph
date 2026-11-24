@@ -132,7 +132,8 @@ impl<'c> Rows<'c> {
                 s.time,
                 s.corrected_time,
                 s.author,
-                s.summary
+                // A commit message can carry a pasted key (XS-10).
+                cartograph_core::secrets::mask(&s.summary)
             ])?;
         if s.rename_limit {
             self.conn
@@ -520,14 +521,22 @@ pub(crate) fn extractor_id(conn: &Connection, kind: &str) -> rusqlite::Result<i6
     )
 }
 
-/// A specifier cut to [`SPEC_BYTES`] on a character boundary.
-fn cut(s: &str) -> &str {
-    if s.len() <= SPEC_BYTES {
+/// `s` cut to `max` bytes on a character boundary.
+fn cut_to(s: &str, max: usize) -> &str {
+    if s.len() <= max {
         return s;
     }
-    let mut end = SPEC_BYTES;
+    let mut end = max;
     while !s.is_char_boundary(end) {
         end -= 1;
     }
     &s[..end]
+}
+
+/// A specifier as stored: anything that looks like a secret masked (XS-10), then cut to
+/// [`SPEC_BYTES`]. Masking comes first so a secret can't be cut in half and slip past the rules;
+/// only the first 4 KiB is read, far more than is kept.
+fn cut(s: &str) -> String {
+    let masked = cartograph_core::secrets::mask(cut_to(s, 4096));
+    cut_to(&masked, SPEC_BYTES).to_owned()
 }

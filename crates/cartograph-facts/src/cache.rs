@@ -7,6 +7,8 @@ use std::path::Path;
 use cartograph_parse::BlobFacts;
 use rusqlite::{Connection, OptionalExtension};
 
+use crate::schema::{self, BlobFact};
+
 /// "CRTF".
 const APPLICATION_ID: i32 = 0x4352_5446;
 
@@ -33,7 +35,7 @@ impl FactCache {
         Ok(Self { conn })
     }
 
-    pub fn get(&self, blob: &[u8], extractor: &str, version: &str) -> Option<BlobFacts> {
+    fn get_raw(&self, blob: &[u8], extractor: &str, version: &str) -> Option<Vec<u8>> {
         self.conn
             .prepare_cached(
                 "SELECT payload FROM fact WHERE blob = ?1 AND extractor = ?2 AND version = ?3",
@@ -43,7 +45,22 @@ impl FactCache {
             .optional()
             .ok()
             .flatten()
-            .and_then(|b| BlobFacts::decode(&b))
+    }
+
+    pub fn get(&self, blob: &[u8], extractor: &str, version: &str) -> Option<BlobFacts> {
+        BlobFacts::decode(&self.get_raw(blob, extractor, version)?)
+    }
+
+    /// The interface facts (XS-01) of one blob for one adapter: one row holding one JSON array, so a
+    /// blob is one read. Adapter names never collide with an extractor kind, so the rows share the
+    /// table.
+    pub fn get_interface(
+        &self,
+        blob: &[u8],
+        extractor: &str,
+        version: &str,
+    ) -> Option<Vec<BlobFact>> {
+        schema::decode(&self.get_raw(blob, extractor, version)?)
     }
 
     /// Writes a batch in one transaction.
@@ -51,13 +68,31 @@ impl FactCache {
         &mut self,
         rows: impl IntoIterator<Item = (&'a [u8], &'a str, &'a str, &'a BlobFacts)>,
     ) -> rusqlite::Result<()> {
+        self.put_raw_many(rows.into_iter().map(|(b, e, v, f)| (b, e, v, f.encode())))
+    }
+
+    /// Writes interface facts in one transaction.
+    pub fn put_interface_many<'a>(
+        &mut self,
+        rows: impl IntoIterator<Item = (&'a [u8], &'a str, &'a str, &'a [BlobFact])>,
+    ) -> rusqlite::Result<()> {
+        self.put_raw_many(
+            rows.into_iter()
+                .map(|(b, e, v, f)| (b, e, v, schema::encode(f))),
+        )
+    }
+
+    fn put_raw_many<'a>(
+        &mut self,
+        rows: impl IntoIterator<Item = (&'a [u8], &'a str, &'a str, Vec<u8>)>,
+    ) -> rusqlite::Result<()> {
         let tx = self.conn.transaction()?;
         {
             let mut st = tx.prepare_cached(
                 "INSERT OR REPLACE INTO fact (blob, extractor, version, payload) VALUES (?1, ?2, ?3, ?4)",
             )?;
-            for (blob, ex, ver, facts) in rows {
-                st.execute((blob, ex, ver, facts.encode()))?;
+            for (blob, ex, ver, payload) in rows {
+                st.execute((blob, ex, ver, payload))?;
             }
         }
         tx.commit()

@@ -1,5 +1,6 @@
--- Index schema, format version 3 (IDX-03; v2 adds the repo's indexed commit, IDX-13; v3 adds lineage
--- across renames, rewrites, structure nodes, derived rows, coverage, layout and search, phase 3).
+-- Index schema, format version 4 (IDX-03; v2 adds the repo's indexed commit, IDX-13; v3 adds lineage
+-- across renames, rewrites, structure nodes, derived rows, coverage, layout and search, phase 3; v4
+-- adds the cross-service tables, phase 4: one block per item, each marked XS-nn).
 -- Every table is STRICT. Everything that changes over time
 -- is an interval [from_seq, to_seq) on the first-parent timeline; to_seq NULL means still open.
 -- No triggers and no views: an index file is untrusted input (board G01).
@@ -96,7 +97,8 @@ CREATE TABLE fact (
 -- kind: file, service, library or module (IDX-20). key names a structure node across runs and
 -- rebuilds (`service:<repo>:<root>`, `module:<path>`). parent is the node one level up (a file's
 -- module, a module's service); service is the top-level ancestor, so a scope's descendants are one
--- indexed lookup (SRV-08). fan_in counts live inbound links at the last run (IDX-21).
+-- indexed lookup (SRV-08). detected_by is the C6 rule that found a service or library (the
+-- detect_rule of board S04) and detect_source the file that rule read (XS-02). fan_in counts live inbound links at the last run (IDX-21).
 CREATE TABLE node (
   id INTEGER PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -106,6 +108,7 @@ CREATE TABLE node (
   parent INTEGER,
   service INTEGER,
   detected_by TEXT,
+  detect_source TEXT,
   fan_in INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 CREATE INDEX node_file ON node (file);
@@ -170,12 +173,25 @@ CREATE TABLE archived_interval (
 ) STRICT;
 CREATE INDEX archived_interval_rewrite ON archived_interval (rewrite);
 
--- Host names that reach a service: compose service names and k8s names (C6), for the links area.
-CREATE TABLE alias (
+-- XS-02 host aliases (begin)
+-- Host names that reach a service (C6, C7): compose service and container names, network aliases and
+-- k8s Service names in their four forms. port is the one the host listens on (NULL: any). env_id
+-- names the environment the file belongs to (NULL: every one; environments arrive with XS-09).
+-- source is the file's path and blob_id the blob that says so; valid_from and valid_to are the
+-- interval of that version of the file at that path, like every other row's.
+CREATE TABLE host_alias (
   host TEXT NOT NULL,
-  node INTEGER NOT NULL REFERENCES node (id),
-  source TEXT NOT NULL
+  port INTEGER,
+  env_id INTEGER,
+  service_id INTEGER NOT NULL REFERENCES node (id),
+  source TEXT NOT NULL,
+  blob_id BLOB NOT NULL,
+  valid_from INTEGER NOT NULL,
+  valid_to INTEGER
 ) STRICT;
+CREATE INDEX host_alias_host ON host_alias (host, valid_from);
+CREATE INDEX host_alias_service ON host_alias (service_id);
+-- XS-02 host aliases (end)
 
 -- One row per derived artefact (B6, IDX-21): what it was built from. A run rebuilds an artefact only
 -- when its key changes; AI output is marked stale instead.
@@ -199,7 +215,9 @@ CREATE TABLE scope_count (
 ) STRICT;
 
 -- An import that didn't resolve (IDX-22), while it was there. spec is untrusted text (F8), cut to
--- 512 bytes.
+-- 512 bytes, with anything that looks like a secret masked (XS-10). XS-01 extends it to every
+-- reference an adapter couldn't resolve: fact_kind is the kind of the fact (NULL for an import), raw
+-- the reference as the source spells it, masked and cut the same way.
 CREATE TABLE unresolved (
   file INTEGER NOT NULL REFERENCES file (id),
   spec TEXT NOT NULL,
@@ -207,7 +225,9 @@ CREATE TABLE unresolved (
   stage TEXT NOT NULL,
   reason TEXT NOT NULL,
   from_seq INTEGER NOT NULL,
-  to_seq INTEGER
+  to_seq INTEGER,
+  fact_kind TEXT,
+  raw TEXT
 ) STRICT;
 CREATE INDEX unresolved_at ON unresolved (from_seq, to_seq);
 CREATE INDEX unresolved_file ON unresolved (file, spec);
@@ -234,3 +254,49 @@ CREATE VIRTUAL TABLE search USING fts5 (
 CREATE VIRTUAL TABLE search_sub USING fts5 (
   name, path, content = '', contentless_delete = 1, tokenize = 'trigram'
 );
+
+-- ---- XS-23 owners: begin ----
+-- The CODEOWNERS blob of a repo (the first of .github/, root, docs/, .gitlab/) over history, one
+-- row per version: present from from_seq until to_seq (NULL: still).
+CREATE TABLE codeowners (
+  repo INTEGER NOT NULL REFERENCES repo (id),
+  blob BLOB NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX codeowners_repo ON codeowners (repo, from_seq);
+
+-- Who owns a file lineage while (last matching pattern wins). owner is untrusted text (F8): an
+-- `@user`, an `@org/team` or an email, at most 256 bytes of [A-Za-z0-9._%+@/-]; pattern is the
+-- CODEOWNERS pattern that matched, cut to 512 bytes. kind: team, person or email. Emails are
+-- personal data: they stay in the index and are left out of reports.
+CREATE TABLE ownership (
+  file INTEGER NOT NULL REFERENCES file (id),
+  owner TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  pattern TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX ownership_file ON ownership (file, from_seq);
+CREATE INDEX ownership_owner ON ownership (owner);
+-- ---- XS-23 owners: end ----
+
+-- >>> XS-01 (format 4): what a link stands on. One row per piece of source text, for a link (NULL
+-- while it is only a fact). text is the source cut to 200 characters with secrets masked (XS-10);
+-- kind is literal, template or inferred; extractor is `name@version`.
+CREATE TABLE evidence (
+  id INTEGER PRIMARY KEY,
+  link INTEGER REFERENCES link (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  start_line INTEGER NOT NULL,
+  start_col INTEGER NOT NULL,
+  end_line INTEGER NOT NULL,
+  end_col INTEGER NOT NULL,
+  extractor TEXT NOT NULL
+) STRICT;
+CREATE INDEX evidence_link ON evidence (link);
+CREATE INDEX evidence_file ON evidence (file);
+-- <<< XS-01

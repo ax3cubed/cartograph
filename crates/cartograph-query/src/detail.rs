@@ -273,8 +273,7 @@ impl Snapshot<'_> {
         Ok(NodeDetail {
             node: self.wire_node(row, c.seq)?,
             metrics,
-            // ponytail: owners arrive with CODEOWNERS (phase 4).
-            owners: Vec::new(),
+            owners: self.owners_of_node(row, c.seq as u32)?,
             added: first.map(|s| self.commit_ref(s as u32)).transpose()?,
             removed: match (open, last) {
                 (0, Some(s)) => Some(self.commit_ref(s as u32)?),

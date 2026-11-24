@@ -175,7 +175,8 @@ impl Snapshot<'_> {
     /// `GET …/services`: the services and libraries alive now, with the rule that found each.
     pub fn services(&self) -> Result<Vec<Service>, QueryError> {
         let mut st = self.conn().prepare_cached(
-            "SELECT n.id, n.kind, n.key, n.name, n.detected_by FROM node n
+            "SELECT n.id, n.kind, n.key, n.name, n.detected_by,
+                    n.detect_source FROM node n
              WHERE n.kind IN ('service', 'library')
                AND EXISTS (SELECT 1 FROM node_span s WHERE s.node = n.id AND s.to_seq IS NULL)
              ORDER BY n.key",
@@ -187,11 +188,12 @@ impl Snapshot<'_> {
                 r.get::<_, Option<String>>(2)?,
                 r.get::<_, Option<String>>(3)?,
                 r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<String>>(5)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, kind, key, name, detected_by) = row?;
+            let (id, kind, key, name, detected_by, detect_source) = row?;
             // `service:<repo>:<root>`, as IDX-20 writes it for services and libraries alike.
             let mut parts = key.as_deref().unwrap_or_default().splitn(3, ':').skip(1);
             let repo = parts.next().unwrap_or_default().to_owned();
@@ -211,6 +213,7 @@ impl Snapshot<'_> {
                 tags: vec![],
                 library: kind == "library",
                 detected_by,
+                detect_source,
             });
         }
         Ok(out)

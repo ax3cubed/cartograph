@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fact",
+  "description": "One interface fact, as an adapter prints it (H4).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "$ref": "#/$defs/FactKind"
+    },
+    "repo": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "commit": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "path": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "span": {
+      "$ref": "#/$defs/FactSpan"
+    },
+    "attrs": {
+      "$ref": "#/$defs/Attrs",
+      "default": {}
+    },
+    "evidence": {
+      "$ref": "#/$defs/Evidence"
+    },
+    "extractor": {
+      "$ref": "#/$defs/ExtractorRef"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "kind",
+    "repo",
+    "commit",
+    "path",
+    "span",
+    "evidence",
+    "extractor"
+  ],
+  "$defs": {
+    "FactKind": {
+      "description": "What an adapter found.",
+      "type": "string",
+      "enum": [
+        "route",
+        "http.call",
+        "event.publish",
+        "event.subscribe",
+        "db.read",
+        "db.write",
+        "db.table.def",
+        "env.read",
+        "client.base",
+        "entrypoint",
+        "symbol.def",
+        "symbol.ref",
+        "codegen.marker"
+      ]
+    },
+    "FactSpan": {
+      "description": "`[start_line, start_col, end_line, end_col]`: 1-based lines, 0-based columns (H4).",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "Attrs": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/AttrValue"
+      },
+      "propertyNames": {
+        "maxLength": 64
+      },
+      "maxProperties": 32
+    },
+    "AttrValue": {
+      "description": "An attribute's value: a plain string, or the parts of a template.",
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "object",
+          "properties": {
+            "parts": {
+              "$ref": "#/$defs/Parts"
+            }
+          },
+          "required": [
+            "parts"
+          ]
+        }
+      ]
+    },
+    "Parts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Part"
+      },
+      "maxItems": 32
+    },
+    "Part": {
+      "description": "One piece of a value built from a template or a concatenation: text the code spells out, or an\nexpression it doesn't, so a matcher can see which segments are literal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "lit": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "lit"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "expr": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "expr"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Evidence": {
+      "description": "The source text a fact stands on, cut to [`MAX_EVIDENCE`] characters.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/EvidenceType"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "text"
+      ]
+    },
+    "EvidenceType": {
+      "description": "How the evidence was read from the source.",
+      "oneOf": [
+        {
+          "description": "The source spells the value out.",
+          "type": "string",
+          "const": "literal"
+        },
+        {
+          "description": "A template or concatenation with parts the code doesn't spell out.",
+          "type": "string",
+          "const": "template"
+        },
+        {
+          "description": "Worked out from more than one place.",
+          "type": "string",
+          "const": "inferred"
+        }
+      ]
+    },
+    "ExtractorRef": {
+      "description": "The extractor that produced a fact; with the blob it is the cache key.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ]
+    }
+  }
+}

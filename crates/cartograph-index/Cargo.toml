@@ -15,6 +15,7 @@ cartograph-git.workspace = true
 cartograph-facts.workspace = true
 cartograph-store.workspace = true
 cartograph-parse.workspace = true
+globset.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -629,3 +629,39 @@ fn install_removes_the_old_logs_before_the_new_file_takes_the_name() {
     drop(old);
     assert_eq!(version(&Index::open_read(&p).unwrap().conn), "new");
 }
+
+/// A format 3 file migrates to the columns `schema.sql` gives a new file (XS-01).
+#[test]
+fn the_v3_to_v4_migration_matches_a_new_file() {
+    let d = tmp();
+    let p = with_format(d.path(), FORMAT_VERSION, MIN_READER_VERSION);
+    let columns = |c: &Connection, table: &str| -> Vec<(String, String, bool)> {
+        let mut st = c
+            .prepare(&format!(
+                "SELECT name, type, \"notnull\" FROM pragma_table_info('{table}')"
+            ))
+            .unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    let tables = ["evidence", "unresolved"];
+    let want: Vec<_> = {
+        let c = Connection::open(&p).unwrap();
+        tables.iter().map(|t| columns(&c, t)).collect()
+    };
+    Connection::open(&p)
+        .unwrap()
+        .execute_batch(&format!(
+            "{} UPDATE meta SET value = 3 WHERE key = 'format_version'; PRAGMA user_version = 3;",
+            migrate::UNDO_V4
+        ))
+        .unwrap();
+    assert_eq!(Index::open_read(&p).unwrap().state, State::NeedsMigrate);
+    let lock = writer::WriterLock::try_acquire(d.path()).unwrap().unwrap();
+    assert!(migrate::migrate(&lock, &p).unwrap());
+    let c = Connection::open(&p).unwrap();
+    let got: Vec<_> = tables.iter().map(|t| columns(&c, t)).collect();
+    assert_eq!(got, want);
+}

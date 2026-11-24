@@ -307,6 +307,7 @@ fn services(plan: &setup::Plan) -> Vec<Service> {
             tags: vec![],
             library: root.kind == "library",
             detected_by: Some(root.detected_by),
+            detect_source: root.source,
         }));
     }
     out

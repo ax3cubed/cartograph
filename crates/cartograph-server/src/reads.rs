@@ -52,6 +52,7 @@ pub(crate) fn router() -> Router<Arc<App>> {
         .route("/api/v1/w/{ws}/runs", get(runs))
         .route("/api/v1/w/{ws}/extractors", get(extractors))
         .route("/api/v1/w/{ws}/services", get(services))
+        .route("/api/v1/w/{ws}/owners", get(owners))
         .route("/api/v1/mcp/tools", get(mcp_tools))
         .route("/api/v1/agents", get(agents))
         .route(
@@ -644,6 +645,11 @@ async fn extractors(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Resp
 
 async fn services(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
     read(app, ws, |s| s.services()).await
+}
+
+/// Owners from CODEOWNERS (XS-23): who owns how many files now.
+async fn owners(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
+    read(app, ws, |s| s.owners()).await
 }
 
 #[cfg(test)]

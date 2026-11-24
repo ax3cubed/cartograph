@@ -383,7 +383,7 @@ mod tests {
                      CREATE UNIQUE INDEX commits_sha ON commits (sha);
                      UPDATE meta SET value = {format} WHERE key = 'format_version';
                      PRAGMA user_version = {format};",
-                    undo = cartograph_store::migrate::UNDO_V3
+                    undo = cartograph_store::migrate::undo_to_v2()
                 ))
                 .unwrap();
         }
