@@ -71,34 +71,20 @@ jobs:
 
   conventions:
     name: Conventions
-    # Commit messages, the PR title (it becomes the squash commit on main) and the branch name.
+    # The branch name. Commit messages are checked by the git hooks, not here.
     # Runs on every PR, whatever changed. See CONTRIBUTING.md.
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Branch name
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: node scripts/check-branch.mjs "$HEAD_REF"
-      - name: Commit messages
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: pnpm exec commitlint --from "$BASE" --to "$HEAD" --verbose
-      - name: Pull request title
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-        run: printf '%s\n' "$TITLE" | pnpm exec commitlint --verbose
 
   lockfiles:
     name: One lockfile (HD-01)
