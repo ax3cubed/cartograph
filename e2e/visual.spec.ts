@@ -8,7 +8,8 @@ test.skip(!process.env.PW_REMOTE, "screenshots run only in the pinned container:
 
 // What changes from run to run: the index's age and build time, the fixture repos' folders on this machine, the
 // per-worker home the agents page reads, and each index run's time and duration.
-const VOLATILE = [".sh-is", ".fr-list span", ".set-ed-facts dd", ".set-note > .set-mono", ".set-idx-state .set-note", ".set-conn-name small", ".set-idx-runs li:not([aria-hidden]) > span:nth-child(-n+2)"];
+// .sh-bell: the server records activity on its own tick, so the unread count depends on timing.
+const VOLATILE = [".sh-is", ".sh-bell", ".fr-list span", ".set-ed-facts dd", ".set-note > .set-mono", ".set-idx-state .set-note", ".set-conn-name small", ".set-idx-runs li:not([aria-hidden]) > span:nth-child(-n+2)"];
 /** The timeline's window ends at today: pinned, so the strip is the same every day. After the fixtures' last commit. */
 const TODAY = new Date("2026-11-20T12:00:00Z");
 const THEMES = ["dark", "light"] as const;
