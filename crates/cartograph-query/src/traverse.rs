@@ -163,7 +163,15 @@ impl Snapshot<'_> {
                 ));
             }
         };
-        let walks = [0.9f32, 0.6, 0.3].map(|floor| dependents(&g, &seeds, seq, floor));
+        // The three walks are independent, so they run side by side.
+        let walks = std::thread::scope(|t| {
+            [0.9f32, 0.6, 0.3]
+                .map(|floor| {
+                    let (g, seeds) = (&g, &seeds);
+                    t.spawn(move || dependents(g, seeds, seq, floor))
+                })
+                .map(|h| h.join().expect("an impact walk panicked"))
+        });
         let mut placed = Bits::new(g.row.len());
         let mut levels: [Vec<u32>; 3] = Default::default();
         for (i, w) in walks.iter().enumerate() {
