@@ -8,10 +8,11 @@ use std::time::Instant;
 
 use cartograph_git::{ObjectId, Repo};
 
-/// `git ls-tree -r`, regular files only: git's own answer, not gix's.
+/// `git ls-tree -r`, regular files only: git's own answer, not gix's. `-C` so a bare or a working
+/// clone both work.
 fn ls_tree(repo: &str, rev: &str) -> BTreeMap<String, String> {
     let out = Command::new("git")
-        .args(["--git-dir", repo, "ls-tree", "-r", "-z", rev])
+        .args(["-C", repo, "ls-tree", "-r", "-z", rev])
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
@@ -100,14 +101,14 @@ fn remotion_renames_agree_with_git_log() {
         .collect();
     let walk_ms = t.elapsed().as_millis();
     let out = Command::new("git")
-        .args(["--git-dir", path.join(".git").to_str().unwrap()])
+        .args(["-C", path.to_str().unwrap()])
         .args([
             "log",
             "--first-parent",
             "--reverse",
             "-M50%",
             "--name-status",
-            "--format=@",
+            "--format=tformat:@", // a bare "@" is no longer a valid pretty format
             &tip,
         ])
         .env("GIT_CONFIG_NOSYSTEM", "1")
