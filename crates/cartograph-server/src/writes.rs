@@ -15,9 +15,9 @@ use cartograph_api::events::ServerEvent;
 use cartograph_api::types::{
     Actor, ApiError, ConfigFile, ConfigWrite, CreateWorkspace, CreatedWorkspace, DiscoverRequest,
     DiscoveredFolder, Discovery, ErrorCode, FileDiff, FolderResult, FsEntry, IndexState, JobKind,
-    Prefs, WorkspaceSummary,
+    Prefs, Service, WorkspaceSummary,
 };
-use cartograph_core::{Explain, paths};
+use cartograph_core::{Explain, NodeId, RepoId, paths};
 use cartograph_discovery::{DiscoveryError, manifest, setup};
 use serde::Deserialize;
 
@@ -251,6 +251,67 @@ fn discovery_error(e: &DiscoveryError) -> Response {
     bad(ErrorCode::Unprocessable, &e.what(), &e.why(), &e.action())
 }
 
+/// The services the first index will find (IDX-20's C6 rules at each repo's branch tip), for the
+/// wizard's review step. Reads manifest blobs only; a repo that can't be read is left out here
+/// and reported by the index itself.
+fn services(plan: &setup::Plan) -> Vec<Service> {
+    use cartograph_index::structure::{ServiceSpec, detect};
+    let specs: Vec<ServiceSpec> = plan
+        .manifest
+        .services
+        .iter()
+        .map(|s| ServiceSpec {
+            name: s.name.clone(),
+            repo: s.repo.clone(),
+            path: s.path.clone(),
+        })
+        .collect();
+    let mut out = Vec::new();
+    for ((r, p), m) in plan
+        .resolution
+        .repos
+        .iter()
+        .zip(&plan.repos)
+        .zip(&plan.manifest.repos)
+    {
+        let Ok(git) = cartograph_git::Repo::open(&p.root) else {
+            continue;
+        };
+        let Ok(tip) = git
+            .resolve(&format!("refs/heads/{}", p.branch))
+            .or_else(|_| git.head())
+        else {
+            continue;
+        };
+        let scopes: Vec<String> = r.scopes.iter().map(|s| s.prefix.clone()).collect();
+        let Ok(found) = detect(
+            &git,
+            tip,
+            &m.name,
+            &scopes,
+            &specs,
+            &plan.manifest.options.exclude,
+        ) else {
+            continue;
+        };
+        out.extend(found.roots.into_iter().map(|root| Service {
+            id: NodeId(format!("service:{}:{}", m.name, root.path)),
+            name: root.name,
+            repo: RepoId(m.name.clone()),
+            paths: if root.path.is_empty() {
+                vec![]
+            } else {
+                vec![root.path]
+            },
+            domain: None,
+            tags: vec![],
+            library: root.kind == "library",
+            detected_by: Some(root.detected_by),
+        }));
+    }
+    out
+}
+
 pub(crate) fn rows(plan: &setup::Plan) -> Vec<DiscoveredFolder> {
     let mut out = Vec::new();
     for (r, m) in plan.resolution.repos.iter().zip(&plan.manifest.repos) {
@@ -304,8 +365,8 @@ pub async fn discover(State(app): State<Arc<App>>, bytes: Bytes) -> Response {
                 0,
                 Discovery {
                     folders: rows(&plan),
-                    // ponytail: services come with IDX-20, the estimate with a measured rate.
-                    services: vec![],
+                    services: services(&plan),
+                    // ponytail: the estimate comes with a measured rate.
                     estimate_s: None,
                 },
             ),

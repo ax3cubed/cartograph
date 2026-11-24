@@ -143,6 +143,8 @@ pub fn json_schema() -> Value {
         Concept,
         CoverageRow,
         Unresolved,
+        IndexRun,
+        ExtractorInfo,
         Owner,
         Rule,
         RuleViolation,

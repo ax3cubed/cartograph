@@ -764,3 +764,117 @@ fn a_two_repo_workspace_filters_counts_and_names_by_repo() {
         "a removed repo is still a known name"
     );
 }
+
+/// IDX-20 to IDX-22's reads: coverage from the last run's totals, the open unresolved imports as of
+/// a commit, runs newest first, extractors with their live files, and services with their rule.
+#[test]
+fn coverage_runs_extractors_and_services_read_what_the_index_stored() {
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("index.cartograph");
+    let w = empty_index(&path, 1);
+    w.execute_batch(
+        "INSERT INTO commits (seq, repo, sha, time, corrected_time, author, summary)
+           VALUES (1, 1, x'aa01', 100, 100, 'a', 'one'), (2, 1, x'aa02', 200, 200, 'a', 'two');
+         INSERT INTO file (id, repo) VALUES (1, 1), (2, 1);
+         INSERT INTO file_path (file, path, from_seq, to_seq) VALUES
+           (1, 'r/src/a.ts', 1, NULL), (2, 'r/src/b.ts', 1, NULL);
+         INSERT INTO file_version (file, blob, from_seq, to_seq) VALUES
+           (1, x'b1', 1, NULL), (2, x'b2', 1, 2), (2, x'b3', 2, NULL);
+         INSERT INTO extractor (id, name, version) VALUES
+           (1, 'ts-imports', '0.9.0'), (2, 'ts-imports', '1.0.0'), (3, 'go-imports', '1.0.0');
+         INSERT INTO fact (blob, extractor, payload) VALUES
+           (x'b1', 2, x''), (x'b2', 2, x''), (x'b3', 1, x'');
+         INSERT INTO node (id, kind, file, key, name, detected_by) VALUES
+           (10, 'service', NULL, 'service:r:', 'r', 'repo'),
+           (11, 'library', NULL, 'service:r:packages/ui', '@r/ui', 'pnpm'),
+           (12, 'service', NULL, 'service:r:old', 'old', 'repo'),
+           (20, 'file', 1, NULL, NULL, NULL);
+         INSERT INTO node_span (node, from_seq, to_seq) VALUES (10, 1, NULL), (11, 1, NULL), (12, 1, 2);
+         INSERT INTO unresolved (file, spec, line, stage, reason, from_seq, to_seq) VALUES
+           (1, '@shared/money', 3, 'resolve', 'not-found', 1, NULL),
+           (1, './gone', 9, 'resolve', 'not-found', 1, 2);
+         INSERT INTO run (id, started_at, finished_at, writer_version, files_total, files_parsed,
+                          imports_total, imports_resolved) VALUES
+           (1, 1000, 1041, '0.1.0', 2, 2, 5, 3),
+           (2, 2000, NULL, '0.2.0', NULL, NULL, NULL, NULL);
+         PRAGMA wal_checkpoint(TRUNCATE);",
+    )
+    .unwrap();
+    drop(w);
+    let store = Store::open_path(&path).unwrap();
+    let s = store.snapshot(Limits::default()).unwrap();
+
+    let rows = s.coverage().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        (rows[0].id.as_str(), rows[0].done, rows[0].total),
+        ("files", 2, 2)
+    );
+    assert!(rows[0].gap.is_none());
+    assert_eq!(
+        (rows[1].id.as_str(), rows[1].done, rows[1].total),
+        ("imports", 3, 5)
+    );
+    assert_eq!(rows[1].gap.as_ref().unwrap().what, "2 unresolved imports");
+
+    let now = s
+        .unresolved(IMPORTS_ROW, &At::parse("now").unwrap(), Page::default())
+        .unwrap();
+    assert_eq!(now.rows.len(), 1);
+    let u = &now.rows[0];
+    assert_eq!(
+        (u.file.0.as_str(), u.path.as_str(), u.line, u.text.as_str()),
+        (node_id(20).as_str(), "r/src/a.ts", 3, "@shared/money")
+    );
+    let then = s
+        .unresolved(IMPORTS_ROW, &At::parse("aa01").unwrap(), Page::default())
+        .unwrap();
+    assert_eq!(
+        then.rows.len(),
+        2,
+        "a closed interval is listed as of a commit inside it"
+    );
+    assert!(matches!(
+        s.unresolved("calls", &At::parse("now").unwrap(), Page::default()),
+        Err(QueryError::NotFound { .. })
+    ));
+
+    let runs = s.runs(Page::default()).unwrap().rows;
+    assert_eq!(runs.iter().map(|r| r.id).collect::<Vec<_>>(), [2, 1]);
+    assert_eq!(runs[1].files_parsed, Some(2));
+    assert!(runs[0].finished_at.is_none() && runs[0].files_total.is_none());
+
+    let ex = s.extractors().unwrap();
+    let ex: Vec<_> = ex
+        .iter()
+        .map(|e| (e.name.as_str(), e.version.as_str(), e.files))
+        .collect();
+    assert_eq!(ex, [("go-imports", "1.0.0", 0), ("ts-imports", "1.0.0", 2)]);
+
+    let svc = s.services().unwrap();
+    let svc: Vec<_> = svc
+        .iter()
+        .map(|x| {
+            (
+                x.name.as_str(),
+                x.repo.0.as_str(),
+                x.paths.clone(),
+                x.library,
+                x.detected_by.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        svc,
+        [
+            ("r", "r", vec![], false, Some("repo")),
+            (
+                "@r/ui",
+                "r",
+                vec!["packages/ui".to_owned()],
+                true,
+                Some("pnpm")
+            ),
+        ]
+    );
+}

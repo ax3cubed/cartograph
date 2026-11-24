@@ -452,6 +452,7 @@ export interface CartographApi {
   Entrypoint: Entrypoint;
   Environment: Environment;
   ErrorBody: ErrorBody;
+  ExtractorInfo: ExtractorInfo;
   FileDiff: FileDiff;
   Freshness: Freshness;
   FsEntry: FsEntry;
@@ -459,6 +460,7 @@ export interface CartographApi {
   GraphSlice: GraphSlice;
   ImpactRequest: ImpactRequest;
   ImpactResult: ImpactResult;
+  IndexRun: IndexRun;
   IndexingSettings: IndexingSettings;
   Job: Job;
   JobRequest: JobRequest;
@@ -875,8 +877,17 @@ export interface DiscoveredFolder {
  * via the `definition` "Service".
  */
 export interface Service {
+  /**
+   * The C6 rule that found it: `manifest`, `scope`, `backstage`, `pnpm`, `npm-workspaces`,
+   * `go.work`, `nx`, `cargo`, `composer` or `repo` (board S04).
+   */
+  detected_by?: string | null;
   domain?: string | null;
   id: NodeId;
+  /**
+   * A workspace package with no deployable marker (C6).
+   */
+  library: boolean;
   name: string;
   paths: string[];
   repo: RepoId;
@@ -926,6 +937,20 @@ export interface ApiError {
   try: string;
   what: string;
   why: string;
+}
+/**
+ * An extractor the index holds facts from (IDX-21), with the live files it read.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ExtractorInfo".
+ */
+export interface ExtractorInfo {
+  files: number;
+  name: string;
+  /**
+   * The newest version that wrote facts.
+   */
+  version: string;
 }
 /**
  * What a write to a committed file did, or would do.
@@ -1104,6 +1129,23 @@ export interface ImpactResult {
    * A resource cap (50k visited nodes, depth 12, 5 s) stopped the walk.
    */
   truncated: boolean;
+}
+/**
+ * One index run (IDX-22): when it ran, the binary that wrote it, and its coverage totals. The
+ * totals are absent on a run that stopped before its end.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "IndexRun".
+ */
+export interface IndexRun {
+  files_parsed?: number | null;
+  files_total?: number | null;
+  finished_at?: string | null;
+  id: number;
+  imports_resolved?: number | null;
+  imports_total?: number | null;
+  started_at: string;
+  writer_version: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -1659,12 +1701,19 @@ export interface ContextBlock {
   tokens: number;
 }
 /**
+ * A reference that didn't resolve (IDX-22). `text` is the raw specifier: untrusted text (F8),
+ * shown as text only.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Unresolved".
  */
 export interface Unresolved {
   file: NodeId;
   line: number;
+  /**
+   * The file's path now, repo-prefixed as node paths are.
+   */
+  path: string;
   reason: string;
   text: string;
 }

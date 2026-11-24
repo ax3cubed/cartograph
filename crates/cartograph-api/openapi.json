@@ -1218,6 +1218,29 @@
         ],
         "type": "string"
       },
+      "ExtractorInfo": {
+        "description": "An extractor the index holds facts from (IDX-21), with the live files it read.",
+        "properties": {
+          "files": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "description": "The newest version that wrote facts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "files"
+        ],
+        "type": "object"
+      },
       "ExtractorSetting": {
         "additionalProperties": false,
         "properties": {
@@ -1510,6 +1533,66 @@
           "guessed",
           "services",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "IndexRun": {
+        "description": "One index run (IDX-22): when it ran, the binary that wrote it, and its coverage totals. The\ntotals are absent on a run that stopped before its end.",
+        "properties": {
+          "files_parsed": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "files_total": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "imports_resolved": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "imports_total": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "writer_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "started_at",
+          "writer_version"
         ],
         "type": "object"
       },
@@ -3682,6 +3765,13 @@
       },
       "Service": {
         "properties": {
+          "detected_by": {
+            "description": "The C6 rule that found it: `manifest`, `scope`, `backstage`, `pnpm`, `npm-workspaces`,\n`go.work`, `nx`, `cargo`, `composer` or `repo` (board S04).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "domain": {
             "type": [
               "string",
@@ -3690,6 +3780,10 @@
           },
           "id": {
             "$ref": "#/components/schemas/NodeId"
+          },
+          "library": {
+            "description": "A workspace package with no deployable marker (C6).",
+            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -3715,7 +3809,8 @@
           "name",
           "repo",
           "paths",
-          "tags"
+          "tags",
+          "library"
         ],
         "type": "object"
       },
@@ -3902,6 +3997,7 @@
         "type": "object"
       },
       "Unresolved": {
+        "description": "A reference that didn't resolve (IDX-22). `text` is the raw specifier: untrusted text (F8),\nshown as text only.",
         "properties": {
           "file": {
             "$ref": "#/components/schemas/NodeId"
@@ -3910,6 +4006,10 @@
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
+          },
+          "path": {
+            "description": "The file's path now, repo-prefixed as node paths are.",
+            "type": "string"
           },
           "reason": {
             "type": "string"
@@ -3920,6 +4020,7 @@
         },
         "required": [
           "file",
+          "path",
           "line",
           "text",
           "reason"
@@ -8542,6 +8643,91 @@
         "x-cartograph-kind": "read"
       }
     },
+    "/api/v1/w/{ws}/extractors": {
+      "get": {
+        "operationId": "getWsExtractors",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/ExtractorInfo"
+                      },
+                      "type": "array"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Extractors in the index and the live files each read",
+        "tags": [
+          "IDX-21"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
     "/api/v1/w/{ws}/freshness": {
       "get": {
         "operationId": "getWsFreshness",
@@ -11063,6 +11249,123 @@
         "summary": "Current violations",
         "tags": [
           "SRV-12"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
+    "/api/v1/w/{ws}/runs": {
+      "get": {
+        "operationId": "getWsRuns",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/IndexRun"
+                      },
+                      "type": "array"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Index runs, newest first, with their coverage totals",
+        "tags": [
+          "IDX-22"
         ],
         "x-cartograph-kind": "read"
       }

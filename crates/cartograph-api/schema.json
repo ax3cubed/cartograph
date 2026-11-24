@@ -1199,6 +1199,29 @@
       ],
       "type": "string"
     },
+    "ExtractorInfo": {
+      "description": "An extractor the index holds facts from (IDX-21), with the live files it read.",
+      "properties": {
+        "files": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "description": "The newest version that wrote facts.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "files"
+      ],
+      "type": "object"
+    },
     "ExtractorSetting": {
       "additionalProperties": false,
       "properties": {
@@ -1568,6 +1591,66 @@
         "guessed",
         "services",
         "truncated"
+      ],
+      "type": "object"
+    },
+    "IndexRun": {
+      "description": "One index run (IDX-22): when it ran, the binary that wrote it, and its coverage totals. The\ntotals are absent on a run that stopped before its end.",
+      "properties": {
+        "files_parsed": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "files_total": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "imports_resolved": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "imports_total": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "writer_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "started_at",
+        "writer_version"
       ],
       "type": "object"
     },
@@ -3782,6 +3865,13 @@
     },
     "Service": {
       "properties": {
+        "detected_by": {
+          "description": "The C6 rule that found it: `manifest`, `scope`, `backstage`, `pnpm`, `npm-workspaces`,\n`go.work`, `nx`, `cargo`, `composer` or `repo` (board S04).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "domain": {
           "type": [
             "string",
@@ -3790,6 +3880,10 @@
         },
         "id": {
           "$ref": "#/definitions/NodeId"
+        },
+        "library": {
+          "description": "A workspace package with no deployable marker (C6).",
+          "type": "boolean"
         },
         "name": {
           "type": "string"
@@ -3815,7 +3909,8 @@
         "name",
         "repo",
         "paths",
-        "tags"
+        "tags",
+        "library"
       ],
       "type": "object"
     },
@@ -4002,6 +4097,7 @@
       "type": "object"
     },
     "Unresolved": {
+      "description": "A reference that didn't resolve (IDX-22). `text` is the raw specifier: untrusted text (F8),\nshown as text only.",
       "properties": {
         "file": {
           "$ref": "#/definitions/NodeId"
@@ -4010,6 +4106,10 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "path": {
+          "description": "The file's path now, repo-prefixed as node paths are.",
+          "type": "string"
         },
         "reason": {
           "type": "string"
@@ -4020,6 +4120,7 @@
       },
       "required": [
         "file",
+        "path",
         "line",
         "text",
         "reason"
@@ -4197,6 +4298,9 @@
     "ErrorBody": {
       "$ref": "#/definitions/ErrorBody"
     },
+    "ExtractorInfo": {
+      "$ref": "#/definitions/ExtractorInfo"
+    },
     "FileDiff": {
       "$ref": "#/definitions/FileDiff"
     },
@@ -4217,6 +4321,9 @@
     },
     "ImpactResult": {
       "$ref": "#/definitions/ImpactResult"
+    },
+    "IndexRun": {
+      "$ref": "#/definitions/IndexRun"
     },
     "IndexingSettings": {
       "$ref": "#/definitions/IndexingSettings"
@@ -4363,6 +4470,7 @@
     "Entrypoint",
     "Environment",
     "ErrorBody",
+    "ExtractorInfo",
     "FileDiff",
     "Freshness",
     "FsEntry",
@@ -4370,6 +4478,7 @@
     "GraphSlice",
     "ImpactRequest",
     "ImpactResult",
+    "IndexRun",
     "IndexingSettings",
     "Job",
     "JobRequest",

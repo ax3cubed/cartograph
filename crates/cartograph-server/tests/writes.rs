@@ -269,6 +269,11 @@ fn discovery_asks_to_pick_one_of_several_workspace_files() {
         Some(r#"{"path":"~","workspace_file":"a.code-workspace"}"#),
     );
     assert_eq!(a.json()["data"]["folders"][0]["result"], "repo");
+    // IDX-20's rules at the branch tip: a repo with no packages and no deployable is one service.
+    let services = &a.json()["data"]["services"];
+    assert_eq!(services.as_array().map(Vec::len), Some(1), "{services}");
+    assert_eq!(services[0]["detected_by"], "repo");
+    assert_eq!(services[0]["library"], false);
     let api = openapi();
     let schema = &api["paths"]["/api/v1/discover"]["post"]["responses"]["200"]["content"]["application/json"]
         ["schema"];

@@ -47,6 +47,11 @@ pub(crate) fn router() -> Router<Arc<App>> {
         .route("/api/v1/w/{ws}/path", get(path))
         .route("/api/v1/w/{ws}/reach", get(reach))
         .route("/api/v1/w/{ws}/stories", get(stories))
+        .route("/api/v1/w/{ws}/coverage", get(coverage))
+        .route("/api/v1/w/{ws}/coverage/{row}/unresolved", get(unresolved))
+        .route("/api/v1/w/{ws}/runs", get(runs))
+        .route("/api/v1/w/{ws}/extractors", get(extractors))
+        .route("/api/v1/w/{ws}/services", get(services))
         .route("/api/v1/mcp/tools", get(mcp_tools))
         .route("/api/v1/agents", get(agents))
         .route(
@@ -122,6 +127,7 @@ macro_rules! node_page {
 }
 
 node_read!(node, |s, id, at, _p| s.node_detail(&id, &at));
+node_page!(unresolved, |s, row, at, page| s.unresolved(&row, &at, page));
 node_read!(metrics, |s, id, at, _p| s.metrics(&id, &at));
 // `limit` is the number of monthly bins here: 12 when absent.
 node_read!(series, |s, id, at, p| s.series(
@@ -611,6 +617,33 @@ async fn source(
         Ok(Err(e)) => bad(e),
         Err(_) => bad(QueryError::Internal),
     }
+}
+
+/// The Coverage view, Indexing and Services settings (IDX-20 to IDX-22): what the index can see,
+/// how it was built and what it found. Each answers as of the last run.
+async fn coverage(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
+    read(app, ws, |s| s.coverage()).await
+}
+
+async fn runs(
+    State(app): State<Arc<App>>,
+    Path(ws): Path<String>,
+    q: Result<Query<ReadParams>, QueryRejection>,
+) -> Response {
+    let page = match params(q).and_then(|p| Page::parse(p.limit, p.cursor.as_deref()).map_err(bad))
+    {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    read_page(app, ws, move |s| s.runs(page).map(Answer::from)).await
+}
+
+async fn extractors(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
+    read(app, ws, |s| s.extractors()).await
+}
+
+async fn services(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
+    read(app, ws, |s| s.services()).await
 }
 
 #[cfg(test)]

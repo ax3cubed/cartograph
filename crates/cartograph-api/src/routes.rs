@@ -137,6 +137,8 @@ pub fn routes() -> Vec<Route> {
         r("GET", w!("/concepts/{id}"), R, READ, None, Json(s::<Concept>), "SRV-12", "One concept"),
         r("GET", w!("/coverage"), R, READ, None, Json(s::<Vec<CoverageRow>>), "SRV-12", "Coverage rows"),
         r("GET", w!("/coverage/{row}/unresolved"), R, READ, None, Json(s::<Vec<Unresolved>>), "SRV-12", "Unresolved references behind a row"),
+        r("GET", w!("/runs"), R, READ, None, Json(s::<Vec<IndexRun>>), "IDX-22", "Index runs, newest first, with their coverage totals"),
+        r("GET", w!("/extractors"), R, &[], None, Json(s::<Vec<ExtractorInfo>>), "IDX-21", "Extractors in the index and the live files each read"),
         r("GET", w!("/owners"), R, READ, None, Json(s::<Vec<Owner>>), "SRV-12", "Owners from CODEOWNERS"),
         r("GET", w!("/rules"), R, READ, None, Json(s::<Vec<Rule>>), "SRV-12", "Rules"),
         r("GET", w!("/rules/violations"), R, READ, None, Json(s::<Vec<RuleViolation>>), "SRV-12", "Current violations"),

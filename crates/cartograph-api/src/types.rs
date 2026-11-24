@@ -788,12 +788,39 @@ pub struct CoverageRow {
     pub gap: Option<Problem>,
 }
 
+/// A reference that didn't resolve (IDX-22). `text` is the raw specifier: untrusted text (F8),
+/// shown as text only.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Unresolved {
     pub file: NodeId,
+    /// The file's path now, repo-prefixed as node paths are.
+    pub path: String,
     pub line: u32,
     pub text: String,
     pub reason: String,
+}
+
+/// One index run (IDX-22): when it ran, the binary that wrote it, and its coverage totals. The
+/// totals are absent on a run that stopped before its end.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct IndexRun {
+    pub id: u32,
+    pub started_at: Timestamp,
+    pub finished_at: Option<Timestamp>,
+    pub writer_version: String,
+    pub files_total: Option<u32>,
+    pub files_parsed: Option<u32>,
+    pub imports_total: Option<u32>,
+    pub imports_resolved: Option<u32>,
+}
+
+/// An extractor the index holds facts from (IDX-21), with the live files it read.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ExtractorInfo {
+    pub name: String,
+    /// The newest version that wrote facts.
+    pub version: String,
+    pub files: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -839,6 +866,11 @@ pub struct Service {
     pub paths: Vec<String>,
     pub domain: Option<String>,
     pub tags: Vec<String>,
+    /// A workspace package with no deployable marker (C6).
+    pub library: bool,
+    /// The C6 rule that found it: `manifest`, `scope`, `backstage`, `pnpm`, `npm-workspaces`,
+    /// `go.work`, `nx`, `cargo`, `composer` or `repo` (board S04).
+    pub detected_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
