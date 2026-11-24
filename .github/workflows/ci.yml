@@ -1,11 +1,10 @@
 name: CI
 
 # Pull requests run on Linux and only the jobs whose files changed. The full Linux, macOS and Windows
-# matrix runs on main, weekly, on demand, and on a PR labelled `ci:full`. Skipped jobs report as
-# skipped, which branch protection treats as passing.
+# matrix runs weekly, on demand, and on a PR labelled `ci:full`. Merging to main starts nothing: the
+# PR already ran. Skipped jobs report as skipped, which branch protection treats as passing.
+# ponytail: caches only save from main, so they refresh on the weekly run, not on every merge.
 on:
-  push:
-    branches: [main]
   pull_request:
     # closed: a merged or closed PR starts a run in its own concurrency group, which cancels any run
     # still in progress for it; every job below skips on that event, so the run itself does nothing.
