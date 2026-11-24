@@ -1,7 +1,8 @@
-// FE-08 level of detail as pure functions over one file-level slice, so they run under node in `pnpm check`
-// (levels.check.ts). The index serves files and import links per date (SRV-04's first cut: no roll-ups and no
-// stored positions yet), so the service and module levels are rolled up here from the file slice and the
-// workspace's structure (services and modules from …/nodes/{id}/children).
+// FE-08 level of detail as pure functions over slices, so they run under node in `pnpm check` (levels.check.ts). The
+// index serves each level (SRV-04: lod=service, module or file) with its stored positions (IDX-25, I2), and the map
+// draws those. An index with no layout rows yet (migrated, not synced again) serves x = y = 0: then, and only then,
+// the service and module levels are rolled up here from the file slice and the workspace's structure (services and
+// modules from …/nodes/{id}/children), and laid out here.
 import type { GraphSlice, Lod, Node } from "../../lib/api/types.gen.ts";
 
 export type Level = Exclude<Lod, "workspace">;
@@ -22,6 +23,11 @@ export const bundleWidth = (count: number, unit = 1) => unit * Math.sqrt(Math.ma
 
 /** The structure a file slice rolls up into: services (top) and modules (inside a service). */
 export type Holder = Pick<Node, "id" | "kind" | "name" | "path"> & { service: string };
+
+/** Whether a slice carries stored positions (I2): an index with no layout rows serves every node at 0, 0. */
+export const hasLayout = (s: GraphSlice | undefined) => !!s && s.nodes.x.some((x, i) => x !== 0 || s.nodes.y[i] !== 0);
+/** Whether node `i` of `s` has a stored position. */
+export const placed = (s: GraphSlice, i: number) => s.nodes.x[i] !== 0 || s.nodes.y[i] !== 0;
 
 export interface Structure {
   services: Holder[];
@@ -125,7 +131,9 @@ export type Pt = { x: number; y: number };
 export type Disc = Pt & { r: number };
 
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
-const STEP = 1; // spacing between files in a module, in layout units
+const STEP = 1; // spacing between files in a module, in layout units (the indexer's file radius is 1 too)
+/** A file's drawn radius. */
+export const FILE_R = STEP * 0.32;
 export const hash = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
 
 /** Circles on shelves, largest first then by key, centred on the origin. Returns centres in input order. */
@@ -162,14 +170,20 @@ export interface Layout {
   box: { x: [number, number]; y: [number, number] };
 }
 
+/** The service and module slices the index serves, now: their stored discs replace the ones computed here. */
+export interface Served {
+  service?: GraphSlice;
+  module?: GraphSlice;
+}
+
 /**
- * Positions for all three levels from one slice (the workspace now) and its structure. Bottom-up: a module's radius
- * fits its files, a service's fits its modules on shelves, then services on shelves. Files take sunflower seats
- * ranked by a hash of their id, so a file keeps its seat as others come and go. Deterministic: the same index gives
- * the same positions every time it is opened. Stored positions (I2) win when the slice carries them.
+ * Positions for all three levels from one slice (the workspace now) and its structure. Stored positions (I2) win:
+ * a file the slice places sits there, and when `served` carries the service and module levels with positions, their
+ * discs are the index's. Otherwise, bottom-up: a module's radius fits its files, a service's fits its modules on
+ * shelves, then services on shelves; files take sunflower seats ranked by a hash of their id, so a file keeps its
+ * seat as others come and go. Deterministic: the same index gives the same positions every time it is opened.
  */
-export function layout(s: GraphSlice, st: Structure, own = owners(s, st)): Layout {
-  const stored = s.nodes.x.some((x, i) => x !== 0 || s.nodes.y[i] !== 0);
+export function layout(s: GraphSlice, st: Structure, own = owners(s, st), served?: Served): Layout {
   const perMod = new Map<number, number[]>(), loose = new Map<number, number[]>();
   for (let f = 0; f < s.nodes.id.length; f++) {
     const m = own.module[f], v = own.service[f];
@@ -200,8 +214,19 @@ export function layout(s: GraphSlice, st: Structure, own = owners(s, st)): Layou
   const place = (list: number[] | undefined, d: Disc | undefined) => {
     if (!list || !d) return;
     [...list].sort((a, b) => hash(s.nodes.id[a]) - hash(s.nodes.id[b]) || (s.nodes.id[a] < s.nodes.id[b] ? -1 : 1))
-      .forEach((f, rank) => files.set(s.nodes.id[f], stored ? { x: s.nodes.x[f], y: s.nodes.y[f] } : seat(d, rank, s.nodes.id[f])));
+      .forEach((f, rank) => files.set(s.nodes.id[f], placed(s, f) ? { x: s.nodes.x[f], y: s.nodes.y[f] } : seat(d, rank, s.nodes.id[f])));
   };
+  // the index's discs replace these when it serves them: one plane, never two mixed
+  if (hasLayout(served?.service)) {
+    services.clear(); modules.clear();
+    for (const lv of [served!.service!, served!.module]) {
+      lv?.nodes.id.forEach((id, i) => {
+        if (placed(lv, i)) (lv.nodes.kind[i] === "module" ? modules : services).set(id, { x: lv.nodes.x[i], y: lv.nodes.y[i], r: lv.nodes.size[i] });
+      });
+    }
+    // loose files sit in their service's disc
+    st.services.forEach((sv, k) => { const d = services.get(sv.id); if (d) looseDisc.set(k, d); else looseDisc.delete(k); });
+  }
   for (const [m, list] of perMod) place(list, modules.get(st.modules[m].id));
   for (const [k, list] of loose) place(list, looseDisc.get(k));
   const all = [...services.values()];
@@ -216,9 +241,9 @@ export function placeOf(L: Layout, id: string, kind: string, holder?: string): P
   if (kind === "service") return L.services.get(id) ?? { x: 0, y: 0, r: 1 };
   if (kind === "module") return L.modules.get(id) ?? { x: 0, y: 0, r: 1 };
   const p = L.files.get(id);
-  if (p) return { ...p, r: STEP * 0.32 };
+  if (p) return { ...p, r: FILE_R };
   const d = (holder && (L.modules.get(holder) ?? L.services.get(holder))) || { x: 0, y: 0, r: 4 };
-  return { ...seat(d, -1, id), r: STEP * 0.32 };
+  return { ...seat(d, -1, id), r: FILE_R };
 }
 
 // ---------- compare (I4) ----------

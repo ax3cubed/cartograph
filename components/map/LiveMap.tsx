@@ -17,7 +17,7 @@ import Timeline, { DAY, type Tick } from "../timeline/Timeline";
 import { nearest } from "../timeline/bins";
 import TableView from "./TableView";
 import Details from "./Details";
-import { compare, layout as levelLayout, owners, rollUp, type Compared, type DiffState, type Level } from "./levels";
+import { compare, hasLayout, layout as levelLayout, owners, placed, rollUp, type Compared, type DiffState, type Level } from "./levels";
 import { degrees, linked, sayFile, sayFolder, shown, topFolder } from "./table";
 import type { GLLevel } from "./WebGLMap";
 import "./liveMap.css";
@@ -49,17 +49,21 @@ const hue = (i: number) => (i < 6 ? `var(--hue-${i + 1})` : "var(--steel)");
 const token = (i: number) => (i >= 0 && i < 6 ? `--hue-${i + 1}` : "--steel");
 const NOUN: Record<Level, { one: string; many: string }> = { service: { one: "service", many: "services" }, module: { one: "module", many: "modules" }, file: { one: "file", many: "files" } };
 
+/** Stored positions (I2) are in the indexer's units, where a file's radius is 1; the SVG map spaces files wider. */
+const STORED_SCALE = 6;
+
 /**
- * Positions for the SVG map, from the workspace now so they hold still while the date moves (I2). Each top folder
- * is a disc of files (a sunflower, ordered by a hash of the id so a file keeps its rank as others come and go), and
- * the discs are packed on shelves, largest first. A file that isn't there now gets a seat by its hash.
+ * Positions for the SVG map, from the workspace now so they hold still while the date moves (I2). A file sits where
+ * the index placed it, and each top folder is a disc around its files. On an index with no layout rows yet, each top
+ * folder is a disc of files (a sunflower, ordered by a hash of the id so a file keeps its rank as others come and
+ * go), and the discs are packed on shelves, largest first. A file that isn't there now gets a seat by its hash.
  */
 function svgLayout(s: GraphSlice) {
   const count = s.nodes.id.length;
   const folder = s.nodes.name.map(topFolder);
   const groups = [...new Set(folder)].sort();
   const pos = new Map<string, Pt>();
-  const stored = s.nodes.x.some((x, i) => x !== 0 || s.nodes.y[i] !== 0);
+  const stored = hasLayout(s);
   const centres = new Map<string, Pt & { r: number }>();
   const members = new Map<string, number[]>(groups.map((g) => [g, []]));
   folder.forEach((g, i) => members.get(g)!.push(i));
@@ -68,15 +72,24 @@ function svgLayout(s: GraphSlice) {
   const area = bySize.reduce((a, g) => a + (2 * radius(g)) ** 2, 0);
   const width = bySize.length ? Math.max(2 * radius(bySize[0]), Math.sqrt(area) * 1.3) : 0;
   let x = 0, y = 0, row = 0;
+  const at0 = (i: number): Pt => ({ x: s.nodes.x[i] * STORED_SCALE, y: s.nodes.y[i] * STORED_SCALE });
   for (const g of bySize) {
-    const r = radius(g);
-    if (x > 0 && x + 2 * r > width) { x = 0; y += row; row = 0; }
-    const c = { x: x + r, y: y + r, r };
+    let c: Pt & { r: number };
+    if (stored) {
+      // the disc around the folder's placed files
+      const ps = members.get(g)!.filter((i) => placed(s, i)).map(at0);
+      const cx = ps.length ? ps.reduce((a, p) => a + p.x, 0) / ps.length : 0, cy = ps.length ? ps.reduce((a, p) => a + p.y, 0) / ps.length : 0;
+      c = { x: cx, y: cy, r: Math.max(0, ...ps.map((p) => Math.hypot(p.x - cx, p.y - cy))) + 24 };
+    } else {
+      const r = radius(g);
+      if (x > 0 && x + 2 * r > width) { x = 0; y += row; row = 0; }
+      c = { x: x + r, y: y + r, r };
+      x += 2 * r; row = Math.max(row, 2 * r);
+    }
     centres.set(g, c);
-    x += 2 * r; row = Math.max(row, 2 * r);
     members.get(g)!.sort((a, b) => hash(s.nodes.id[a]) - hash(s.nodes.id[b])).forEach((i, k) => {
       const rr = STEP * Math.sqrt(k + 0.5), a = k * GOLDEN;
-      pos.set(s.nodes.id[i], stored ? { x: s.nodes.x[i], y: s.nodes.y[i] } : { x: c.x + rr * Math.cos(a), y: c.y + rr * Math.sin(a) });
+      pos.set(s.nodes.id[i], stored && placed(s, i) ? at0(i) : { x: c.x + rr * Math.cos(a), y: c.y + rr * Math.sin(a) });
     });
   }
   const all = [...pos.values()];
@@ -185,6 +198,12 @@ function LiveMap() {
   // a workspace with more files than the SVG map draws is WebGL before its slice arrives, so sigma starts at once
   const gl = forceGL || size > MAX_DRAWN || (!s && (current?.files ?? 0) > MAX_DRAWN);
   const nowSlice = nowG.data;
+  // an index with stored positions (I2) serves the service and module levels too; one without has them rolled up here
+  const served = hasLayout(nowSlice);
+  const lvWs = gl && served ? ws : undefined;
+  const svcA = useGraph(lvWs, at, "service"), modA = useGraph(lvWs, at, "module");
+  const svcB = useGraph(cmp ? lvWs : undefined, bAt ?? "", "service"), modB = useGraph(cmp ? lvWs : undefined, bAt ?? "", "module");
+  const svcNow = useGraph(lvWs, "", "service"), modNow = useGraph(lvWs, "", "module");
   const L = useMemo(() => (!gl && nowSlice ? svgLayout(nowSlice) : null), [gl, nowSlice]);
   const cA = useMemo<Compared | null>(() => (cmp && s && sB ? (bEarlier ? compare(sB, s) : compare(s, sB)) : null), [cmp, s, sB, bEarlier]);
   /** The file-level slice the map, the table and the walk read: the date's, or both dates' union in compare. */
@@ -193,16 +212,27 @@ function LiveMap() {
   const deg = useMemo(() => (fileSlice ? degrees(fileSlice) : { inn: [], out: [] }), [fileSlice]);
 
   // ---------- the WebGL map's levels (FE-08) ----------
-  const glL = useMemo(() => (gl && nowSlice && structure ? levelLayout(nowSlice, structure) : null), [gl, nowSlice, structure]);
+  const nowServed = useMemo(() => (served && !svcNow.error && !modNow.error ? { service: svcNow.data, module: modNow.data } : undefined),
+    [served, svcNow.data, svcNow.error, modNow.data, modNow.error]);
+  const glL = useMemo(() => {
+    if (!gl || !nowSlice || !structure) return null;
+    if (nowServed && (!nowServed.service || !nowServed.module)) return null; // the index's discs are on their way
+    return levelLayout(nowSlice, structure, undefined, nowServed);
+  }, [gl, nowSlice, structure, nowServed]);
   const svcIndex = useMemo(() => new Map((structure?.services ?? []).map((x, k) => [x.id, k])), [structure]);
   const holderSvc = useMemo(() => new Map([...(structure?.services ?? []).map((x) => [x.id, x.id] as const), ...(structure?.modules ?? []).map((m) => [m.id, m.service] as const)]), [structure]);
   const glLevels = useMemo(() => {
     if (!gl || !structure || !s) return null;
-    const one = (x: GraphSlice) => {
+    type R = { data?: GraphSlice; error?: unknown };
+    // the index's levels when it serves them; rolled up here when it has no layout or the read failed
+    const one = (x: GraphSlice, sv: R, md: R) => {
       const own = owners(x, structure);
+      if (served && sv.data && md.data && !sv.error && !md.error) return { own, service: sv.data, module: md.data };
       return { own, service: rollUp(x, structure, "service", own), module: rollUp(x, structure, "module", own) };
     };
-    const A = one(s), B = sB ? one(sB) : null;
+    const waiting = (r: R) => served && !r.data && !r.error;
+    if (waiting(svcA) || waiting(modA) || (sB && (waiting(svcB) || waiting(modB)))) return null;
+    const A = one(s, svcA, modA), B = sB ? one(sB, svcB, modB) : null;
     const pair = (lv: "service" | "module" | "file") => {
       const a = lv === "file" ? s : A[lv];
       if (!B || !sB) return { slice: a };
@@ -221,7 +251,7 @@ function LiveMap() {
     out.service.service = (i) => out.service.slice.nodes.id[i];
     out.module.service = (i) => holderSvc.get(out.module.slice.nodes.id[i]) ?? "";
     return out;
-  }, [gl, structure, s, sB, bEarlier, holderSvc]);
+  }, [gl, structure, s, sB, bEarlier, holderSvc, served, svcA.data, svcA.error, modA.data, modA.error, svcB.data, svcB.error, modB.data, modB.error]); // eslint-disable-line react-hooks/exhaustive-deps
   const hueOf = useCallback((svc: string) => token(svcIndex.get(svc) ?? -1), [svcIndex]);
   // FE-12: the WebGL map draws what the table lists, under the same filter
   const glDrawn = useMemo(() => {

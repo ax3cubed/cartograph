@@ -1,6 +1,6 @@
 // FE-08 and FE-09: the zoom-to-level rule, bundle widths, roll-ups, layout and compare. Run with `pnpm check`.
 import assert from "node:assert/strict";
-import { bundleWidth, compare, layout, levelFor, owners, placeOf, rollUp, type Structure } from "./levels.ts";
+import { bundleWidth, compare, hasLayout, layout, levelFor, owners, placeOf, rollUp, type Structure } from "./levels.ts";
 import type { GraphSlice } from "../../lib/api/types.gen.ts";
 
 // zoom to level (board 00): fit is 50%; service below 60%, module 60–140%, file above
@@ -92,6 +92,36 @@ for (let t = 0; t < 200; t++) {
   // a file gone by now still gets a seat inside its holder
   const gone = placeOf(a, "n-gone", "file", "m1"), d = a.modules.get("m1")!;
   assert.ok(Math.hypot(gone.x - d.x, gone.y - d.y) <= d.r, "a gone file sits in its module");
+}
+
+// stored positions (I2): the index's discs and file places win; with none, the fallback above lays out
+{
+  const s = slice(60, 0);
+  assert.equal(hasLayout(s), false, "a slice at 0, 0 has no layout");
+  s.nodes.x = s.nodes.id.map((_, i) => (i === 3 ? 0 : 100 + i));
+  s.nodes.y = s.nodes.id.map((_, i) => (i === 3 ? 0 : -i));
+  assert.ok(hasLayout(s));
+  const lv = (lod: "service" | "module", ids: string[]): GraphSlice => ({
+    lod,
+    nodes: { id: ids, kind: ids.map(() => lod), name: ids, parent: ids.map(() => -1), children: ids.map(() => 0), size: ids.map((_, i) => 10 + i), x: ids.map((_, i) => 1000 * (i + 1)), y: ids.map(() => 7) },
+    links: { id: [], from: [], to: [], kind: [], level: [], score: [], weight: [], added_seq: [], removed_seq: [] },
+  });
+  const served = { service: lv("service", ["s1", "s2", "s3"]), module: lv("module", ["m1", "m2", "m3", "m4"]) };
+  const a = layout(s, st, undefined, served), b = layout(structuredClone(s), structuredClone(st), undefined, structuredClone(served));
+  assert.deepEqual([...a.files], [...b.files], "deterministic");
+  assert.deepEqual(a.services.get("s2"), { x: 2000, y: 7, r: 11 }, "a service sits on the index's disc");
+  assert.deepEqual(a.modules.get("m4"), { x: 4000, y: 7, r: 13 }, "a module sits on the index's disc");
+  assert.deepEqual(a.box, { x: [1000 - 10, 3000 + 12], y: [7 - 12, 7 + 12] }, "the box is the index's services");
+  assert.deepEqual(a.files.get("n5"), { x: 105, y: -5 }, "a placed file sits where the index put it");
+  // a file the index hasn't placed gets a seat in its holder's disc from the index
+  const own = owners(s, st), p = a.files.get("n3")!;
+  const d = own.module[3] >= 0 ? a.modules.get(st.modules[own.module[3]].id)! : a.services.get(st.services[own.service[3]].id)!;
+  assert.ok(Math.hypot(p.x - d.x, p.y - d.y) <= d.r, "an unplaced file sits in its holder");
+  // served levels without positions leave the fallback in charge
+  const flat = { service: lv("service", ["s1"]), module: lv("module", []) };
+  flat.service.nodes.x = [0];
+  flat.service.nodes.y = [0];
+  assert.deepEqual([...layout(s, st, undefined, flat).services], [...layout(s, st).services], "no stored discs: the fallback's");
 }
 
 // compare: added, removed, changed and unchanged by id

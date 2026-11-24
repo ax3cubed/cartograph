@@ -1,7 +1,7 @@
 // FE-04: the shell's reads from the local API, as hooks. Components still speak the interim lib/model.ts shapes;
 // to* below map the generated wire types onto them (lib/model.ts header) until FE-02's switch-over.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { Commit as ApiCommit, Freshness as ApiFreshness, GraphSlice, Node as ApiNode, Repo as ApiRepo, SearchResults, WorkspaceSummary as ApiWorkspace } from "./types.gen.ts";
+import type { Commit as ApiCommit, Freshness as ApiFreshness, GraphSlice, Lod, Node as ApiNode, Repo as ApiRepo, SearchResults, WorkspaceSummary as ApiWorkspace } from "./types.gen.ts";
 import type { Holder, Structure } from "../../components/map/levels.ts";
 import { get, type Params, type RequestError } from "./client.ts";
 import type { Freshness, WorkspaceSummary } from "../model.ts";
@@ -63,7 +63,9 @@ export function useFreshness(ws: string | undefined): Resource<Freshness> {
 export const useRepos = (ws: string | undefined) => useResource<ApiRepo[]>(ws ?? "", wsRoute(ws, "repos"));
 
 /** One file-level slice at `at` (now, a date or a sha). */
-export const useGraph = (ws: string | undefined, at: string) => useResource<GraphSlice>(ws ?? "", wsRoute(ws, "graph"), { at: at || "now" });
+/** One level's slice at `at` ("" = now); the file level unless `lod` says otherwise (SRV-04). */
+export const useGraph = (ws: string | undefined, at: string, lod: Lod = "file") =>
+  useResource<GraphSlice>(ws ?? "", wsRoute(ws, "graph"), lod === "file" ? { at: at || "now" } : { at: at || "now", lod });
 
 // ---------- FE-08 to FE-10: map, time and panel reads ----------
 

@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import type Graph from "graphology";
 import type Sigma from "sigma";
 import type { GraphSlice } from "@/lib/api";
-import { bundleWidth, levelFor, placeOf, zoomOf, type DiffState, type Layout, type Level } from "./levels";
+import { bundleWidth, FILE_R, levelFor, placed, placeOf, zoomOf, type DiffState, type Layout, type Level } from "./levels";
 
 export interface GLLevel {
   slice: GraphSlice;
@@ -97,7 +97,8 @@ function build(GraphCtor: typeof Graph, lv: GLLevel, level: Level, L: Layout, cs
   let files = 0;
   for (let i = 0; i < n.id.length; i++) {
     const kind = n.kind[i];
-    const p = placeOf(L, n.id[i], kind === "file" ? "file" : kind === "module" ? "module" : "service", lv.holder?.(i));
+    // a node the index placed (I2) sits there; the layout seats the rest
+    const p = placed(s, i) ? { x: n.x[i], y: n.y[i], r: kind === "file" ? FILE_R : n.size[i] } : placeOf(L, n.id[i], kind === "file" ? "file" : kind === "module" ? "module" : "service", lv.holder?.(i));
     if ((cull && !cull(p.x, p.y, p.r)) || lv.hide?.[i]) continue;
     if (kind === "file" && ++files > MAX_FILES) break;
     const st = lv.diff?.node[i];
