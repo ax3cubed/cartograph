@@ -43,9 +43,7 @@ export const CANDIDATES: Record<string, { name: string; node: string; score: num
   invoice: { name: "orderTotal", node: "gateway/routes/orders.ts", score: 0.64, why: "looks similar but shares no fields with InvoiceDTO" },
 };
 
-/** Coverage gaps that are not derivable from the contracts. Each list matches its row's gap count. */
-export const UNRESOLVED: Record<string, { at: string; raw: string }[]> = {
-  imports: [{ at: "api-gateway/src/clients/billingClient.ts:3", raw: 'import { Money } from "@shared/money"' }],
-  calls: [{ at: "billing-service/src/invoices/createInvoice.ts:41", raw: "`${env.CATALOG_URL}/products`" }],
-  routes: [{ at: "api-gateway/src/routes/orders.ts:52", raw: "router.get(\"/orders/:id/receipt\")" }],
-};
+/** The call site behind the calls coverage gap (XS-14 owns the cross-service rows). Matches the row's gap count. */
+export const UNRESOLVED_CALLS: { at: string; raw: string }[] = [
+  { at: "billing-service/src/invoices/createInvoice.ts:41", raw: "`${env.CATALOG_URL}/products`" },
+];

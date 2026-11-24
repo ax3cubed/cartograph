@@ -2,32 +2,17 @@
 .set-conn-flow span { display: flex; flex-direction: column; gap: 2px; padding: 0.5rem 0.75rem; border-radius: 0.625rem; background: var(--slab); font-size: 0.78rem; }
 .set-conn-flow small { color: var(--muted); font-size: 0.75rem; }
 .set-conn-flow i { color: var(--muted); font-style: normal; }
-.set-conn-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; align-items: start; }
-.set-conn-layout.has-panel { grid-template-columns: minmax(0, 1fr) 23.75rem; }
 .set-conn-list { list-style: none; margin: 0; padding: 0; }
-.set-conn-row { display: grid; grid-template-columns: 2.25rem minmax(0, 1.5fr) minmax(0, 1fr) 8rem 5.75rem; gap: 0.75rem; align-items: center; min-height: 3.6rem; padding-block: calc(var(--row-y) / 3); border-top: 1px solid var(--line); font-size: 0.84rem; }
+.set-conn-row { display: grid; grid-template-columns: 2.25rem minmax(0, 1.5fr) minmax(0, 1fr) 9rem; gap: 0.75rem; align-items: center; min-height: 3.6rem; padding-block: calc(var(--row-y) / 3); border-top: 1px solid var(--line); font-size: 0.84rem; }
 .set-conn-ic { width: 2.25rem; height: 2.25rem; flex: none; border-radius: 0.625rem; background: var(--slab); display: grid; place-items: center; font-size: 0.75rem; font-weight: 700; color: var(--body); }
 .set-conn-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .set-conn-name b { font-weight: 600; overflow-wrap: anywhere; }
 .set-conn-name small, .set-conn-state small { color: var(--muted); font-size: 0.75rem; overflow-wrap: anywhere; }
 .set-conn-gives { display: flex; gap: 0.375rem; flex-wrap: wrap; }
 .set-conn-state { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
-.set-conn-panel { box-shadow: var(--shadow-3); gap: 0.875rem; }
-.set-conn-kinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
-.set-conn-kinds button { display: flex; align-items: center; gap: 0.625rem; min-height: 3rem; padding: 0 0.625rem; border-radius: 0.75rem; border: 1.5px solid var(--line); font-size: 0.8125rem; font-weight: 500; text-align: left; }
-.set-conn-kinds button[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.set-conn-kinds .set-conn-ic { width: 1.75rem; height: 1.75rem; }
-.set-conn-needs { list-style: none; margin: 0.375rem 0 0; padding: 0; display: grid; gap: 0.25rem; }
-.set-conn-needs li { display: grid; grid-template-columns: 1.125rem 1fr auto; gap: 0.625rem; align-items: center; font-size: 0.8125rem; min-height: 2rem; }
-.set-conn-needs svg { color: var(--up); }
-.set-conn-needs small { color: var(--muted); }
-.set-conn-link { align-self: center; color: var(--accent); font-size: 0.75rem; }
+.set-conn-link { color: var(--accent); }
 .set-conn-link:hover { text-decoration: underline; }
-.set-conn-token { display: flex; flex-direction: column; gap: 0.625rem; }
 @media (max-width: 64rem) {
-  .set-conn-layout.has-panel { grid-template-columns: minmax(0, 1fr); }
   .set-conn-row { grid-template-columns: 2.25rem minmax(0, 1fr); }
   .set-conn-gives, .set-conn-state { grid-column: 2; }
 }
-.set-conn-panel h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 0.25rem; }
-.set-conn-fix { display: flex; align-items: center; gap: 0.625rem; margin: 0; font-size: 0.8125rem; font-weight: 600; overflow-wrap: anywhere; }

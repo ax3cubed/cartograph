@@ -34,7 +34,6 @@
 .aw-tab tr.is-skip td { color: var(--muted); }
 .aw-tab input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
 .aw-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 10px; background: var(--c, var(--faint)); }
-.aw-lang { margin-left: 8px; font: 0.6875rem var(--font-mono), monospace; color: var(--muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .aw-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 24px; border-radius: 14px; background: var(--slab); }

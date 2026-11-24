@@ -3,7 +3,7 @@ import type { AgentInstall, AgentStatus, ConfigFile, FileDiff, McpTool } from ".
 import { authHeaders, get, OFFLINE, RequestError, send } from "./client.ts";
 import { expire, setUp } from "./session.ts";
 
-export { readExcludes, setExcludes, setService, type ServiceEntry } from "./yaml.ts";
+export { readExcludes, readRetrieval, setExcludes, setRetrieval, setService, type RetrievalEntry, type ServiceEntry } from "./yaml.ts";
 
 // ---------- routes ----------
 

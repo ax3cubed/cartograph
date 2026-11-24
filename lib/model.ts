@@ -12,7 +12,7 @@
 //   Entrypoint, Concept, CoverageRow, Owner         ActivityItem, WorkspaceSummary, SearchResult
 //   CommitImpact (added_links, removed_links)       McpToolName, McpTool, Provider, AppearanceSettings
 //   Bin (a histogram bin; the generated Bin is the bin size), FileEvent, Rewrite, Sym, SymLink,
-//   Connection, ProviderKind, Extractor, EnvKey, EnvName, SpecVersion, FolderRow, Metrics:
+//   EnvKey, EnvName, SpecVersion, Metrics:
 //   no generated type yet; each needs a Rust type with schemars in crates/cartograph-api.
 
 // ---------- the map: nodes, links, commits (moved from lib/workspace.ts) ----------
@@ -177,19 +177,8 @@ export interface Sym {
 export interface SymLink { from: string; to: string; kind: "call" | "type" }
 
 // ---------- settings (moved from lib/demo/settings.ts) ----------
-export type Tone = "ok" | "warn" | "bad" | "off";
-export type ProviderKind = "folder" | "github" | "gitlab" | "bitbucket" | "k8s" | "spec" | "traces" | "azure";
-export interface Connection { id: string; kind: ProviderKind; ic: string; name: string; auth: string; provides: string[]; status: string; tone: Tone; when: string; action?: string }
-export interface Extractor { id: string; name: string; note: string; v: string; files: string; on: boolean }
 export type EnvName = "prod" | "staging" | "local";
 export interface EnvKey { key: string; value: string; from: string; to: string; tone: "ok" | "off" }
 
-// ---------- views and shell (moved from lib/demo/views-extra.ts and lib/demo/shell.ts) ----------
+// ---------- views (moved from lib/demo/views-extra.ts) ----------
 export interface SpecVersion { v: number; sha: string; summary: string; breaking?: { what: string; callers: string[] } }
-export interface FolderRow {
-  folder: string; // as written in the workspace file
-  name?: string; // display name from folders[].name
-  result: "repo" | "scope" | "skipped";
-  repo?: string; // service id for repo and scope rows
-  detail: string;
-}

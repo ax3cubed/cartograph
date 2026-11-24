@@ -88,3 +88,39 @@ export function setService(yaml: string, s: ServiceEntry): string {
   } else lines.splice(svc.end, 0, ...entry(pad));
   return lines.join("\n");
 }
+
+/** `retrieval:` (FE-13, G7): the chunk kinds searched (absent: the default set) and the secret scan (absent: on). */
+export interface RetrievalEntry { include?: string[]; secret_scan?: boolean }
+
+export function readRetrieval(yaml: string): RetrievalEntry {
+  const lines = yaml.split("\n");
+  const r = block(lines, "retrieval", 0);
+  if (!r) return {};
+  const child = indentOf(lines.slice(r.start + 1, r.end).find((l) => !isBlank(l)) ?? "  ") || 2;
+  const out: RetrievalEntry = {};
+  const inc = block(lines, "include", child, r.start + 1, r.end);
+  if (inc) {
+    const inline = lines[inc.start].split(/include:/)[1].trim();
+    out.include = inline.startsWith("[")
+      ? inline.replace(/^\[|\]\s*(#.*)?$/g, "").split(",").map(unquote).filter(Boolean)
+      : lines.slice(inc.start + 1, inc.end).filter((l) => l.trimStart().startsWith("- ")).map((l) => unquote(l.trimStart().slice(2)));
+  }
+  const scan = block(lines, "secret_scan", child, r.start + 1, r.end);
+  if (scan) out.secret_scan = unquote(lines[scan.start].split(/secret_scan:/)[1]) !== "false";
+  return out;
+}
+
+/** `yaml` with `retrieval:` holding `r`'s keys, in place of any earlier one (removed when `r` is empty). */
+export function setRetrieval(yaml: string, r: RetrievalEntry): string {
+  const lines = yaml.split("\n");
+  const body = [
+    ...(r.include ? [`  include: [${r.include.map(scalar).join(", ")}]`] : []),
+    ...(r.secret_scan === undefined ? [] : [`  secret_scan: ${r.secret_scan}`]),
+  ];
+  const next = body.length ? ["retrieval:", ...body] : [];
+  const old = block(lines, "retrieval", 0);
+  if (old) { lines.splice(old.start, old.end - old.start, ...next); return lines.join("\n"); }
+  if (!next.length) return yaml;
+  const tail = lines.length && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+  return [...lines.slice(0, tail), ...next, ...lines.slice(tail)].join("\n");
+}

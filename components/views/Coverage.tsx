@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import { Gauge } from "lucide-react";
-import { getContracts, getCoverage, getEntrypoints, getFreshness, getRepos } from "@/lib/source";
+import { getContracts, getCoverage, getEntrypoints, getFreshness, getRepos, getUnresolved } from "@/lib/source";
+import { useLive, useWorkspaces, wsRoute } from "@/lib/api/live";
+import { useResource } from "@/lib/api/cache";
+import type { CoverageRow as ApiCoverageRow, Unresolved } from "@/lib/api";
+import type { CoverageRow } from "@/lib/model";
 import { NODES } from "@/lib/workspace";
-import { UNRESOLVED } from "@/lib/demo/views-extra";
+import { UNRESOLVED_CALLS } from "@/lib/demo/views-extra";
 import { AsideTop, Cell, Chip, KeyHint, NodeLink, Page, ViewSplit, mapHref, pathOf, useHashState, useRoving } from "./shared";
 import { specRisk } from "./risk";
 import "./coverage.css";
@@ -23,16 +27,29 @@ const fmt = (p: number) => `${+p.toFixed(1)}%`;
 const sentence = (s: string) => { const t = s.replace(/^\d+\s+/, ""); return t[0].toUpperCase() + t.slice(1); };
 
 interface Ref { at: string; raw: string; node?: string }
-const nodeAt = (at: string) => NODES.find((n) => n.path === at.split(":")[0])?.id;
-/** The references behind a gap. Each list is as long as the gap's count. */
-function refs(id: string): Ref[] {
+/** The rows the index answers (IDX-22). The cross-service rows (calls, handlers, routes, consumers) stay demo data
+ * until XS-14. */
+const INDEX_ROWS = new Set(["files", "imports"]);
+const toRow = (r: ApiCoverageRow): CoverageRow => ({ id: r.id, label: r.label, done: r.done, total: r.total, target: r.target ?? undefined, gap: r.gap ? { what: r.gap.what, why: r.gap.why, action: r.gap.try } : undefined });
+const unresolvedRef = (u: Unresolved): Ref => ({ at: `${u.path}:${u.line}`, raw: u.text, node: u.file || undefined });
+/** The references behind a gap. Each list is as long as the gap's count, or the first page of it. */
+function refs(id: string, unresolved: Unresolved[]): Ref[] {
   if (id === "handlers") return getContracts().flatMap((s) => s.operations.filter((o) => !o.handler).map((o) => ({ at: s.file, raw: `${o.method} ${o.path}` })));
   if (id === "consumers") return getEntrypoints().filter((e) => e.consumers === 0).map((e) => ({ at: pathOf(e.node), raw: e.label, node: e.node }));
-  return (UNRESOLVED[id] ?? []).map((u) => ({ ...u, node: nodeAt(u.at) }));
+  if (id === "calls") return UNRESOLVED_CALLS.map((u) => ({ ...u, node: NODES.find((n) => n.path === u.at.split(":")[0])?.id }));
+  return id === "imports" ? unresolved.map(unresolvedRef) : [];
 }
 
 export default function Coverage() {
-  const rows = getCoverage();
+  const live = useLive();
+  const { current } = useWorkspaces();
+  const ws = live ? current?.id : undefined;
+  const fromIndex = useResource<ApiCoverageRow[]>(ws ?? "", wsRoute(ws, "coverage"));
+  const liveUnresolved = useResource<Unresolved[]>(ws ?? "", wsRoute(ws, "coverage/imports/unresolved"), { limit: 200 });
+  const unresolved = (live ? liveUnresolved.data : getUnresolved()) ?? [];
+  const rows = live
+    ? [...(fromIndex.data ?? []).map(toRow), ...getCoverage().filter((r) => !INDEX_ROWS.has(r.id))]
+    : getCoverage();
   const gaps = rows.filter((r) => r.gap && r.total > r.done).sort((a, b) => b.total - b.done - (a.total - a.done));
   const h = useHashState();
   const sel = gaps.find((g) => g.id === h.get("row")) ?? gaps[0];
@@ -40,10 +57,10 @@ export default function Coverage() {
   const first = getFreshness().state === "none" || getRepos().length === 0;
   const risky = getContracts().map((s) => ({ s, r: specRisk(s) })).filter((x) => x.r.mismatch || x.r.breaking);
   const riskN = risky.reduce((n, x) => n + x.r.mismatch + x.r.breaking, 0);
-  const list = sel ? refs(sel.id) : [];
+  const list = sel ? refs(sel.id, unresolved) : [];
   const n = sel ? sel.total - sel.done : 0;
   const first1 = list.find((r) => r.node)?.node;
-  const rv = useRoving(gaps.map((g) => g.id), sel?.id, (row) => h.set({ row }), (id) => { const f = refs(id).find((r) => r.node)?.node; return f ? mapHref(f, BACK) : undefined; });
+  const rv = useRoving(gaps.map((g) => g.id), sel?.id, (row) => h.set({ row }), (id) => { const f = refs(id, unresolved).find((r) => r.node)?.node; return f ? mapHref(f, BACK) : undefined; });
 
   return (
     <Page icon={Gauge} when={first} empty={{ title: "Building your first index", body: "Coverage shows what the map can and can't see once the first index finishes.", action: { label: "See indexing settings", href: "/settings/indexing" } }}>

@@ -1,6 +1,6 @@
 // Run: pnpm check
 import assert from "node:assert/strict";
-import { readExcludes, setExcludes, setService } from "./yaml.ts";
+import { readExcludes, readRetrieval, setExcludes, setRetrieval, setService } from "./yaml.ts";
 
 const base = `# Northwind
 version: 1
@@ -38,4 +38,15 @@ assert.ok(again.includes("path: billing/src") && !again.includes("path: billing\
 const more = setService(again, { name: "auth", repo: "a" });
 assert.equal((more.match(/- name:/g) ?? []).length, 3, "added beside the repo and billing entries");
 assert.ok(more.indexOf("billing/src") < more.indexOf("name: auth"), "order kept");
+
+// retrieval: (FE-13)
+assert.deepEqual(readRetrieval(base), {});
+assert.equal(setRetrieval(base, {}), base, "nothing to write leaves the file alone");
+const ret = setRetrieval(base, { include: ["cards", "changes"], secret_scan: false });
+assert.ok(ret.startsWith(base.trimEnd()) && ret.endsWith("retrieval:\n  include: [cards, changes]\n  secret_scan: false\n"), "appended, the rest as it was");
+assert.deepEqual(readRetrieval(ret), { include: ["cards", "changes"], secret_scan: false });
+const ret2 = setRetrieval(ret, { secret_scan: true });
+assert.deepEqual(readRetrieval(ret2), { secret_scan: true });
+assert.equal(setRetrieval(ret2, {}), base, "the section goes when it is back to the defaults");
+assert.deepEqual(readRetrieval("version: 1\nretrieval:\n  include:\n    - docs\n    - \"cards\"\n"), { include: ["docs", "cards"] });
 console.log("settings yaml ok");

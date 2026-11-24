@@ -7,7 +7,7 @@ import { useFreshness, useLive, useWorkspaces } from "@/lib/api/live";
 import { bump, useResource } from "@/lib/api/cache";
 import { RequestError, send } from "@/lib/api/client";
 import { AGENTS, MCP_TOOLS, type AgentInstall, type AgentStatus, type FileDiff, type McpTool } from "@/lib/api/settings";
-import { Chip, SettingsPage, useStored } from "./ui";
+import { Chip, SettingsPage } from "./ui";
 import { fmtDate } from "@/lib/date";
 import "./editor.css";
 
@@ -38,7 +38,6 @@ export default function Editor() {
   const tools = live ? liveTools.data ?? [] : getMcpTools();
   const ws = live ? current : getCurrentWorkspace();
   const fresh = live ? liveFresh : getFreshness();
-  const [transport, setTransport] = useStored<"stdio" | "http">("cartograph:mcp-transport", "stdio");
 
   return (
     <SettingsPage title="Use from your editor" saves="app"
@@ -60,19 +59,14 @@ export default function Editor() {
         </div>
         <div className="set-col">
           <section className="set-sec" aria-labelledby="set-ed-sv">
-            <div className="set-sec-head"><h2 id="set-ed-sv">Server</h2><Chip tone="ok" dot>{transport === "stdio" ? "Started by your editor" : "HTTP on this machine"}</Chip></div>
+            <div className="set-sec-head"><h2 id="set-ed-sv">Server</h2><Chip tone="ok" dot>Started by your editor</Chip></div>
             <dl className="set-ed-facts">
-              <dt id="set-ed-tr">Connection</dt>
-              <dd><div className="set-seg" role="radiogroup" aria-labelledby="set-ed-tr">
-                <button type="button" role="radio" aria-checked={transport === "stdio"} onClick={() => setTransport("stdio")}>Editor starts it (default)</button>
-                <button type="button" role="radio" aria-checked={transport === "http"} onClick={() => setTransport("http")}>Local web address</button>
-              </div></dd>
-              {transport === "http" && <><dt>Address</dt><dd className="set-mono">http://127.0.0.1:4317/mcp</dd></>}
+              <dt>Connection</dt><dd>Standard input and output</dd>
               <dt>Index</dt><dd>{ws?.name}{fresh?.builtAt ? <> · built {fmtDate(fresh.builtAt, "md", "local")}</> : null}</dd>
               {live && ws && <><dt>Workspace</dt><dd className="set-mono" title={ws.path}>{ws.path}</dd></>}
             </dl>
             {live && <p className="set-note">The index itself lives in Cartograph&apos;s data folder (<span className="set-mono">~/.cartograph/workspaces/{ws?.id ?? "<workspace>"}/index.cartograph</span>, or under <span className="set-mono">CARTOGRAPH_HOME</span> when that is set), never inside the workspace.</p>}
-            <p className="set-note">{transport === "stdio" ? "Your editor starts cartograph mcp itself. Nothing listens on a port." : "Only this machine can connect. The server listens on 127.0.0.1, so other machines can't reach it."}</p>
+            <p className="set-note">Your editor starts cartograph mcp itself and talks to it over standard input and output. Nothing listens on a port.</p>
           </section>
           {live && <Agents list={agents.data} error={agents.error} loading={agents.loading} />}
           <section className="set-sec" aria-labelledby="set-ed-tl">
