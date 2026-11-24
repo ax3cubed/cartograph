@@ -264,7 +264,14 @@ fn every_detail_function_matches_the_typescript_helpers_on_northwind() {
     let dir = tempfile::tempdir().unwrap();
     let ix = cartograph_fixtures::index(&cartograph_fixtures::northwind(), dir.path());
     let store = Store::open_path(&ix).unwrap();
-    let s = store.snapshot(Limits::default()).unwrap();
+    // One snapshot answers hundreds of comparisons; its deadline is per snapshot, so a slow CI
+    // runner needs more than the default 5 s for all of them together.
+    let s = store
+        .snapshot(Limits {
+            deadline: std::time::Duration::from_secs(120),
+            ..Limits::default()
+        })
+        .unwrap();
     let all = Page::parse(Some(1000), None).unwrap();
 
     // Scopes the index has under the demo's names: the TypeScript services (Go and Python ones
@@ -397,7 +404,14 @@ fn series_density_and_commit_impact_agree_with_the_links() {
     let dir = tempfile::tempdir().unwrap();
     let ix = cartograph_fixtures::index(&cartograph_fixtures::northwind(), dir.path());
     let store = Store::open_path(&ix).unwrap();
-    let s = store.snapshot(Limits::default()).unwrap();
+    // One snapshot answers hundreds of comparisons; its deadline is per snapshot, so a slow CI
+    // runner needs more than the default 5 s for all of them together.
+    let s = store
+        .snapshot(Limits {
+            deadline: std::time::Duration::from_secs(120),
+            ..Limits::default()
+        })
+        .unwrap();
     let all = Page::parse(Some(1000), None).unwrap();
 
     // The series' net changes add up to the live count, month by month back to the start.
