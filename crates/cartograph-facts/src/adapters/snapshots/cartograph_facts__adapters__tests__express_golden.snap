@@ -1,0 +1,7 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "pretty(&run(&mut c, 3, \"orders/src/server.ts\", ORDERS_SERVER))"
+---
+express {"kind":"route","span":[5,0,5,29],"attrs":{"method":"USE","mount":{"parts":[{"expr":"ordersRouter"}]},"path":"/api"},"evidence":{"type":"template","text":"app.use(\"/api\", ordersRouter)"}}
+express {"kind":"route","span":[6,0,8,2],"attrs":{"method":"GET","path":"/orders/:id"},"evidence":{"type":"literal","text":"app.get(\"/orders/:id\", (req, res) => { res.json({ id: req.params.id }); })"}}
+express {"kind":"route","span":[9,0,9,27],"attrs":{"method":"POST","path":"/orders"},"evidence":{"type":"literal","text":"app.post(`/orders`, create)"}}

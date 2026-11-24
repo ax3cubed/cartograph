@@ -1,0 +1,5 @@
+name = "fetch"
+version = "1.0.0"
+language = "ecmascript"
+files = ["**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx"]
+requires = ["fetch", "axios", "got", "ky"]

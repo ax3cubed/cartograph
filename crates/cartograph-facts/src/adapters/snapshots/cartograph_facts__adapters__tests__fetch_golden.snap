@@ -1,0 +1,8 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "pretty(&run(&mut c, 4, \"web/src/api.ts\", WEB_API))"
+---
+fetch {"kind":"http.call","span":[3,18,3,58],"attrs":{"method":"GET","url":{"parts":[{"lit":"http://orders:8080/orders/"},{"expr":"id"}]}},"evidence":{"type":"template","text":"fetch(`http://orders:8080/orders/${id}`)"}}
+fetch {"kind":"http.call","span":[7,2,7,70],"attrs":{"method":"POST","url":{"parts":[{"expr":"base"},{"lit":"/orders"}]}},"evidence":{"type":"template","text":"fetch(base + \"/orders\", { method: \"post\", body: JSON.stringify(o) })"}}
+fetch {"kind":"http.call","span":[9,35,9,61],"attrs":{"method":"GET","url":{"parts":[{"lit":"/orders/"},{"expr":"id"}]}},"evidence":{"type":"template","text":"axios.get(\"/orders/\" + id)"}}
+fetch {"kind":"client.base","span":[8,22,8,71],"attrs":{"url":{"parts":[{"expr":"process.env.ORDERS_URL"}]}},"evidence":{"type":"template","text":"axios.create({ baseURL: process.env.ORDERS_URL })"}}

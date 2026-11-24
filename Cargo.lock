@@ -394,17 +394,23 @@ version = "0.2.0"
 dependencies = [
  "cartograph-core",
  "cartograph-parse",
+ "insta",
  "jsonschema",
  "oxc_resolver",
  "postcard",
  "proptest",
+ "regex",
  "rusqlite",
  "rustc-hash",
  "schemars",
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
  "tracing",
+ "tree-sitter",
+ "tree-sitter-javascript",
+ "tree-sitter-typescript",
 ]
 
 [[package]]

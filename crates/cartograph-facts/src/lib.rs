@@ -1,5 +1,6 @@
 //! Fact cache, resolvers and the replay engine.
 
+pub mod adapters;
 pub mod cache;
 pub mod fs;
 pub mod lang;

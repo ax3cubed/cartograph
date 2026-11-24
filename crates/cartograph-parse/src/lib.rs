@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 mod lang;
 pub mod manifest;
 mod manifest_lang;
-mod syntax;
+pub mod syntax;
 mod ts;
 
 pub use lang::{GoImports, PhpImports, PyImports};

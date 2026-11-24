@@ -1,6 +1,6 @@
 //! What every tree-sitter extractor shares: one parser per grammar per thread, made the first time
 //! a file of that grammar shows up (IDX-23: a workspace with no PHP never builds a PHP parser), a
-//! time limit per parse, and a depth-limited walk.
+//! time limit per parse, and a depth-limited walk. Adapters (XS-03) parse through it too.
 
 use std::cell::RefCell;
 use std::ops::ControlFlow;
@@ -21,11 +21,7 @@ thread_local! {
 }
 
 /// Parses `bytes` with the grammar of `kind`; `None` when the time limit stopped it.
-pub(crate) fn parse(
-    kind: &'static str,
-    language: fn(&str) -> Language,
-    bytes: &[u8],
-) -> Option<Tree> {
+pub fn parse(kind: &'static str, language: fn(&str) -> Language, bytes: &[u8]) -> Option<Tree> {
     PARSERS.with_borrow_mut(|ps| {
         let i = match ps.iter().position(|(k, _)| *k == kind) {
             Some(i) => i,
@@ -53,7 +49,7 @@ pub(crate) fn parse(
 }
 
 /// Visits every node, depth first, down to [`MAX_DEPTH`].
-pub(crate) fn walk(tree: &Tree, mut visit: impl FnMut(Node)) {
+pub fn walk(tree: &Tree, mut visit: impl FnMut(Node)) {
     let mut cursor = tree.walk();
     let mut depth = 0usize;
     loop {
@@ -74,7 +70,7 @@ pub(crate) fn walk(tree: &Tree, mut visit: impl FnMut(Node)) {
     }
 }
 
-pub(crate) fn span(n: Node) -> Span {
+pub fn span(n: Node) -> Span {
     let (s, e) = (n.start_position(), n.end_position());
     Span {
         start_line: s.row as u32 + 1,
@@ -85,6 +81,6 @@ pub(crate) fn span(n: Node) -> Span {
 }
 
 /// A node's source text.
-pub(crate) fn text<'a>(n: Node, src: &'a [u8]) -> &'a str {
+pub fn text<'a>(n: Node, src: &'a [u8]) -> &'a str {
     std::str::from_utf8(src.get(n.start_byte()..n.end_byte()).unwrap_or_default()).unwrap_or("")
 }
