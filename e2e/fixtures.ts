@@ -3,6 +3,8 @@
 // the machine" check (HD-11).
 import { test as base, expect, type Page } from "@playwright/test";
 import { spawn } from "node:child_process";
+// A minimal PATH, so the agents page finds no editor installed on this machine (git stays reachable).
+const E2E_PATH = process.platform === "win32" ? process.env.PATH : "/usr/bin:/bin";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +18,7 @@ export async function serve(golden = true): Promise<Served & { stop: () => Promi
   else mkdirSync(join(home, "workspaces"));
   const child = spawn(process.env.CARTOGRAPH_E2E_BIN!, ["serve", "--port", "0"], {
     // HOME too: the folder picker and the registry never see the real one.
-    env: { ...process.env, CARTOGRAPH_HOME: home, HOME: home, USERPROFILE: home, NO_COLOR: "1" },
+    env: { ...process.env, CARTOGRAPH_HOME: home, HOME: home, USERPROFILE: home, NO_COLOR: "1", PATH: E2E_PATH },
     stdio: "ignore",
   });
   const stop = async () => {
