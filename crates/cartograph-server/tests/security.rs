@@ -29,6 +29,7 @@ const API: &[&str] = &[
     "/api/v1/w/{ws}/path?from=n1&to=n2",
     "/api/v1/mcp/tools",
     "/api/v1/agents",
+    "/api/v1/activity",
 ];
 
 #[test]

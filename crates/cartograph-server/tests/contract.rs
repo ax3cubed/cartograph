@@ -20,6 +20,7 @@ const SERVED: &[(&str, &str)] = &[
     ),
     ("/api/v1/w/{ws}/graph?lod=module", "/api/v1/w/{ws}/graph"),
     ("/api/v1/w/{ws}/graph?lod=service", "/api/v1/w/{ws}/graph"),
+    ("/api/v1/activity", "/api/v1/activity"),
 ];
 
 #[test]

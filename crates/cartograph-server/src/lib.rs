@@ -11,6 +11,7 @@
 // Handlers return their error as a ready Response; it is built once per failed request.
 #![allow(clippy::result_large_err)]
 
+pub mod activity;
 pub mod agents;
 mod guard;
 mod live;

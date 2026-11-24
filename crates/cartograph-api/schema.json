@@ -10,28 +10,45 @@
       "type": "string"
     },
     "ActivityItem": {
+      "description": "One row of the activity list (FE-16), kept in the workspace's ask.db. `text` and `detail` hold\nrepo and author names, which are untrusted: the app renders them as text. Never file contents.",
       "properties": {
         "at": {
           "type": "string"
         },
+        "detail": {
+          "description": "Who ran it and which version: \"Indexed by the background sync · cartograph 0.4.0\".",
+          "type": "string"
+        },
+        "href": {
+          "description": "The app view the row opens, as a path and hash.",
+          "type": "string"
+        },
         "id": {
+          "description": "`<workspace>:<row>`.",
           "type": "string"
         },
         "kind": {
           "$ref": "#/definitions/ActivityKind"
         },
         "text": {
+          "description": "\"billing-service synced to 3e0d7a2 · 3 commits by Tom Ellery and Jon Reyes\", at most 120\ncharacters.",
           "type": "string"
         },
         "unread": {
           "type": "boolean"
+        },
+        "ws": {
+          "type": "string"
         }
       },
       "required": [
         "id",
+        "ws",
         "at",
         "kind",
         "text",
+        "detail",
+        "href",
         "unread"
       ],
       "type": "object"
@@ -3708,6 +3725,34 @@
             },
             "event": {
               "const": "activity.new",
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Rows marked read in one tab, so every other tab clears them too. Empty: every row.",
+          "properties": {
+            "data": {
+              "properties": {
+                "ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "ids"
+              ],
+              "type": "object"
+            },
+            "event": {
+              "const": "activity.read",
               "type": "string"
             }
           },

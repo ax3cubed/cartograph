@@ -405,6 +405,12 @@ export type ServerEvent =
       event: "activity.new";
     }
   | {
+      data: {
+        ids: string[];
+      };
+      event: "activity.read";
+    }
+  | {
       data: {};
       event: "workspaces.changed";
     };
@@ -495,15 +501,34 @@ export interface CartographApi {
   WorkspaceSummary: WorkspaceSummary;
 }
 /**
+ * One row of the activity list (FE-16), kept in the workspace's ask.db. `text` and `detail` hold
+ * repo and author names, which are untrusted: the app renders them as text. Never file contents.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "ActivityItem".
  */
 export interface ActivityItem {
   at: string;
+  /**
+   * Who ran it and which version: "Indexed by the background sync · cartograph 0.4.0".
+   */
+  detail: string;
+  /**
+   * The app view the row opens, as a path and hash.
+   */
+  href: string;
+  /**
+   * `<workspace>:<row>`.
+   */
   id: string;
   kind: ActivityKind;
+  /**
+   * "billing-service synced to 3e0d7a2 · 3 commits by Tom Ellery and Jon Reyes", at most 120
+   * characters.
+   */
   text: string;
   unread: boolean;
+  ws: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema

@@ -202,6 +202,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/v1/w/{ws}/graph", get(graph))
         .merge(crate::reads::router())
         .route("/api/v1/events", get(live::events))
+        .route("/api/v1/activity", get(crate::activity::get_activity))
+        .route("/api/v1/activity/read", post(crate::activity::post_read))
         .route("/api/v1/w/{ws}/jobs", post(live::post_job))
         .route(
             "/api/v1/jobs/{id}",

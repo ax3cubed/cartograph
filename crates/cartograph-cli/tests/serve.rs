@@ -370,6 +370,8 @@ fn only_the_listed_write_routes_accept_a_state_changing_method() {
         // SRV-21: the preview changes nothing; the install writes the user's agent config.
         "POST /api/v1/agents/preview".into(),
         "POST /api/v1/agents/install".into(),
+        // FE-16: read state is on the server, so every tab agrees.
+        "POST /api/v1/activity/read".into(),
     ];
     want.sort();
     served.sort();

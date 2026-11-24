@@ -24,7 +24,7 @@ pub struct Flags {
 
 /// The registered workspace covering `dir` (IDX-11): the registry is the allow-list, so only its
 /// repos are read or fetched (F8).
-fn workspace(data: &Path, dir: &Path) -> Result<Workspace, Report> {
+fn workspace(data: &Path, dir: &Path) -> Result<(String, Workspace), Report> {
     let applied = setup::locate(data, dir)
         .map_err(|e| Report::from_error(&e))?
         .ok_or_else(|| Report {
@@ -33,12 +33,18 @@ fn workspace(data: &Path, dir: &Path) -> Result<Workspace, Report> {
             action: "run `cartograph init` in the workspace folder".into(),
             exit_code: ExitCode::Usage,
         })?;
-    cartograph_server::workspace(data, &applied.workspace_id).map_err(|p| Report {
+    let ws = cartograph_server::workspace(data, &applied.workspace_id).map_err(|p| Report {
         what: p.what,
         why: p.why,
         action: p.action,
         exit_code: ExitCode::Error,
-    })
+    })?;
+    Ok((applied.workspace_id, ws))
+}
+
+/// FE-16: the run's activity rows. A failure to write them never fails the sync.
+fn record(data: &Path, id: &str) {
+    cartograph_server::activity::after_cli_sync(data, id);
 }
 
 pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
@@ -57,7 +63,7 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
         );
         return Ok(());
     }
-    let ws = workspace(&data, dir)?;
+    let (id, ws) = workspace(&data, dir)?;
     let explain = |e: &dyn cartograph_core::Explain| Report::from_error(e);
     if f.background {
         // An explicit request (a hook): auto_sync = "never" governs only the syncs reads start.
@@ -88,7 +94,10 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
         ..SyncOptions::default()
     };
     let s = match sync(&ws, &opts, &mut cache).map_err(|e| explain(&e))? {
-        SyncOutcome::Synced(s) => s,
+        SyncOutcome::Synced(s) => {
+            record(&data, &id);
+            s
+        }
         SyncOutcome::AlreadyRunning => {
             out.print(
                 "a sync is already running; it will include this request",
@@ -179,17 +188,14 @@ fn all(out: &Out, data: &Path, f: &Flags, g: &Global) -> Result<(), Report> {
             Err(p) => ("failed", p.what),
             Ok(ws) => match sync(&ws, &opts, &mut cache) {
                 Ok(SyncOutcome::AlreadyRunning) => ("busy", String::new()),
-                Ok(SyncOutcome::Synced(s)) if s.fetch_failed.is_empty() => {
-                    ("synced", format!("{} commits", s.steps))
+                Ok(SyncOutcome::Synced(s)) => {
+                    record(data, &id);
+                    let mut detail = format!("{} commits", s.steps);
+                    if !s.fetch_failed.is_empty() {
+                        detail += &format!("; fetch failed: {}", s.fetch_failed.join(", "));
+                    }
+                    ("synced", detail)
                 }
-                Ok(SyncOutcome::Synced(s)) => (
-                    "synced",
-                    format!(
-                        "{} commits; fetch failed: {}",
-                        s.steps,
-                        s.fetch_failed.join(", ")
-                    ),
-                ),
                 Err(e) => ("failed", cartograph_core::Explain::what(&e)),
             },
         };

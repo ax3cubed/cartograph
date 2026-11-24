@@ -58,6 +58,9 @@ pub enum ServerEvent {
     },
     #[serde(rename = "activity.new")]
     ActivityNew(ActivityItem),
+    /// Rows marked read in one tab, so every other tab clears them too. Empty: every row.
+    #[serde(rename = "activity.read")]
+    ActivityRead { ids: Vec<String> },
     #[serde(rename = "workspaces.changed")]
     WorkspacesChanged {},
 }

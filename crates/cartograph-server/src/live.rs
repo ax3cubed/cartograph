@@ -52,6 +52,9 @@ struct Jobs {
     spawned: HashMap<String, Instant>,
     /// What the ticker last saw per workspace: generation and freshness.
     seen: HashMap<String, (u64, String)>,
+    /// FE-16, per workspace: the last activity row sent, and whether the index changed since the
+    /// last record (recorded once its writer lets go, so a run's batches make one row).
+    activity: HashMap<String, (i64, bool)>,
 }
 
 /// D1: the states a background sync brings current. Rewritten history is one of them: a sync
@@ -193,11 +196,11 @@ pub fn start_with(
     let app2 = app.clone();
     let id = job.id.clone();
     let ws = ws.to_owned();
-    tokio::task::spawn_blocking(move || run(&app2, &id, &ws, kind, &cancel));
+    tokio::task::spawn_blocking(move || run(&app2, &id, &ws, kind, by, &cancel));
     job
 }
 
-fn run(app: &Arc<App>, id: &str, ws: &str, kind: JobKind, cancel: &AtomicBool) {
+fn run(app: &Arc<App>, id: &str, ws: &str, kind: JobKind, by: Actor, cancel: &AtomicBool) {
     let t0 = Instant::now();
     let mut last = Instant::now() - PROGRESS_EVERY;
     let progress = |stage: &str, done: u64, total: u64| {
@@ -253,6 +256,9 @@ fn run(app: &Arc<App>, id: &str, ws: &str, kind: JobKind, cancel: &AtomicBool) {
         app.live.emit(ServerEvent::WorkspacesChanged {});
     }
     let generation = result.as_ref().ok().copied();
+    if !(cancelled && first_index == Some(true)) {
+        crate::activity::after_run(&app.data_dir, ws, kind, by, state, problem.as_ref());
+    }
     app.live.emit(ServerEvent::JobFinished {
         job_id: id.to_owned(),
         ok: state == JobState::Done,
@@ -301,7 +307,44 @@ impl App {
                 freshness: fresh.clone(),
             });
         }
+        self.tick_activity(ws, gen_changed, fresh.state);
         self.ensure_fresh(ws, &fresh);
+    }
+
+    /// FE-16: records a change nobody recorded once no writer holds the index, then sends every
+    /// row not sent yet (the CLI's and MCP's too) as `activity.new`. The first look sends nothing:
+    /// those rows are in the list already.
+    fn tick_activity(&self, ws: &str, gen_changed: bool, state: IndexState) {
+        let (last, pending) = {
+            let mut jobs = self.live.jobs();
+            let running = jobs.running.contains_key(ws);
+            let e = jobs.activity.entry(ws.to_owned()).or_insert((-1, true));
+            e.1 |= gen_changed;
+            // A tick after the change, not on it: the CLI or MCP that ran it records it first,
+            // with who it was.
+            let pending = e.1 && !gen_changed && !running && state != IndexState::Syncing;
+            if pending {
+                e.1 = false;
+            }
+            (e.0, pending)
+        };
+        if pending && let Err(e) = crate::activity::record(&self.data_dir, ws, None, false) {
+            tracing::warn!(ws, error = %e, "can't record activity");
+        }
+        let Ok((rows, newest)) = crate::activity::since(&self.data_dir, ws, last.max(0)) else {
+            return;
+        };
+        self.live
+            .jobs()
+            .activity
+            .entry(ws.to_owned())
+            .or_default()
+            .0 = newest;
+        if last >= 0 {
+            for r in rows {
+                self.live.emit(ServerEvent::ActivityNew(r));
+            }
+        }
     }
 
     /// D1: a workspace that is behind or rewritten, with `auto_sync = background` and no job

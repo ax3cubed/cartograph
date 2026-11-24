@@ -1031,12 +1031,22 @@ pub enum ActivityKind {
     Warning,
 }
 
+/// One row of the activity list (FE-16), kept in the workspace's ask.db. `text` and `detail` hold
+/// repo and author names, which are untrusted: the app renders them as text. Never file contents.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ActivityItem {
+    /// `<workspace>:<row>`.
     pub id: String,
+    pub ws: WorkspaceId,
     pub at: Timestamp,
     pub kind: ActivityKind,
+    /// "billing-service synced to 3e0d7a2 · 3 commits by Tom Ellery and Jon Reyes", at most 120
+    /// characters.
     pub text: String,
+    /// Who ran it and which version: "Indexed by the background sync · cartograph 0.4.0".
+    pub detail: String,
+    /// The app view the row opens, as a path and hash.
+    pub href: String,
     pub unread: bool,
 }
 

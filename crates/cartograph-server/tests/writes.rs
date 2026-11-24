@@ -28,6 +28,11 @@ fn writes(ws: &str) -> Vec<(&'static str, String, Option<&'static str>)> {
         ),
         ("DELETE", "/api/v1/jobs/0000".into(), None),
         (
+            "POST",
+            "/api/v1/activity/read".into(),
+            Some(r#"{"ids":[]}"#),
+        ),
+        (
             "PUT",
             format!("/api/v1/w/{ws}/config"),
             Some(r#"{"yaml":""}"#),

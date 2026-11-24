@@ -1120,6 +1120,14 @@ impl Tools {
                     None,
                 ),
             };
+            crate::activity::after_run(
+                &data,
+                &ws,
+                JobKind::Sync,
+                cartograph_api::types::Actor::Mcp,
+                state,
+                error.as_ref(),
+            );
             *r.end.lock().unwrap_or_else(|p| p.into_inner()) = Some(End {
                 state,
                 error,
