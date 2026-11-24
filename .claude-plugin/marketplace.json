@@ -1,6 +1,8 @@
 {
   "name": "cartograph",
-  "owner": { "name": "Cartograph" },
+  "owner": {
+    "name": "Cartograph"
+  },
   "metadata": {
     "description": "The Cartograph plugin for Claude Code: a local map of your codebase and its history."
   },
@@ -10,6 +12,10 @@
       "source": "./plugins/cartograph",
       "description": "MCP tools over your local Cartograph index (find, describe, neighbors, path, impact), a skill, and a one-line freshness note at session start.",
       "version": "0.2.0",
+      "author": {
+        "name": "Cartograph",
+        "url": "https://github.com/ax3cubed/cartograph"
+      },
       "license": "MIT"
     }
   ]

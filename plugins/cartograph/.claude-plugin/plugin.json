@@ -1,8 +1,17 @@
 {
   "name": "cartograph",
   "version": "0.2.0",
+  "author": {
+    "name": "Cartograph",
+    "url": "https://github.com/ax3cubed/cartograph"
+  },
   "description": "MCP tools over your local Cartograph index, a skill for using them, and a one-line freshness note at session start. Needs the cartograph binary on PATH; nothing leaves your machine.",
   "license": "MIT",
   "repository": "https://github.com/ax3cubed/cartograph",
-  "keywords": ["codebase-map", "mcp", "impact-analysis", "local"]
+  "keywords": [
+    "codebase-map",
+    "mcp",
+    "impact-analysis",
+    "local"
+  ]
 }
