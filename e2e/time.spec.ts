@@ -117,8 +117,10 @@ test.describe("history fixture", () => {
 test("WebGL map: opens at service level, and the table lists that level", async ({ page, go }) => {
   await go("/#renderer=webgl");
   await expect(page.getByText("Service level")).toBeVisible();
-  // sigma loads lazily; a cold Firefox on CI can take longer than the default 10 s to start it.
-  await expect(page.locator(".lm-gl-stage canvas").first()).toBeAttached({ timeout: 30_000 });
+  // Headless Firefox on CI's Linux runner has no WebGL 2: there the map must fall back to the table.
+  const gl = await page.evaluate(() => !!document.createElement("canvas").getContext("webgl2"));
+  if (gl) await expect(page.locator(".lm-gl-stage canvas").first()).toBeAttached({ timeout: 30_000 });
+  else await expect(page.getByRole("table", { name: "Services" })).toBeVisible();
   await expect(note(page)).toContainText("5 services");
   await page.getByRole("button", { name: "Table", exact: true }).click();
   await expect(page.getByRole("table", { name: "Services" })).toHaveAttribute("aria-rowcount", "6");
