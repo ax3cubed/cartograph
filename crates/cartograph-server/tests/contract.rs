@@ -18,6 +18,8 @@ const SERVED: &[(&str, &str)] = &[
         "/api/v1/w/{ws}/graph?at=now&lod=file&kinds=imports",
         "/api/v1/w/{ws}/graph",
     ),
+    ("/api/v1/w/{ws}/graph?lod=module", "/api/v1/w/{ws}/graph"),
+    ("/api/v1/w/{ws}/graph?lod=service", "/api/v1/w/{ws}/graph"),
 ];
 
 #[test]
@@ -63,7 +65,7 @@ fn every_error_body_validates_and_leaks_nothing() {
         (get(&r, "/api/v1/w/nope/graph"), 404, "not_found"),
         (get(&r, "/api/v1/w/..%2f..%2fetc/graph"), 404, "not_found"),
         (
-            get(&r, &format!("/api/v1/w/{ws}/graph?lod=service")),
+            get(&r, &format!("/api/v1/w/{ws}/graph?lod=workspace")),
             400,
             "bad_request",
         ),

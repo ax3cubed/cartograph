@@ -243,8 +243,14 @@ fn perf_reads_on_60k_files_and_200k_links() {
             )
             .unwrap();
     }
+    // A stored position for every node (IDX-25), so the slices read the layout as they do on a
+    // real index: a grid stands in for the force layout, which this gate doesn't time.
     ix.conn
-        .execute_batch("COMMIT; PRAGMA wal_checkpoint(TRUNCATE);")
+        .execute_batch(
+            "INSERT INTO layout (node, x, y, r, from_seq)
+               SELECT id, (id % 997) * 2.5, (id / 997) * 2.5, 1.0, 0 FROM node;
+             COMMIT; PRAGMA wal_checkpoint(TRUNCATE);",
+        )
         .unwrap();
     drop(ix);
     let fast = optimised();
@@ -277,8 +283,33 @@ fn perf_reads_on_60k_files_and_200k_links() {
         cached = cached.min(ms(t));
         assert_eq!(again.links.id.len(), slice.links.id.len());
     }
+    assert!(
+        slice.nodes.x.iter().any(|x| *x != 0.0),
+        "positions are read"
+    );
     record("graph_file_slice_cold_ms", cold, 500.0, "ms");
     record("graph_file_slice_cached_ms", cached, 50.0, "ms");
+
+    // The service level, cold: 62 services and the links between them rolled up from the file
+    // scan. Recorded against SRV-04's 20 ms, not gated yet: the roll-up reads every live file and
+    // link, so it costs what a cold file slice does until roll-ups are kept per generation.
+    let q = GraphQuery::from_params(&GraphParams {
+        at: Some("2015-01-01".into()),
+        lod: Some(cartograph_api::types::Lod::Service),
+        ..Default::default()
+    })
+    .unwrap();
+    let t = Instant::now();
+    let services = store
+        .snapshot(Limits::default())
+        .unwrap()
+        .graph(&q)
+        .unwrap();
+    let service_cold = ms(t);
+    assert_eq!(services.nodes.id.len(), 62);
+    let rolled: u64 = services.links.weight.iter().map(|w| u64::from(*w)).sum();
+    assert!(rolled > 0 && rolled <= slice.links.id.len() as u64);
+    record("graph_service_slice_cold_ms", service_cold, 20.0, "ms");
 
     let snap = store.snapshot(Limits::default()).unwrap();
     // The in-memory graph, built once per generation (SRV-11: under 300 ms).

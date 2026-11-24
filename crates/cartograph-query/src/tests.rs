@@ -360,6 +360,116 @@ fn graph_equals_brute_force_at_every_commit() {
     }
 }
 
+/// FE-08 and IDX-25's gate: the same index read twice places every node alike, the positions are
+/// the `layout` rows live at the step, and a rolled-up link counts the file links it stands for.
+#[test]
+fn graph_levels_read_the_stored_layout_and_count_member_links() {
+    use cartograph_api::types::{GraphSlice, Lod};
+    use std::collections::BTreeMap;
+    let b = built();
+    let q = |sha: &str, lod: Lod| GraphQuery { lod, ..at(sha) };
+    let read = |sha: &str, lod: Lod| -> GraphSlice {
+        // A store of its own each time: nothing is shared but the file.
+        let store = Store::open_path(&b.index).unwrap();
+        let snap = store.snapshot(Limits::default()).unwrap();
+        snap.graph(&q(sha, lod)).unwrap()
+    };
+    let conn = Connection::open(&b.index).unwrap();
+    let layout_at = |node: &str, seq: u64| -> Option<(f32, f32, f32)> {
+        let id: i64 = node.trim_start_matches('n').parse().unwrap();
+        conn.query_row(
+            "SELECT x, y, r FROM layout WHERE node = ?1 AND from_seq <= ?2
+               AND (to_seq IS NULL OR to_seq > ?2)",
+            params![id, seq as i64],
+            |r| {
+                Ok((
+                    r.get::<_, f64>(0)? as f32,
+                    r.get::<_, f64>(1)? as f32,
+                    r.get::<_, f64>(2)? as f32,
+                ))
+            },
+        )
+        .ok()
+    };
+    // Each file node's (module or service, service), from the node table.
+    let holders: BTreeMap<String, (String, String)> = conn
+        .prepare(
+            "SELECT id, coalesce(parent, service), service FROM node
+             WHERE kind = 'file' AND service IS NOT NULL",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                format!("n{}", r.get::<_, i64>(0)?),
+                (
+                    format!("n{}", r.get::<_, i64>(1)?),
+                    format!("n{}", r.get::<_, i64>(2)?),
+                ),
+            ))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let mut placed = 0;
+    let mut rolled = 0;
+    for sha in &b.shas {
+        for lod in [Lod::File, Lod::Module, Lod::Service] {
+            let (one, two) = (read(sha, lod), read(sha, lod));
+            assert_eq!(one.lod, lod);
+            assert_eq!(one.nodes.id, two.nodes.id);
+            assert_eq!(one.nodes.x, two.nodes.x, "same x twice at {sha} {lod:?}");
+            assert_eq!(one.nodes.y, two.nodes.y, "same y twice at {sha} {lod:?}");
+            assert_eq!(one.nodes.size, two.nodes.size);
+            let seq = one.at.as_ref().unwrap().seq;
+            for i in 0..one.nodes.id.len() {
+                let got = (one.nodes.x[i], one.nodes.y[i], one.nodes.size[i]);
+                match layout_at(&one.nodes.id[i].0, seq) {
+                    Some(want) => {
+                        assert_eq!(got, want, "{} at {seq}", one.nodes.name[i]);
+                        placed += 1;
+                    }
+                    None => assert_eq!(got, (0.0, 0.0, 1.0)),
+                }
+            }
+        }
+        // Rolled-up counts: every file link between two holders, once, under its pair.
+        let files = read(sha, Lod::File);
+        for (lod, pick) in [
+            (
+                Lod::Service,
+                (|h: &(String, String)| h.1.clone()) as fn(&_) -> String,
+            ),
+            (Lod::Module, |h: &(String, String)| h.0.clone()),
+        ] {
+            let mut want: BTreeMap<(String, String), u32> = BTreeMap::new();
+            for j in 0..files.links.id.len() {
+                let end = |n: u32| holders.get(&files.nodes.id[n as usize].0).map(pick);
+                if let (Some(a), Some(b)) = (end(files.links.from[j]), end(files.links.to[j]))
+                    && a != b
+                {
+                    *want.entry((a, b)).or_default() += files.links.weight[j];
+                }
+            }
+            let s = read(sha, lod);
+            let have: BTreeMap<(String, String), u32> = (0..s.links.id.len())
+                .map(|j| {
+                    let id = |n: u32| s.nodes.id[n as usize].0.clone();
+                    ((id(s.links.from[j]), id(s.links.to[j])), s.links.weight[j])
+                })
+                .collect();
+            assert_eq!(have.len(), s.links.id.len(), "one link per pair");
+            assert_eq!(have, want, "{lod:?} link counts at {sha}");
+            rolled += have.len();
+            // A parent index points at a node of the slice.
+            for p in &s.nodes.parent {
+                assert!(*p >= -1 && (*p as i64) < s.nodes.id.len() as i64);
+            }
+        }
+    }
+    assert!(placed > 0, "the fixture has stored positions");
+    assert!(rolled > 0, "the fixture has rolled-up links");
+}
+
 #[test]
 fn at_resolves_dates_short_shas_and_now() {
     let b = built();
@@ -456,7 +566,7 @@ fn graph_filters_and_refusals() {
     use cartograph_api::types::Lod;
     assert_eq!(
         refused(GraphParams {
-            lod: Some(Lod::Service),
+            lod: Some(Lod::Workspace),
             ..Default::default()
         }),
         ErrorCode::BadRequest

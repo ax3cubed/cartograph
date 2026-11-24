@@ -1,10 +1,17 @@
-//! `graph(GraphQuery) -> GraphSlice` (SRV-04), first cut: one `at=` slice at file level.
+//! `graph(GraphQuery) -> GraphSlice` (SRV-04): one `at=` slice at file, module or service level.
 //!
-//! ponytail: phase 1 indexes files and import links only, so the slice is the live files and the
-//! live links at one step, scanned from SQLite (5 ms for 115k rows in phase 0). Roll-ups to
-//! module and service, `scope`, `range=`, stored positions and the per-generation interval cache
-//! are phase 3; until then x, y are 0 and the client lays the slice out itself. The slice is built
-//! in memory, not streamed from the cursor: the response cap bounds it.
+//! The slice is the live files and the live links at one step, scanned from SQLite (5 ms for 115k
+//! rows in phase 0). Positions are the indexer's stored layout (IDX-25, I2) live at that step; the
+//! query layer never computes layout. A node with no layout row (an index migrated but not synced
+//! again) keeps x = y = 0 and size 1, and the client lays it out itself.
+//!
+//! Module and service levels roll the file slice up: each file stands for its module (or its
+//! service when it sits in no module) or for its service, and the links between two holders
+//! become one link whose `weight` counts the file links (SRV-04's count). At module level the
+//! services that hold those modules are in the slice too, as their parents.
+//!
+//! ponytail: `scope`, `range=` and the per-generation interval cache are still to come; the slice
+//! is built in memory, not streamed from the cursor: the response cap bounds it.
 
 use std::collections::HashMap;
 
@@ -25,6 +32,8 @@ pub const MAX_LINKS: usize = 400_000;
 #[derive(Debug, Clone)]
 pub struct GraphQuery {
     pub at: At,
+    /// File, module or service (SRV-04).
+    pub lod: Lod,
     /// None keeps every kind.
     pub kinds: Option<Vec<LinkKind>>,
     pub min_confidence: ConfidenceLevel,
@@ -35,7 +44,7 @@ fn later(what: &str, when: &str) -> QueryError {
     QueryError::bad(
         format!("{what} isn't available yet"),
         format!("this index has files and import links only; {what} arrives with {when}"),
-        "ask for lod=file with at=",
+        "ask for lod=file, module or service with at=",
     )
 }
 
@@ -50,12 +59,15 @@ fn rank(l: ConfidenceLevel) -> u8 {
 impl GraphQuery {
     /// Checks the HTTP parameters; what phase 1 can't answer is refused by name, never ignored.
     pub fn from_params(p: &GraphParams) -> Result<Self, QueryError> {
-        match p.lod {
-            None | Some(Lod::File) => {}
-            Some(_) => return Err(later("a rolled-up level of detail", "phase 3 (SRV-04)")),
-        }
+        let lod = match p.lod {
+            None | Some(Lod::File) => Lod::File,
+            Some(l @ (Lod::Module | Lod::Service)) => l,
+            Some(Lod::Workspace) => {
+                return Err(later("the workspace level of detail", "domains (SRV-04)"));
+            }
+        };
         if p.scope.is_some() {
-            return Err(later("scope", "roll-ups in phase 3 (SRV-04)"));
+            return Err(later("scope", "in-place expand (SRV-04)"));
         }
         if p.range.is_some() {
             return Err(later("range", "phase 3 (SRV-04); ask for one at= per step"));
@@ -87,6 +99,7 @@ impl GraphQuery {
                 .transpose()?;
         Ok(Self {
             at: At::parse(p.at.as_deref().unwrap_or("now"))?,
+            lod,
             kinds,
             // H2: scores under 0.30 are hidden by default, and every level starts at 0.30.
             min_confidence: p.min_confidence.unwrap_or(ConfidenceLevel::Guessed),
@@ -94,6 +107,63 @@ impl GraphQuery {
         })
     }
 }
+
+/// A live file: its node, its path, the node one level up and its service.
+struct LiveFile {
+    id: i64,
+    path: String,
+    parent: Option<i64>,
+    service: Option<i64>,
+    pos: Option<(f32, f32, f32)>,
+}
+
+fn empty_nodes() -> NodeColumns {
+    NodeColumns {
+        id: Vec::new(),
+        kind: Vec::new(),
+        name: Vec::new(),
+        parent: Vec::new(),
+        x: Vec::new(),
+        y: Vec::new(),
+        size: Vec::new(),
+        children: Vec::new(),
+    }
+}
+
+fn empty_links() -> LinkColumns {
+    LinkColumns {
+        id: Vec::new(),
+        from: Vec::new(),
+        to: Vec::new(),
+        kind: Vec::new(),
+        level: Vec::new(),
+        score: Vec::new(),
+        weight: Vec::new(),
+        added_seq: Vec::new(),
+        removed_seq: Vec::new(),
+    }
+}
+
+/// Appends one node; no layout row means 0, 0 and size 1.
+fn push_node(
+    nodes: &mut NodeColumns,
+    id: i64,
+    kind: NodeKind,
+    name: String,
+    pos: Option<(f32, f32, f32)>,
+) {
+    let (x, y, r) = pos.unwrap_or((0.0, 0.0, 1.0));
+    nodes.id.push(NodeId(node_id(id)));
+    nodes.kind.push(kind);
+    nodes.name.push(name);
+    nodes.parent.push(-1);
+    nodes.x.push(x);
+    nodes.y.push(y);
+    nodes.size.push(r);
+    nodes.children.push(0);
+}
+
+const NARROWER: &str = "ask for fewer link kinds (kinds=) or one repo (repo=)";
 
 impl Snapshot<'_> {
     /// The slice, from the per-generation cache when the same request was answered already.
@@ -106,6 +176,78 @@ impl Snapshot<'_> {
         let s = self.build_graph(q)?;
         self.keep_slice(&key, std::sync::Arc::new(s.clone()));
         Ok(s)
+    }
+
+    /// The files live at `seq` (of `repo` when given), by path, with their stored positions.
+    fn live_files(&self, seq: i64, repo: Option<&String>) -> Result<Vec<LiveFile>, QueryError> {
+        let mut st = self.conn().prepare_cached(
+            "SELECT n.id, fp.path, n.parent, n.service, l.x, l.y, l.r
+             FROM file_path fp JOIN node n ON n.file = fp.file
+             JOIN file f ON f.id = fp.file
+             LEFT JOIN layout l ON l.node = n.id AND l.from_seq <= ?1
+               AND (l.to_seq IS NULL OR l.to_seq > ?1)
+             WHERE fp.from_seq <= ?1 AND (fp.to_seq IS NULL OR fp.to_seq > ?1)
+               AND (?2 IS NULL OR f.repo IN (SELECT id FROM repo WHERE name = ?2))
+             ORDER BY fp.path",
+        )?;
+        let mut rows = st.query(rusqlite::params![seq, repo])?;
+        let mut out: Vec<LiveFile> = Vec::new();
+        while let Some(r) = rows.next()? {
+            let id: i64 = r.get(0)?;
+            // Two layout rows live at one step would be the indexer's bug: keep the first.
+            if out.last().is_some_and(|f| f.id == id) {
+                continue;
+            }
+            if out.len() >= MAX_NODES {
+                return Err(QueryError::TooLarge {
+                    why: format!("more than {MAX_NODES} files are live at this commit"),
+                    narrower: NARROWER.into(),
+                });
+            }
+            self.check_rows(out.len() + 1, NARROWER)?;
+            let pos = match (
+                r.get::<_, Option<f64>>(4)?,
+                r.get::<_, Option<f64>>(5)?,
+                r.get::<_, Option<f64>>(6)?,
+            ) {
+                (Some(x), Some(y), Some(rr)) => Some((x as f32, y as f32, rr as f32)),
+                _ => None,
+            };
+            out.push(LiveFile {
+                id,
+                path: r.get(1)?,
+                parent: r.get(2)?,
+                service: r.get(3)?,
+                pos,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Calls `each(src, dst, from_seq, to_seq, link)` for every live link at `seq` the filters
+    /// keep. Phase 1's links are all exact imports.
+    fn live_links(
+        &self,
+        q: &GraphQuery,
+        seq: i64,
+        mut each: impl FnMut(i64, i64, i64, Option<i64>, i64) -> Result<(), QueryError>,
+    ) -> Result<(), QueryError> {
+        // Phase 1 links are parsed imports: both ends anchored in the tree, so exact at 1.0.
+        let keep = |k: LinkKind| q.kinds.as_ref().is_none_or(|ks| ks.contains(&k));
+        if !keep(LinkKind::Imports) || rank(ConfidenceLevel::Exact) < rank(q.min_confidence) {
+            return Ok(());
+        }
+        let mut st = self.conn().prepare_cached(
+            "SELECT l.id, l.src, l.dst, i.from_seq, i.to_seq
+             FROM interval i JOIN link l ON l.id = i.link
+             WHERE i.from_seq <= ?1 AND (i.to_seq IS NULL OR i.to_seq > ?1)
+             ORDER BY l.id",
+        )?;
+        let mut rows = st.query([seq])?;
+        while let Some(r) = rows.next()? {
+            each(r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(0)?)?;
+        }
+        Ok(())
     }
 
     fn build_graph(&self, q: &GraphQuery) -> Result<GraphSlice, QueryError> {
@@ -126,116 +268,231 @@ impl Snapshot<'_> {
                 action: "list repos with GET …/repos".into(),
             });
         }
-        let narrower = "ask for fewer link kinds (kinds=) or one repo (repo=)";
-
-        let mut nodes = NodeColumns {
-            id: Vec::new(),
-            kind: Vec::new(),
-            name: Vec::new(),
-            parent: Vec::new(),
-            x: Vec::new(),
-            y: Vec::new(),
-            size: Vec::new(),
-            children: Vec::new(),
-        };
-        let mut index: HashMap<i64, u32> = HashMap::new();
         // repo= keeps that repo's files; links with an end outside them are dropped below.
-        let mut st = self.conn().prepare_cached(
-            "SELECT n.id, fp.path FROM file_path fp JOIN node n ON n.file = fp.file
-             JOIN file f ON f.id = fp.file
-             WHERE fp.from_seq <= ?1 AND (fp.to_seq IS NULL OR fp.to_seq > ?1)
-               AND (?2 IS NULL OR f.repo IN (SELECT id FROM repo WHERE name = ?2))
-             ORDER BY fp.path",
-        )?;
-        let mut rows = st.query(rusqlite::params![seq, q.repo])?;
-        while let Some(r) = rows.next()? {
-            let id: i64 = r.get(0)?;
-            let i = nodes.id.len();
-            if i >= MAX_NODES {
-                return Err(QueryError::TooLarge {
-                    why: format!("more than {MAX_NODES} files are live at this commit"),
-                    narrower: narrower.into(),
-                });
-            }
-            self.check_rows(i + 1, narrower)?;
-            index.insert(id, i as u32);
-            nodes.id.push(NodeId(node_id(id)));
-            nodes.kind.push(NodeKind::File);
-            // The repo-relative path: unique, and what a file is known by.
-            nodes.name.push(r.get(1)?);
-            nodes.parent.push(-1);
-            nodes.x.push(0.0);
-            nodes.y.push(0.0);
-            nodes.size.push(1.0);
-            nodes.children.push(0);
-        }
-
-        let mut links = LinkColumns {
-            id: Vec::new(),
-            from: Vec::new(),
-            to: Vec::new(),
-            kind: Vec::new(),
-            level: Vec::new(),
-            score: Vec::new(),
-            weight: Vec::new(),
-            added_seq: Vec::new(),
-            removed_seq: Vec::new(),
+        let files = self.live_files(seq, q.repo.as_ref())?;
+        let (nodes, links) = match q.lod {
+            Lod::Module | Lod::Service => self.rolled_up(q, seq, &files)?,
+            _ => self.file_level(q, seq, files)?,
         };
-        // Phase 1 links are parsed imports: both ends anchored in the tree, so exact at 1.0.
-        let (level, score) = (ConfidenceLevel::Exact, 1.0);
-        let keep = |k: LinkKind| q.kinds.as_ref().is_none_or(|ks| ks.contains(&k));
-        if keep(LinkKind::Imports) && rank(level) >= rank(q.min_confidence) {
-            let mut st = self.conn().prepare_cached(
-                "SELECT l.id, l.src, l.dst, i.from_seq, i.to_seq
-                 FROM interval i JOIN link l ON l.id = i.link
-                 WHERE i.from_seq <= ?1 AND (i.to_seq IS NULL OR i.to_seq > ?1)
-                 ORDER BY l.id",
-            )?;
-            let mut rows = st.query([seq])?;
-            while let Some(r) = rows.next()? {
-                let (src, dst): (i64, i64) = (r.get(1)?, r.get(2)?);
-                let (Some(&from), Some(&to)) = (index.get(&src), index.get(&dst)) else {
-                    // With repo=, a link into another repo has its other end outside the slice.
-                    // Otherwise the indexer only links files it indexed; a dangling end is its
-                    // bug, not ours to paper over silently.
-                    if q.repo.is_none() {
-                        tracing::warn!(
-                            src,
-                            dst,
-                            seq,
-                            "a live link has an end that isn't a live file"
-                        );
-                    }
-                    continue;
-                };
-                if links.id.len() >= MAX_LINKS {
-                    return Err(QueryError::TooLarge {
-                        why: format!("more than {MAX_LINKS} links are live at this commit"),
-                        narrower: narrower.into(),
-                    });
-                }
-                self.check_rows(nodes.id.len() + links.id.len() + 1, narrower)?;
-                links.id.push(LinkId(link_id(r.get(0)?)));
-                links.from.push(from);
-                links.to.push(to);
-                links.kind.push(LinkKind::Imports);
-                links.level.push(level);
-                links.score.push(score);
-                links.weight.push(1);
-                links.added_seq.push(r.get::<_, i64>(3)? as u64);
-                links
-                    .removed_seq
-                    .push(r.get::<_, Option<i64>>(4)?.unwrap_or(-1));
-            }
-        }
-
         Ok(GraphSlice {
-            lod: Lod::File,
+            lod: q.lod,
             scope: None,
             at: Some(at),
             range: None,
             nodes,
             links,
         })
+    }
+
+    fn file_level(
+        &self,
+        q: &GraphQuery,
+        seq: i64,
+        files: Vec<LiveFile>,
+    ) -> Result<(NodeColumns, LinkColumns), QueryError> {
+        let mut nodes = empty_nodes();
+        let index: HashMap<i64, u32> = files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (f.id, i as u32))
+            .collect();
+        let mut parents = Vec::with_capacity(files.len());
+        for f in files {
+            parents.push(f.parent);
+            // The repo-relative path: unique, and what a file is known by.
+            push_node(&mut nodes, f.id, NodeKind::File, f.path, f.pos);
+        }
+        // A parent is in the slice only when it is a file's (never, today): -1 otherwise.
+        for (i, p) in parents.into_iter().enumerate() {
+            if let Some(&j) = p.and_then(|p| index.get(&p)) {
+                nodes.parent[i] = j as i32;
+            }
+        }
+
+        let mut links = empty_links();
+        let n = nodes.id.len();
+        self.live_links(q, seq, |src, dst, from_seq, to_seq, id| {
+            let (Some(&from), Some(&to)) = (index.get(&src), index.get(&dst)) else {
+                // With repo=, a link into another repo has its other end outside the slice.
+                // Otherwise the indexer only links files it indexed; a dangling end is its bug,
+                // not ours to paper over silently.
+                if q.repo.is_none() {
+                    tracing::warn!(
+                        src,
+                        dst,
+                        seq,
+                        "a live link has an end that isn't a live file"
+                    );
+                }
+                return Ok(());
+            };
+            if links.id.len() >= MAX_LINKS {
+                return Err(QueryError::TooLarge {
+                    why: format!("more than {MAX_LINKS} links are live at this commit"),
+                    narrower: NARROWER.into(),
+                });
+            }
+            self.check_rows(n + links.id.len() + 1, NARROWER)?;
+            links.id.push(LinkId(link_id(id)));
+            links.from.push(from);
+            links.to.push(to);
+            links.kind.push(LinkKind::Imports);
+            links.level.push(ConfidenceLevel::Exact);
+            links.score.push(1.0);
+            links.weight.push(1);
+            links.added_seq.push(from_seq as u64);
+            links.removed_seq.push(to_seq.unwrap_or(-1));
+            Ok(())
+        })?;
+        Ok((nodes, links))
+    }
+
+    /// Module or service level: each file stands for its holder at that level, and the links
+    /// between two holders become one, `weight` counting the file links.
+    fn rolled_up(
+        &self,
+        q: &GraphQuery,
+        seq: i64,
+        files: &[LiveFile],
+    ) -> Result<(NodeColumns, LinkColumns), QueryError> {
+        // Services, libraries and modules: kind, name, parent and position at `seq`.
+        struct Holder {
+            kind: String,
+            name: String,
+            parent: Option<i64>,
+            pos: Option<(f32, f32, f32)>,
+        }
+        let mut holders: HashMap<i64, Holder> = HashMap::new();
+        let mut st = self.conn().prepare_cached(
+            "SELECT n.id, n.kind, coalesce(n.name, n.key, ''), n.parent, l.x, l.y, l.r
+             FROM node n LEFT JOIN layout l ON l.node = n.id AND l.from_seq <= ?1
+               AND (l.to_seq IS NULL OR l.to_seq > ?1)
+             WHERE n.kind IN ('service', 'library', 'module')",
+        )?;
+        let mut rows = st.query([seq])?;
+        while let Some(r) = rows.next()? {
+            let pos = match (
+                r.get::<_, Option<f64>>(4)?,
+                r.get::<_, Option<f64>>(5)?,
+                r.get::<_, Option<f64>>(6)?,
+            ) {
+                (Some(x), Some(y), Some(rr)) => Some((x as f32, y as f32, rr as f32)),
+                _ => None,
+            };
+            holders.entry(r.get(0)?).or_insert(Holder {
+                kind: r.get(1)?,
+                name: r.get(2)?,
+                parent: r.get(3)?,
+                pos,
+            });
+        }
+        drop(rows);
+        let is_module = |id: i64| holders.get(&id).is_some_and(|h| h.kind == "module");
+        // Each file's holder at this level: its module, or its service when it is in none.
+        let module_level = q.lod == Lod::Module;
+        let holder_of = |f: &LiveFile| -> Option<i64> {
+            let h = if module_level {
+                f.parent.or(f.service)
+            } else {
+                f.service
+            };
+            h.filter(|h| holders.contains_key(h))
+        };
+        let of: HashMap<i64, i64> = files
+            .iter()
+            .filter_map(|f| Some((f.id, holder_of(f)?)))
+            .collect();
+        // The nodes: the holders some live file stands for, and at module level their services.
+        let mut members: HashMap<i64, u32> = HashMap::new();
+        let mut modules_of: HashMap<i64, std::collections::BTreeSet<i64>> = HashMap::new();
+        for f in files {
+            if let Some(&h) = of.get(&f.id) {
+                *members.entry(h).or_default() += 1;
+            }
+            if let (Some(p), Some(s)) = (f.parent, f.service)
+                && is_module(p)
+                && holders.contains_key(&s)
+            {
+                modules_of.entry(s).or_default().insert(p);
+            }
+        }
+        let mut ids: Vec<i64> = members.keys().copied().collect();
+        if module_level {
+            let services: Vec<i64> = ids
+                .iter()
+                .filter_map(|h| is_module(*h).then(|| holders[h].parent).flatten())
+                .filter(|s| holders.contains_key(s))
+                .collect();
+            ids.extend(services);
+        }
+        // Services first, then modules, each by name: the same order every time.
+        ids.sort_by(|a, b| {
+            (is_module(*a), &holders[a].name, a).cmp(&(is_module(*b), &holders[b].name, b))
+        });
+        ids.dedup();
+        let mut nodes = empty_nodes();
+        let index: HashMap<i64, u32> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, h)| (*h, i as u32))
+            .collect();
+        for &h in &ids {
+            let x = &holders[&h];
+            let kind = if x.kind == "module" {
+                NodeKind::Module
+            } else {
+                // A library is a service that deploys nothing (C6); the wire has one kind for both.
+                NodeKind::Service
+            };
+            push_node(&mut nodes, h, kind, x.name.clone(), x.pos);
+            let i = nodes.id.len() - 1;
+            if let Some(&p) = x.parent.as_ref().and_then(|p| index.get(p)) {
+                nodes.parent[i] = p as i32;
+            }
+            // One level down: a service's modules with a live file, a module's live files.
+            nodes.children[i] = if kind == NodeKind::Module {
+                members.get(&h).copied().unwrap_or(0)
+            } else {
+                modules_of.get(&h).map_or(0, |m| m.len() as u32)
+            };
+        }
+        self.check_rows(nodes.id.len(), NARROWER)?;
+
+        // Links: one per (holder, holder) pair, first seen in link id order.
+        let mut links = empty_links();
+        let mut pair: HashMap<(u32, u32), usize> = HashMap::new();
+        let n = nodes.id.len();
+        self.live_links(q, seq, |src, dst, from_seq, _, _| {
+            let (Some(a), Some(b)) = (
+                of.get(&src).and_then(|h| index.get(h)),
+                of.get(&dst).and_then(|h| index.get(h)),
+            ) else {
+                return Ok(());
+            };
+            if a == b {
+                return Ok(());
+            }
+            if let Some(&j) = pair.get(&(*a, *b)) {
+                links.weight[j] += 1;
+                links.added_seq[j] = links.added_seq[j].min(from_seq as u64);
+                return Ok(());
+            }
+            self.check_rows(n + links.id.len() + 1, NARROWER)?;
+            pair.insert((*a, *b), links.id.len());
+            links.id.push(LinkId(format!(
+                "{}>{}",
+                nodes.id[*a as usize].0, nodes.id[*b as usize].0
+            )));
+            links.from.push(*a);
+            links.to.push(*b);
+            links.kind.push(LinkKind::Imports);
+            links.level.push(ConfidenceLevel::Exact);
+            links.score.push(1.0);
+            links.weight.push(1);
+            links.added_seq.push(from_seq as u64);
+            links.removed_seq.push(-1);
+            Ok(())
+        })?;
+        Ok((nodes, links))
     }
 }
