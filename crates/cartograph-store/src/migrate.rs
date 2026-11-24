@@ -48,6 +48,9 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-04 http links: begin ----
+    "DROP INDEX fact_extractor; DROP INDEX file_version_blob;\n",
+    // ---- XS-04 http links: end ----
     // ---- XS-02 host aliases: begin ----
     "DROP TABLE host_alias;
      ALTER TABLE node DROP COLUMN detect_source;
@@ -72,6 +75,10 @@ pub fn undo_to_v2() -> String {
 /// The tables and columns format 4 adds, as `schema.sql` declares them; one delimited block per
 /// phase-4 item.
 const V4: &str = concat!(
+    // ---- XS-04 http links: begin ----
+    "CREATE INDEX fact_extractor ON fact (extractor);
+     CREATE INDEX file_version_blob ON file_version (blob);\n",
+    // ---- XS-04 http links: end ----
     // ---- XS-23 owners: begin ----
     "CREATE TABLE codeowners (repo INTEGER NOT NULL REFERENCES repo (id), blob BLOB NOT NULL,
        from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;

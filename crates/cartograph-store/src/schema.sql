@@ -282,6 +282,14 @@ CREATE INDEX ownership_file ON ownership (file, from_seq);
 CREATE INDEX ownership_owner ON ownership (owner);
 -- ---- XS-23 owners: end ----
 
+-- XS-04 http links (begin)
+-- The HTTP pass reads the interface facts (extractor `adapters`) with the file versions that hold
+-- them: both lookups go by the index. Its links are `link` rows of kind http, its evidence rows
+-- are the call site and the route site, its unresolved calls carry fact_kind http.call.
+CREATE INDEX fact_extractor ON fact (extractor);
+CREATE INDEX file_version_blob ON file_version (blob);
+-- XS-04 http links (end)
+
 -- >>> XS-01 (format 4): what a link stands on. One row per piece of source text, for a link (NULL
 -- while it is only a fact). text is the source cut to 200 characters with secrets masked (XS-10);
 -- kind is literal, template or inferred; extractor is `name@version`.

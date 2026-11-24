@@ -156,6 +156,17 @@ pub(crate) fn build_single_with(
         .map_err(|_| BuildError::Empty(repo_path.display().to_string()))?;
     let (steps, facts, extract, walk_ms, extract_ms) =
         walk_and_extract(&repo, head, cache, workers)?;
+    let mut ifs = crate::ifaces::Ifaces::new();
+    crate::ifaces::extract(
+        &repo,
+        steps
+            .iter()
+            .flat_map(|s| &s.changes)
+            .filter_map(|c| Some((c.new?, c.path.clone()))),
+        cache,
+        &mut ifs,
+        &mut std::collections::HashSet::new(),
+    )?;
     let ix = Index::create(out)?;
     let t = Instant::now();
     let repo_name = repo_path
@@ -202,6 +213,8 @@ pub(crate) fn build_single_with(
     let last = steps.len().saturating_sub(1) as i64;
     rows.flush(last)?;
     rows.facts(facts.iter())?;
+    crate::ifaces::write(&ix.conn, &ifs)?;
+    crate::ifaces::mark_current(&ix.conn)?;
     let count = |sql: &str| ix.conn.query_row(sql, [], |r| r.get::<_, i64>(0));
     s.links = count("SELECT count(*) FROM link")? as usize;
     s.intervals = count("SELECT count(*) FROM interval")? as usize;

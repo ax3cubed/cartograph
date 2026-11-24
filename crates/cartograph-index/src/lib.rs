@@ -5,6 +5,8 @@ pub mod build;
 pub mod derive;
 pub mod extract;
 pub mod freshness;
+pub mod http;
+pub mod ifaces;
 pub mod layout;
 pub mod links;
 pub mod owners;

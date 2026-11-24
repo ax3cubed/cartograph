@@ -77,7 +77,7 @@ impl<'c> Rows<'c> {
         let mut open = HashMap::new();
         let mut st = conn.prepare(
             "SELECT l.kind, l.src, l.dst, l.id, i.from_seq FROM interval i
-             JOIN link l ON l.id = i.link WHERE i.to_seq IS NULL",
+             JOIN link l ON l.id = i.link WHERE i.to_seq IS NULL AND l.kind != 'http'",
         )?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
@@ -218,7 +218,7 @@ impl<'c> Rows<'c> {
                 self.conn
                     .prepare_cached(
                         "UPDATE unresolved SET to_seq = ?3
-                         WHERE file = ?1 AND spec = ?2 AND to_seq IS NULL",
+                         WHERE file = ?1 AND spec = ?2 AND to_seq IS NULL AND fact_kind IS NULL",
                     )?
                     .execute(params![file, cut(spec), seq])?;
             }
@@ -536,7 +536,7 @@ fn cut_to(s: &str, max: usize) -> &str {
 /// A specifier as stored: anything that looks like a secret masked (XS-10), then cut to
 /// [`SPEC_BYTES`]. Masking comes first so a secret can't be cut in half and slip past the rules;
 /// only the first 4 KiB is read, far more than is kept.
-fn cut(s: &str) -> String {
+pub(crate) fn cut(s: &str) -> String {
     let masked = cartograph_core::secrets::mask(cut_to(s, 4096));
     cut_to(&masked, SPEC_BYTES).to_owned()
 }
