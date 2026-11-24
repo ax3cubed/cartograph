@@ -74,6 +74,10 @@ const alpha = (rgb: string, a: number) => rgb.replace(/^rgba?\(([^,]+),([^,]+),(
 
 const DIFF: Record<DiffState, string> = { added: "--up", removed: "--down", changed: "--warn", unchanged: "--edge" };
 
+// Sigma's graph space is y-up; the layout and the SVG map are y-down. Every y crosses here, so both maps agree.
+const flipY = (y: number) => -y;
+const flipBox = (b: Layout["box"]) => ({ x: b.x, y: [flipY(b.y[1]), flipY(b.y[0])] as [number, number] });
+
 function build(GraphCtor: typeof Graph, lv: GLLevel, level: Level, L: Layout, css: Css, hue: (s: string) => string, cull: ((x: number, y: number, r: number) => boolean) | null) {
   const g = new GraphCtor({ type: "directed", multi: false, allowSelfLoops: false });
   const s = lv.slice, n = s.nodes;
@@ -87,7 +91,7 @@ function build(GraphCtor: typeof Graph, lv: GLLevel, level: Level, L: Layout, cs
       seen.add(box);
       const d = L.modules.get(box) ?? L.services.get(box);
       if (!d || (cull && !cull(d.x, d.y, d.r))) continue;
-      g.addNode(`ctx:${box}`, { x: d.x, y: d.y, size: d.r, color: alpha(css(hue(level === "module" ? box : lv.service(i))), 0.08), ring: 0, zIndex: 0, ctx: true, label: "" });
+      g.addNode(`ctx:${box}`, { x: d.x, y: flipY(d.y), size: d.r, color: alpha(css(hue(level === "module" ? box : lv.service(i))), 0.08), ring: 0, zIndex: 0, ctx: true, label: "" });
     }
   }
   // the top 12 by fan-in get a label
@@ -107,7 +111,7 @@ function build(GraphCtor: typeof Graph, lv: GLLevel, level: Level, L: Layout, cs
     const r = kind === "file" ? p.r : p.r * (level === "service" ? 0.5 : 0.6);
     const fill = kind === "file" ? color : alpha(color, kind === "service" ? 0.9 : 0.95);
     g.addNode(n.id[i], {
-      x: p.x, y: p.y, size: r, color: fill, c0: fill,
+      x: p.x, y: flipY(p.y), size: r, color: fill, c0: fill,
       ring: kind === "file" ? 1 : 0, zIndex: 1,
       label: kind === "file" ? n.name[i].split("/").pop() : n.name[i], top: top.has(i), labelColor: css("--text"),
     });
@@ -195,7 +199,7 @@ vec4 layer_ring(vec4 v_fillColor, float v_ring) {
         return;
       }
       const { L, camera } = props.current;
-      if (L) sigma.setCustomBBox({ x: L.box.x, y: L.box.y });
+      if (L) sigma.setCustomBBox(flipBox(L.box));
       if (camera?.cam) sigma.setCamera(camera.cam as ReturnType<Sigma["getCamera"]>);
       else if (camera) camera.cam = sigma.getCamera();
       S.current = { sigma, Graph: GraphCtor, level: "service", cache: new Map(), css };
@@ -234,7 +238,7 @@ vec4 layer_ring(vec4 v_fillColor, float v_ring) {
     const cur = S.current;
     if (!cur || !ready || !levels || !L) return;
     const { sigma } = cur;
-    sigma.setCustomBBox({ x: L.box.x, y: L.box.y });
+    sigma.setCustomBBox(flipBox(L.box));
     const level = cur.level;
     const lv = levels[level];
     let cull: ((x: number, y: number, r: number) => boolean) | null = null;
@@ -243,7 +247,7 @@ vec4 layer_ring(vec4 v_fillColor, float v_ring) {
       const { width, height } = sigma.getDimensions();
       const a = sigma.viewportToGraph({ x: 0, y: 0 }), b = sigma.viewportToGraph({ x: width, y: height });
       const [x0, x1, y0, y1] = [Math.min(a.x, b.x), Math.max(a.x, b.x), Math.min(a.y, b.y), Math.max(a.y, b.y)];
-      cull = (x, y, r) => x + r >= x0 && x - r <= x1 && y + r >= y0 && y - r <= y1;
+      cull = (x, y, r) => x + r >= x0 && x - r <= x1 && flipY(y) + r >= y0 && flipY(y) - r <= y1;
       // the services in view name the culled graph, so panning inside them reuses it
       key += `:${[...L.services].filter(([, d]) => cull!(d.x, d.y, d.r)).map(([id]) => id).join(",")}`;
     }
@@ -284,7 +288,7 @@ vec4 layer_ring(vec4 v_fillColor, float v_ring) {
     const node = cur.sigma.getNodeDisplayData(sel.id);
     if (!L) return;
     const pl = placeOf(L, sel.id, sel.level);
-    const at = node ? { x: node.x, y: node.y } : cur.sigma.graphToFramedGraph?.({ x: pl.x, y: pl.y });
+    const at = node ? { x: node.x, y: node.y } : cur.sigma.graphToFramedGraph?.({ x: pl.x, y: flipY(pl.y) });
     if (at) void cur.sigma.getCamera().animate({ ...at, ratio: RATIO[sel.level] }, { duration: 400 });
     // focus is the trigger; sel and L are read as they are then
     // eslint-disable-next-line react-hooks/exhaustive-deps
