@@ -8,9 +8,9 @@
 use std::collections::{BTreeSet, HashMap};
 
 use cartograph_api::types::{
-    Change, Commit, CommitRef, Confidence, ConfidenceLevel, DensityBin, Evidence, EvidenceKind,
-    Interval, Lang, Layer, Lineage, LineageVia, Link, LinkChange, LinkDetail, Metrics, Node,
-    NodeDetail, NodeKind, RankedNode,
+    Change, Commit, CommitRef, Confidence, ConfidenceLevel, DensityBin, Evidence, EvidenceGroups,
+    EvidenceKind, EvidenceSite, Interval, Lang, Layer, Lineage, LineageVia, Link, LinkChange,
+    LinkDetail, LinkKind, LinkOperation, Metrics, Node, NodeDetail, NodeKind, RankedNode,
 };
 use cartograph_core::{LinkId, NodeId};
 use cartograph_store::rusqlite::{self, OptionalExtension};
@@ -18,6 +18,7 @@ use cartograph_store::rusqlite::{self, OptionalExtension};
 use crate::adjacency::{Adjacency, Edge, Kind, NONE, Scope};
 use crate::page::{Page, Paged};
 use crate::resolve::{hex, link_id, node_id};
+use crate::snippet::Repos;
 use crate::{At, QueryError, Snapshot, rfc3339};
 
 /// The reference that names the whole workspace as a scope.
@@ -672,23 +673,112 @@ impl Snapshot<'_> {
             .copied()
             .ok_or_else(missing)?;
         let mut link = self.wire_link(&g, e)?;
-        let file = self.wire_node(g.row[e.src as usize], c.seq)?.path;
-        link.confidence.evidence = vec![Evidence {
-            kind: EvidenceKind::Parsed,
-            note: "an import statement in the source file".into(),
-            file: Some(file),
-            line: None,
-        }];
+        let http = e.kind == LinkKind::Http;
+        let mut evidence = EvidenceGroups::default();
+        let mut operation = None;
+        if http {
+            // Read the files as they were while the link was live, nearest to `at`.
+            let last = if e.to == NONE { u32::MAX } else { e.to - 1 };
+            let seq = seq.clamp(e.from, last);
+            (evidence, operation) = self.http_evidence(row, i64::from(seq))?;
+        } else {
+            let file = self.wire_node(g.row[e.src as usize], c.seq)?.path;
+            link.confidence.evidence = vec![Evidence {
+                kind: EvidenceKind::Parsed,
+                note: "an import statement in the source file".into(),
+                file: Some(file),
+                line: None,
+            }];
+        }
+        // The same two services, the other link closing where this one opens.
+        let (ss, ds) = (g.service[e.src as usize], g.service[e.dst as usize]);
+        let replaced = http
+            .then(|| {
+                g.edges.iter().find(|x| {
+                    x.kind == e.kind
+                        && x.link != e.link
+                        && x.to == e.from
+                        && ss != NONE
+                        && ds != NONE
+                        && g.service[x.src as usize] == ss
+                        && g.service[x.dst as usize] == ds
+                })
+            })
+            .flatten()
+            .map(|x| LinkId(link_id(x.link)));
         Ok(LinkDetail {
+            opened: self.commit(e.from)?,
+            closed: (e.to != NONE).then(|| self.commit(e.to)).transpose()?,
             link,
-            layer: Layer::Base,
+            // ponytail: no precedence layers exist yet (XS-08 onwards), so an HTTP link has no
+            // layer to name; imports are parsed from the source.
+            layer: (!http).then_some(Layer::Base),
             interval: Interval {
                 from_seq: u64::from(e.from),
                 to_seq: (e.to != NONE).then_some(u64::from(e.to)),
             },
-            replaced_by: None,
+            operation,
+            evidence,
+            replaced,
             correction_id: None,
         })
+    }
+
+    /// The evidence rows of an HTTP link (via `evidence_link`) by role, with snippets read from the
+    /// repo at the version of each file live at `seq`, and the operation the call site names.
+    fn http_evidence(
+        &self,
+        link: i64,
+        seq: i64,
+    ) -> Result<(EvidenceGroups, Option<LinkOperation>), QueryError> {
+        let mut st = self.conn().prepare_cached(
+            "SELECT ev.file = s.file, ev.kind, ev.start_line, ev.end_line, ev.extractor,
+                    ev.operation,
+                    coalesce(fp.path, (SELECT path FROM file_path WHERE file = ev.file
+                                       ORDER BY from_seq DESC LIMIT 1)),
+                    fv.blob, r.path
+             FROM evidence ev JOIN link l ON l.id = ev.link JOIN node s ON s.id = l.src
+               JOIN file f ON f.id = ev.file JOIN repo r ON r.id = f.repo
+               LEFT JOIN file_path fp ON fp.file = ev.file AND fp.from_seq <= ?2
+                 AND (fp.to_seq IS NULL OR fp.to_seq > ?2)
+               LEFT JOIN file_version fv ON fv.file = ev.file AND fv.from_seq <= ?2
+                 AND (fv.to_seq IS NULL OR fv.to_seq > ?2)
+             WHERE ev.link = ?1 ORDER BY ev.id",
+        )?;
+        let mut rows = st.query([link, seq])?;
+        let mut repos = Repos::default();
+        let mut out = EvidenceGroups::default();
+        let mut operation: Option<String> = None;
+        while let Some(r) = rows.next()? {
+            let caller: bool = r.get(0)?;
+            let (line, end_line): (u32, u32) = (r.get(2)?, r.get(3)?);
+            let blob: Option<Vec<u8>> = r.get(7)?;
+            let site = EvidenceSite {
+                file: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                line,
+                end_line,
+                kind: r.get(1)?,
+                extractor: r.get(4)?,
+                snippet: blob
+                    .and_then(|b| repos.snippet(&r.get::<_, String>(8).ok()?, &b, line, end_line)),
+            };
+            if caller {
+                // The call site names the operation; the first one wins.
+                operation = operation.or(r.get(5)?);
+                out.caller.push(site);
+            } else {
+                out.handler.push(site);
+            }
+        }
+        // Contract rows wait for contracts (XS-08): until then `contract` stays empty.
+        let operation = operation.and_then(|o| {
+            let (method, template) = o.split_once(' ')?;
+            Some(LinkOperation {
+                method: method.into(),
+                template: template.into(),
+            })
+        });
+        Ok((out, operation))
     }
 
     /// For `GET …/source`: the repo folder and blob id of a file node at a commit, read from the

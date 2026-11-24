@@ -31,7 +31,7 @@ use crate::links::http::{
 use crate::rows::cut;
 
 /// Bump when what the rows hold changes, so every index rebuilds them.
-const HTTP_VERSION: &str = "http 1";
+const HTTP_VERSION: &str = "http 2";
 
 /// What a site says about itself, for evidence rows.
 struct Info {
@@ -254,7 +254,7 @@ fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
 }
 
 type Link = (i64, i64);
-type EvidenceRow = (i64, &'static str, String, [u32; 4], String);
+type EvidenceRow = (i64, &'static str, String, [u32; 4], String, String);
 type UnresolvedRow = (i64, String, u32, &'static str, String, i64, Option<i64>);
 
 /// One commit's events, netted before they touch a link.
@@ -286,7 +286,7 @@ impl LinkSink for Step {
 struct Out {
     /// Link -> its intervals, the last open when `to` is `None`.
     intervals: BTreeMap<Link, Vec<(i64, Option<i64>)>>,
-    /// Link -> (file, kind, text, span, extractor), deduplicated.
+    /// Link -> (file, kind, text, span, extractor, operation), deduplicated.
     evidence: BTreeMap<Link, BTreeSet<EvidenceRow>>,
     /// Link -> what the confidence engine scores it from.
     types: BTreeMap<Link, BTreeSet<Ev>>,
@@ -355,7 +355,14 @@ impl Sweep {
                 if let Some(i) = self.info.get(k) {
                     // A partial match is inferred from more than the call site's own text.
                     let kind = if partial { "inferred" } else { i.kind };
-                    ev.insert((i.file, kind, i.text.clone(), i.span, i.extractor.clone()));
+                    ev.insert((
+                        i.file,
+                        kind,
+                        i.text.clone(),
+                        i.span,
+                        i.extractor.clone(),
+                        i.template.clone(),
+                    ));
                 }
             }
         }
@@ -537,10 +544,12 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
             .execute(params![id, from, to])?;
             written += 1;
         }
-        for (file, kind, text, span, extractor) in out.evidence.get(l).into_iter().flatten() {
+        for (file, kind, text, span, extractor, operation) in
+            out.evidence.get(l).into_iter().flatten()
+        {
             conn.prepare_cached(
                 "INSERT INTO evidence (link, file, kind, text, start_line, start_col, end_line,
-                   end_col, extractor) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                   end_col, extractor, operation) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?
             .execute(params![
                 id,
@@ -551,7 +560,8 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
                 span[1],
                 span[2],
                 span[3],
-                extractor
+                extractor,
+                operation
             ])?;
         }
     }

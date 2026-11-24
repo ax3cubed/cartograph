@@ -48,6 +48,9 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-06 link detail: begin ----
+    "ALTER TABLE evidence DROP COLUMN operation;\n",
+    // ---- XS-06 link detail: end ----
     // ---- XS-05 confidence: begin ----
     "ALTER TABLE link DROP COLUMN score; ALTER TABLE link DROP COLUMN level;\n",
     // ---- XS-05 confidence: end ----
@@ -105,6 +108,9 @@ const V4: &str = concat!(
      CREATE INDEX evidence_link ON evidence (link);
      CREATE INDEX evidence_file ON evidence (file);\n",
     // ---- XS-01 facts: end ----
+    // ---- XS-06 link detail: begin (after the table it alters) ----
+    "ALTER TABLE evidence ADD COLUMN operation TEXT;\n",
+    // ---- XS-06 link detail: end ----
     // ---- XS-02 host aliases: begin ----
     "DROP TABLE alias;
      ALTER TABLE node ADD COLUMN detect_source TEXT;

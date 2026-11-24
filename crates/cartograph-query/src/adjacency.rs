@@ -161,7 +161,7 @@ impl Adjacency {
 
         let mut edges = Vec::new();
         let mut st = c.prepare_cached(
-            "SELECT l.id, l.kind, l.src, l.dst, i.from_seq, i.to_seq
+            "SELECT l.id, l.kind, l.src, l.dst, i.from_seq, i.to_seq, l.score
              FROM interval i JOIN link l ON l.id = i.link",
         )?;
         let mut rows = st.query([])?;
@@ -174,10 +174,15 @@ impl Adjacency {
                 src,
                 dst,
                 // `package` links are imports of a workspace package; the wire has one kind for both.
-                kind: LinkKind::Imports,
+                kind: if r.get_ref(1)?.as_str() == Ok("http") {
+                    LinkKind::Http
+                } else {
+                    LinkKind::Imports
+                },
                 from: r.get::<_, i64>(4)? as u32,
                 to: r.get::<_, Option<i64>>(5)?.map_or(NONE, |t| t as u32),
-                score: 1.0,
+                // Only HTTP links carry a score (XS-05); imports are parsed, so 1.0.
+                score: r.get::<_, Option<f64>>(6)?.map_or(1.0, |s| s as f32),
             });
         }
         drop(rows);

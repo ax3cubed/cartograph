@@ -308,7 +308,10 @@ CREATE TABLE evidence (
   start_col INTEGER NOT NULL,
   end_line INTEGER NOT NULL,
   end_col INTEGER NOT NULL,
-  extractor TEXT NOT NULL
+  extractor TEXT NOT NULL,
+  -- XS-06 link detail (begin): `get /orders/{}`, the call or route this site stands for.
+  operation TEXT
+  -- XS-06 link detail (end)
 ) STRICT;
 CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX evidence_file ON evidence (file);

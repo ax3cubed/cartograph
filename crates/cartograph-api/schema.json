@@ -1187,6 +1187,35 @@
       ],
       "type": "object"
     },
+    "EvidenceGroups": {
+      "description": "Evidence by role. Contract rows wait for contracts (XS-08).",
+      "properties": {
+        "caller": {
+          "items": {
+            "$ref": "#/definitions/EvidenceSite"
+          },
+          "type": "array"
+        },
+        "contract": {
+          "items": {
+            "$ref": "#/definitions/EvidenceSite"
+          },
+          "type": "array"
+        },
+        "handler": {
+          "items": {
+            "$ref": "#/definitions/EvidenceSite"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "contract",
+        "caller",
+        "handler"
+      ],
+      "type": "object"
+    },
     "EvidenceKind": {
       "description": "`lib/model.ts` Evidence kinds, `name-match` spelled `name_match`.",
       "enum": [
@@ -1198,6 +1227,47 @@
         "model"
       ],
       "type": "string"
+    },
+    "EvidenceSite": {
+      "description": "One place in a file that backs a link. `snippet` is repo text: show it as text, never markup.",
+      "properties": {
+        "end_line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "extractor": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "kind": {
+          "description": "`literal`, `template` or `inferred`.",
+          "type": "string"
+        },
+        "line": {
+          "description": "1-based.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snippet": {
+          "description": "At most 5 lines and 400 characters, secrets masked; null when the repo can't be read.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "end_line",
+        "kind",
+        "extractor"
+      ],
+      "type": "object"
     },
     "ExtractorInfo": {
       "description": "An extractor the index holds facts from (IDX-21), with the live files it read.",
@@ -1976,6 +2046,13 @@
           },
           "type": "array"
         },
+        "corrected": {
+          "description": "A correction decides this link (FE-14/XS-12); false until those exist.",
+          "items": {
+            "type": "boolean"
+          },
+          "type": "array"
+        },
         "from": {
           "items": {
             "format": "uint32",
@@ -2042,6 +2119,7 @@
         "kind",
         "level",
         "score",
+        "corrected",
         "weight",
         "added_seq",
         "removed_seq"
@@ -2050,22 +2128,67 @@
     },
     "LinkDetail": {
       "properties": {
+        "closed": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Commit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "correction_id": {
           "type": [
             "string",
             "null"
           ]
         },
+        "evidence": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/EvidenceGroups"
+            }
+          ],
+          "description": "The code behind the link, by its role in it."
+        },
         "interval": {
           "$ref": "#/definitions/Interval"
         },
         "layer": {
-          "$ref": "#/definitions/Layer"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Layer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer whose answer the map shows. Null until precedence layers exist (XS-08 onwards)."
         },
         "link": {
           "$ref": "#/definitions/Link"
         },
-        "replaced_by": {
+        "opened": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Commit"
+            }
+          ],
+          "description": "The commit that opened the link, and the one that closed it (null while live)."
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LinkOperation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "HTTP links: the call's method and route template."
+        },
+        "replaced": {
           "anyOf": [
             {
               "$ref": "#/definitions/LinkId"
@@ -2073,13 +2196,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "A link between the same two services that closed in the commit this one opened."
         }
       },
       "required": [
         "link",
-        "layer",
-        "interval"
+        "interval",
+        "opened",
+        "evidence"
       ],
       "type": "object"
     },
@@ -2137,6 +2262,23 @@
         "db"
       ],
       "type": "string"
+    },
+    "LinkOperation": {
+      "properties": {
+        "method": {
+          "description": "Lower case: `get`.",
+          "type": "string"
+        },
+        "template": {
+          "description": "`/orders/{}`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "template"
+      ],
+      "type": "object"
     },
     "Lod": {
       "description": "Level of detail of a graph slice.",

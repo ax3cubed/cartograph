@@ -54,6 +54,34 @@ fn every_route_body_validates_against_the_generated_schema() {
     assert_eq!(slice["data"]["links"]["from"].as_array().unwrap().len(), 3);
 }
 
+/// XS-06: a link's id from the map answers `…/links/{id}` with both commits and evidence, and the
+/// body validates against the contract. (HTTP evidence is covered over the XS-04 fixture in
+/// `cartograph-query`'s `link_detail` test.)
+#[test]
+fn a_link_from_the_map_answers_with_its_detail() {
+    let api = openapi();
+    let r = start();
+    let slice = get(&r, &format!("/api/v1/w/{}/graph", r.ws)).json();
+    let id = slice["data"]["links"]["id"][0].as_str().unwrap().to_owned();
+    let path = format!("/api/v1/w/{}/links/{id}", r.ws);
+    let reply = get(&r, &path);
+    assert_eq!(reply.status, 200, "{}", reply.body);
+    let schema = &api["paths"]["/api/v1/w/{ws}/links/{id}"]["get"]["responses"]["200"]["content"]["application/json"]
+        ["schema"];
+    let body = reply.json();
+    validate(&api, schema, &body, &path).unwrap_or_else(|e| panic!("{e}"));
+    let d = &body["data"];
+    assert_eq!(d["link"]["id"], id.as_str());
+    assert_eq!(d["layer"], "base");
+    assert!(d["opened"]["author"].is_string());
+    assert!(d["closed"].is_null());
+    assert!(d["evidence"]["caller"].as_array().unwrap().is_empty());
+    assert_eq!(
+        get(&r, &format!("/api/v1/w/{}/links/l99999", r.ws)).status,
+        404
+    );
+}
+
 #[test]
 fn every_error_body_validates_and_leaks_nothing() {
     let api = openapi();

@@ -26,6 +26,7 @@ mod owners;
 mod page;
 mod read;
 mod resolve;
+mod snippet;
 mod store;
 mod timeline;
 mod traverse;
