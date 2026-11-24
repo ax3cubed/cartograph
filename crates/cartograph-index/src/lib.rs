@@ -6,6 +6,7 @@ pub mod derive;
 pub mod extract;
 pub mod freshness;
 pub mod layout;
+pub mod links;
 pub mod owners;
 mod rows;
 pub mod structure;
