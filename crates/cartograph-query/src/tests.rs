@@ -1027,3 +1027,109 @@ fn owners_follow_codeowners_at_each_commit() {
     assert_eq!(got, [("@acme/core", 1), ("docs@example.com", 1)]);
     assert_eq!(all[0].patterns, ["/src/"]);
 }
+
+/// XS-02's done-when: a pnpm workspace with two Dockerfiles and a compose file yields its services,
+/// each with its rule and the file the rule read, and `http://orders:8080` resolves to `orders`;
+/// the aliases have intervals, so a rename in the compose file closes one and opens the other.
+#[test]
+fn a_compose_host_resolves_to_its_service_at_every_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut f = Fixture::init(&d.path().join("shop"));
+    f.write("package.json", r#"{"name":"shop","private":true}"#);
+    f.write("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
+    f.write("packages/orders/package.json", r#"{"name":"orders"}"#);
+    f.write("packages/orders/Dockerfile", "FROM node:22\n");
+    f.write("packages/orders/src/index.ts", "export const o = 1;\n");
+    f.write("packages/web/package.json", r#"{"name":"web"}"#);
+    f.write("packages/web/Dockerfile", "FROM node:22\n");
+    f.write("packages/web/src/index.ts", "export const w = 1;\n");
+    f.write("packages/money/package.json", r#"{"name":"money"}"#);
+    f.write("packages/money/src/index.ts", "export const m = 1;\n");
+    let compose = |orders: &str| {
+        format!(
+            "services:
+  {orders}:
+    build: ./packages/orders
+    expose: ['8080']
+    networks:
+      default:
+        aliases: [orders-api]
+  web:
+    build:
+      context: ./packages/web
+    ports: ['3000:3000']
+"
+        )
+    };
+    f.write("docker-compose.yml", &compose("orders"));
+    let first = f.commit("compose");
+    f.write("docker-compose.yml", &compose("sales"));
+    let second = f.commit("rename the compose service");
+
+    let index = d.path().join("data/index.cartograph");
+    std::fs::create_dir_all(index.parent().unwrap()).unwrap();
+    let mut cache = FactCache::open(&d.path().join("data/facts.db")).unwrap();
+    cartograph_index::build_single(&f.dir, None, &index, &mut cache, 2).unwrap();
+    let store = Store::open_path(&index).unwrap();
+    let snap = store.snapshot(Limits::default()).unwrap();
+
+    let svc: Vec<_> = snap
+        .services()
+        .unwrap()
+        .into_iter()
+        .map(|s| {
+            (
+                s.name,
+                s.library,
+                s.detected_by.unwrap(),
+                s.detect_source.unwrap(),
+            )
+        })
+        .collect();
+    let row = |n: &str, lib: bool| {
+        (
+            n.to_owned(),
+            lib,
+            "pnpm".to_owned(),
+            "pnpm-workspace.yaml".to_owned(),
+        )
+    };
+    assert_eq!(
+        svc,
+        [row("money", true), row("orders", false), row("web", false)]
+    );
+
+    let now = At::Now;
+    let hit = snap.resolve_host("http://orders:8080/orders/1?x=1", &At::Sha(first.clone()));
+    let hit = hit.unwrap().expect("orders resolves at the first commit");
+    assert_eq!((hit.name.as_str(), hit.host.as_str()), ("orders", "orders"));
+    assert_eq!(
+        (hit.port, hit.source.as_str()),
+        (Some(8080), "docker-compose.yml")
+    );
+    // The network alias, case-folded; a port the service doesn't declare; no port at all.
+    let name = |t: &str, at: &At| snap.resolve_host(t, at).unwrap().map(|m| m.name);
+    assert_eq!(
+        name("ORDERS-API:8080", &At::Sha(first.clone())).as_deref(),
+        Some("orders")
+    );
+    assert_eq!(name("http://orders:9999", &At::Sha(first.clone())), None);
+    assert_eq!(
+        name("orders", &At::Sha(first.clone())).as_deref(),
+        Some("orders")
+    );
+    assert_eq!(
+        name("web:3000", &At::Sha(first.clone())).as_deref(),
+        Some("web")
+    );
+    // The rename closed `orders` and opened `sales` at the second commit; the network alias stays.
+    assert_eq!(name("orders:8080", &At::Sha(second.clone())), None);
+    assert_eq!(
+        name("sales:8080", &At::Sha(second.clone())).as_deref(),
+        Some("orders")
+    );
+    assert_eq!(name("sales:8080", &At::Sha(first)), None);
+    assert_eq!(name("orders-api:8080", &now).as_deref(), Some("orders"));
+    assert_eq!(name("[::1]:8080", &now), None);
+    assert_eq!(name("nobody:1", &now), None);
+}

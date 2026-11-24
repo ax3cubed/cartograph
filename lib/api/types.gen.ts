@@ -878,6 +878,11 @@ export interface DiscoveredFolder {
  */
 export interface Service {
   /**
+   * The file that rule read, repository-relative: `cartograph.yaml`, a catalog or workspace file,
+   * or a package's own manifest; none for `repo` (board S04's "Detected from").
+   */
+  detect_source?: string | null;
+  /**
    * The C6 rule that found it: `manifest`, `scope`, `backstage`, `pnpm`, `npm-workspaces`,
    * `go.work`, `nx`, `cargo`, `composer` or `repo` (board S04).
    */

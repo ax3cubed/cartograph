@@ -1,5 +1,6 @@
 //! Orchestration: sync, rebuild, overlays, layout and freshness (D1).
 
+pub mod aliases;
 pub mod build;
 pub mod derive;
 pub mod extract;

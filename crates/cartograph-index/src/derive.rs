@@ -15,13 +15,14 @@ use cartograph_store::FactHash;
 use cartograph_store::derived::{KeyInputs, changed, inputs_key, record};
 use cartograph_store::rusqlite::{self, Connection, params};
 
+use crate::aliases;
 use crate::layout::{self, Circle};
 use crate::owners;
 use crate::structure::{self, Detected, Root, ServiceSpec};
 
 /// Bump when what an artefact holds changes, so every index rebuilds it.
-const DETECT_VERSION: &str = "detect 1";
-const STRUCTURE_VERSION: &str = "structure 1";
+const DETECT_VERSION: &str = "detect 2";
+const STRUCTURE_VERSION: &str = "structure 2";
 const COUNTS_VERSION: &str = "counts 1";
 const SEARCH_VERSION: &str = "search 1";
 const OWNERS_VERSION: &str = "owners 1";
@@ -146,7 +147,12 @@ pub fn coverage_report(conn: &Connection) -> rusqlite::Result<Option<CoverageRep
     }))
 }
 
-fn key(kind: &str, version: &str, inputs: Vec<Vec<u8>>, config: Option<&str>) -> [u8; 32] {
+pub(crate) fn key(
+    kind: &str,
+    version: &str,
+    inputs: Vec<Vec<u8>>,
+    config: Option<&str>,
+) -> [u8; 32] {
     inputs_key(
         kind,
         &KeyInputs {
@@ -162,7 +168,7 @@ fn key(kind: &str, version: &str, inputs: Vec<Vec<u8>>, config: Option<&str>) ->
 fn stored_roots(conn: &Connection, repo: &str) -> rusqlite::Result<Vec<Root>> {
     let prefix = format!("service:{repo}:");
     let mut st = conn.prepare(
-        "SELECT key, name, kind, detected_by FROM node
+        "SELECT key, name, kind, detected_by, detect_source FROM node
          WHERE key >= ?1 AND key < ?2 AND detected_by IS NOT NULL ORDER BY key",
     )?;
     let rows = st.query_map(params![prefix, format!("service:{repo};")], |r| {
@@ -177,6 +183,7 @@ fn stored_roots(conn: &Connection, repo: &str) -> rusqlite::Result<Vec<Root>> {
                 "service"
             },
             detected_by: r.get(3)?,
+            source: r.get(4)?,
         })
     })?;
     rows.collect()
@@ -189,7 +196,14 @@ fn structure_inputs(roots: &[Root], fingerprint: Vec<u8>, prefixed: bool) -> Vec
     let mut v: Vec<Vec<u8>> = roots
         .iter()
         .filter(|x| !(x.path.is_empty() && x.detected_by == "repo"))
-        .map(|x| format!("{}\0{}\0{}\0{}", x.path, x.name, x.kind, x.detected_by).into_bytes())
+        .map(|x| {
+            let source = x.source.as_deref().unwrap_or("");
+            format!(
+                "{}\0{}\0{}\0{}\0{source}",
+                x.path, x.name, x.kind, x.detected_by
+            )
+            .into_bytes()
+        })
         .collect();
     v.push(fingerprint);
     v.push(format!("prefixed {prefixed}").into_bytes());
@@ -269,18 +283,12 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
         let s_in = structure_inputs(&roots, path_fingerprint(conn, r.id)?, r.prefixed);
         let sk = key("structure", STRUCTURE_VERSION, s_in, config);
         if detected.is_some() || changed(conn, "structure", r.name, &sk)? {
-            structure::build(
-                conn,
-                r.id,
-                r.name,
-                r.prefixed.then_some(r.name),
-                &roots,
-                detected.as_ref().map(|d| d.aliases.as_slice()),
-            )?;
+            structure::build(conn, r.id, r.name, r.prefixed.then_some(r.name), &roots)?;
             record(conn, "structure", r.name, &sk)?;
             st.structures += 1;
             restructured = true;
         }
+        aliases::refresh(conn, r.id, r.name, r.prefixed.then_some(r.name), config)?;
         structure_keys.push(sk.to_vec());
 
         // Owners (XS-23): only when a CODEOWNERS version or a path row changed.
@@ -308,14 +316,7 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
         let s_in = structure_inputs(&roots, path_fingerprint(conn, *id)?, *prefixed);
         let sk = key("structure", STRUCTURE_VERSION, s_in, config);
         if changed(conn, "structure", name, &sk)? {
-            structure::build(
-                conn,
-                *id,
-                name,
-                prefixed.then_some(name.as_str()),
-                &roots,
-                None,
-            )?;
+            structure::build(conn, *id, name, prefixed.then_some(name.as_str()), &roots)?;
             record(conn, "structure", name, &sk)?;
             st.structures += 1;
             restructured = true;

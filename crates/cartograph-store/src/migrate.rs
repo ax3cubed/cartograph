@@ -48,6 +48,12 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-02 host aliases: begin ----
+    "DROP TABLE host_alias;
+     ALTER TABLE node DROP COLUMN detect_source;
+     CREATE TABLE alias (host TEXT NOT NULL, node INTEGER NOT NULL REFERENCES node (id),
+       source TEXT NOT NULL) STRICT;\n",
+    // ---- XS-02 host aliases: end ----
     // ---- XS-01 facts: begin ----
     "DROP TABLE evidence;
      ALTER TABLE unresolved DROP COLUMN fact_kind; ALTER TABLE unresolved DROP COLUMN raw;\n",
@@ -86,6 +92,15 @@ const V4: &str = concat!(
      CREATE INDEX evidence_link ON evidence (link);
      CREATE INDEX evidence_file ON evidence (file);\n",
     // ---- XS-01 facts: end ----
+    // ---- XS-02 host aliases: begin ----
+    "DROP TABLE alias;
+     ALTER TABLE node ADD COLUMN detect_source TEXT;
+     CREATE TABLE host_alias (host TEXT NOT NULL, port INTEGER, env_id INTEGER,
+       service_id INTEGER NOT NULL REFERENCES node (id), source TEXT NOT NULL,
+       blob_id BLOB NOT NULL, valid_from INTEGER NOT NULL, valid_to INTEGER) STRICT;
+     CREATE INDEX host_alias_host ON host_alias (host, valid_from);
+     CREATE INDEX host_alias_service ON host_alias (service_id);\n",
+    // ---- XS-02 host aliases: end ----
 );
 
 /// Takes a format 3 file back to format 2 (test support: tests build an older file from a new one

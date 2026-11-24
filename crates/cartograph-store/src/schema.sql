@@ -97,7 +97,8 @@ CREATE TABLE fact (
 -- kind: file, service, library or module (IDX-20). key names a structure node across runs and
 -- rebuilds (`service:<repo>:<root>`, `module:<path>`). parent is the node one level up (a file's
 -- module, a module's service); service is the top-level ancestor, so a scope's descendants are one
--- indexed lookup (SRV-08). fan_in counts live inbound links at the last run (IDX-21).
+-- indexed lookup (SRV-08). detected_by is the C6 rule that found a service or library (the
+-- detect_rule of board S04) and detect_source the file that rule read (XS-02). fan_in counts live inbound links at the last run (IDX-21).
 CREATE TABLE node (
   id INTEGER PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -107,6 +108,7 @@ CREATE TABLE node (
   parent INTEGER,
   service INTEGER,
   detected_by TEXT,
+  detect_source TEXT,
   fan_in INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 CREATE INDEX node_file ON node (file);
@@ -171,12 +173,25 @@ CREATE TABLE archived_interval (
 ) STRICT;
 CREATE INDEX archived_interval_rewrite ON archived_interval (rewrite);
 
--- Host names that reach a service: compose service names and k8s names (C6), for the links area.
-CREATE TABLE alias (
+-- XS-02 host aliases (begin)
+-- Host names that reach a service (C6, C7): compose service and container names, network aliases and
+-- k8s Service names in their four forms. port is the one the host listens on (NULL: any). env_id
+-- names the environment the file belongs to (NULL: every one; environments arrive with XS-09).
+-- source is the file's path and blob_id the blob that says so; valid_from and valid_to are the
+-- interval of that version of the file at that path, like every other row's.
+CREATE TABLE host_alias (
   host TEXT NOT NULL,
-  node INTEGER NOT NULL REFERENCES node (id),
-  source TEXT NOT NULL
+  port INTEGER,
+  env_id INTEGER,
+  service_id INTEGER NOT NULL REFERENCES node (id),
+  source TEXT NOT NULL,
+  blob_id BLOB NOT NULL,
+  valid_from INTEGER NOT NULL,
+  valid_to INTEGER
 ) STRICT;
+CREATE INDEX host_alias_host ON host_alias (host, valid_from);
+CREATE INDEX host_alias_service ON host_alias (service_id);
+-- XS-02 host aliases (end)
 
 -- One row per derived artefact (B6, IDX-21): what it was built from. A run rebuilds an artefact only
 -- when its key changes; AI output is marked stale instead.

@@ -2,11 +2,6 @@
 source: crates/cartograph-store/src/tests.rs
 expression: "rows.join(\";\\n\")"
 ---
-CREATE TABLE alias (
-  host TEXT NOT NULL,
-  node INTEGER NOT NULL REFERENCES node (id),
-  source TEXT NOT NULL
-) STRICT;
 CREATE TABLE archived_interval (
   rewrite INTEGER NOT NULL REFERENCES rewrite (id),
   link INTEGER NOT NULL REFERENCES link (id),
@@ -77,6 +72,16 @@ CREATE TABLE file_version (
   from_seq INTEGER NOT NULL,
   to_seq INTEGER
 ) STRICT;
+CREATE TABLE host_alias (
+  host TEXT NOT NULL,
+  port INTEGER,
+  env_id INTEGER,
+  service_id INTEGER NOT NULL REFERENCES node (id),
+  source TEXT NOT NULL,
+  blob_id BLOB NOT NULL,
+  valid_from INTEGER NOT NULL,
+  valid_to INTEGER
+) STRICT;
 CREATE TABLE interval (
   link INTEGER NOT NULL REFERENCES link (id),
   from_seq INTEGER NOT NULL,
@@ -110,6 +115,7 @@ CREATE TABLE node (
   parent INTEGER,
   service INTEGER,
   detected_by TEXT,
+  detect_source TEXT,
   fan_in INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 CREATE TABLE node_span (
@@ -207,6 +213,8 @@ CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX file_path_file ON file_path (file, from_seq);
 CREATE INDEX file_path_path ON file_path (path);
 CREATE INDEX file_version_file ON file_version (file, from_seq);
+CREATE INDEX host_alias_host ON host_alias (host, valid_from);
+CREATE INDEX host_alias_service ON host_alias (service_id);
 CREATE INDEX interval_at ON interval (from_seq, to_seq, link);
 CREATE INDEX interval_link ON interval (link);
 CREATE INDEX layout_node ON layout (node, from_seq);

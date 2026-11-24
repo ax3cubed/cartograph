@@ -43,6 +43,7 @@ fn roots(f: &Fixture, services: &[ServiceSpec], scopes: &[String]) -> Vec<String
                  name,
                  kind,
                  detected_by,
+                 ..
              }| format!("{path}={name} {kind} {detected_by}"),
         )
         .collect()
@@ -332,12 +333,9 @@ fn each_c6_rule_and_their_precedence() {
         "a compose build is deployable"
     );
     assert_eq!(
-        found.aliases,
-        [(
-            "core".to_owned(),
-            "crates/core".to_owned(),
-            "docker-compose.yml".to_owned()
-        )]
+        found.roots[0].source.as_deref(),
+        Some("Cargo.toml"),
+        "the rule's input is the workspace file"
     );
 
     let composer = mk(

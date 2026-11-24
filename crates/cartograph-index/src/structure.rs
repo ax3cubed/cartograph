@@ -28,14 +28,18 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use cartograph_git::{ObjectId, Repo, read_blob};
+use cartograph_parse::deploy::{is_k8s_dir, yaml_docs};
 use cartograph_parse::extractor_for;
-use cartograph_store::rusqlite::{self, Connection, OptionalExtension, params};
+use cartograph_store::rusqlite::{self, Connection, params};
 use serde_json::Value;
 
 use crate::timeline::{excluded, glob_matches};
 
 /// Manifests read for detection are capped at this size (IDX-20 security).
-const MAX_MANIFEST: u64 = 1_000_000;
+pub(crate) const MAX_MANIFEST: u64 = 1_000_000;
+
+/// What a `manifest` or `scope` service was read from.
+const MANIFEST_FILE: &str = "cartograph.yaml";
 
 /// One `services:` entry of the manifest.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -56,25 +60,26 @@ pub struct Root {
     pub kind: &'static str,
     /// The C6 rule that found it (board S04).
     pub detected_by: String,
+    /// What that rule read: the manifest, catalog file or workspace file, repository-relative;
+    /// `None` for the whole-repository rule (board S04's "Detected from").
+    pub source: Option<String>,
 }
 
 /// What detection found in one repository.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Detected {
     pub roots: Vec<Root>,
-    /// Host names that reach a root: (host, root path, source file).
-    pub aliases: Vec<(String, String, String)>,
 }
 
-fn base(p: &str) -> &str {
+pub(crate) fn base(p: &str) -> &str {
     p.rsplit('/').next().unwrap_or(p)
 }
 
-fn dir(p: &str) -> &str {
+pub(crate) fn dir(p: &str) -> &str {
     p.rsplit_once('/').map_or("", |(d, _)| d)
 }
 
-fn join(d: &str, rest: &str) -> String {
+pub(crate) fn join(d: &str, rest: &str) -> String {
     let mut parts: Vec<&str> = if d.is_empty() {
         Vec::new()
     } else {
@@ -93,7 +98,7 @@ fn join(d: &str, rest: &str) -> String {
 }
 
 /// Whether `path` is `root` or below it.
-fn under(root: &str, path: &str) -> bool {
+pub(crate) fn under(root: &str, path: &str) -> bool {
     root.is_empty() || path == root || path.strip_prefix(root).is_some_and(|r| r.starts_with('/'))
 }
 
@@ -123,14 +128,6 @@ fn interesting(p: &str) -> bool {
         || (is_k8s_dir(p) && (b.ends_with(".yml") || b.ends_with(".yaml")))
 }
 
-/// k8s manifests are read only in folders named for them, so a repository's other YAML is never
-/// parsed.
-fn is_k8s_dir(p: &str) -> bool {
-    dir(p)
-        .split('/')
-        .any(|d| matches!(d, "k8s" | "kubernetes" | "kube" | "deploy" | "manifests"))
-}
-
 /// Finds the service roots of one repository at `tip` (C6).
 pub fn detect(
     repo: &Repo,
@@ -148,6 +145,7 @@ pub fn detect(
             name: s.name.clone(),
             kind: "service",
             detected_by: "manifest".into(),
+            source: Some(MANIFEST_FILE.into()),
         })
         .collect();
     let skipped = |p: &str| {
@@ -165,17 +163,11 @@ pub fn detect(
         String::from_utf8(read_blob(&local, *oid, MAX_MANIFEST).ok()?).ok()
     };
     let json = |p: &str| -> Option<Value> { serde_json::from_str(&text(p)?).ok() };
-    let yaml_docs = |p: &str| -> Vec<Value> {
-        use serde::Deserialize;
-        let Some(t) = text(p) else { return Vec::new() };
-        serde_norway::Deserializer::from_str(&t)
-            .take(100)
-            .filter_map(|d| Value::deserialize(d).ok())
-            .collect()
-    };
+    let yaml_docs = |p: &str| -> Vec<Value> { text(p).map_or_else(Vec::new, |t| yaml_docs(&t)) };
 
-    // Compose services by build context, and k8s names by folder: aliases, and deployable markers.
-    let mut aliases_at: Vec<(String, String, String)> = Vec::new();
+    // Compose builds by context, and k8s workloads by folder: deployable markers. Their host names are
+    // the host aliases ([`crate::aliases`]).
+    let mut deployed_at: Vec<(String, String)> = Vec::new();
     for p in tree.keys() {
         let b = base(p);
         if (b.starts_with("docker-compose") || b.starts_with("compose")) && !is_k8s_dir(p) {
@@ -183,14 +175,14 @@ pub fn detect(
                 let Some(svcs) = doc.get("services").and_then(Value::as_object) else {
                     continue;
                 };
-                for (host, def) in svcs {
+                for def in svcs.values() {
                     let ctx = match def.get("build") {
                         Some(Value::String(s)) => Some(s.as_str()),
                         Some(b) => b.get("context").and_then(Value::as_str),
                         None => None,
                     };
                     if let Some(ctx) = ctx {
-                        aliases_at.push((host.clone(), join(dir(p), ctx), p.clone()));
+                        deployed_at.push((join(dir(p), ctx), p.clone()));
                     }
                 }
             }
@@ -198,9 +190,9 @@ pub fn detect(
             for doc in yaml_docs(p) {
                 let kind = doc.get("kind").and_then(Value::as_str).unwrap_or("");
                 if matches!(kind, "Deployment" | "Service" | "StatefulSet")
-                    && let Some(n) = doc.pointer("/metadata/name").and_then(Value::as_str)
+                    && doc.pointer("/metadata/name").is_some_and(Value::is_string)
                 {
-                    aliases_at.push((n.to_owned(), dir(p).to_owned(), p.clone()));
+                    deployed_at.push((dir(p).to_owned(), p.clone()));
                 }
             }
         }
@@ -214,12 +206,12 @@ pub fn detect(
                     || b.ends_with(".Dockerfile")
                     || b == "Procfile"
                     || b.starts_with("serverless."))
-        }) || aliases_at
+        }) || deployed_at
             .iter()
-            .any(|(_, at, src)| at == d && !is_k8s_dir(src))
-            || aliases_at
+            .any(|(at, src)| at == d && !is_k8s_dir(src))
+            || deployed_at
                 .iter()
-                .any(|(_, at, src)| is_k8s_dir(src) && under(d, at) && !d.is_empty())
+                .any(|(at, src)| is_k8s_dir(src) && under(d, at) && !d.is_empty())
     };
 
     let mut mine = mine;
@@ -231,6 +223,7 @@ pub fn detect(
                 path,
                 kind: "service",
                 detected_by: "scope".into(),
+                source: Some(MANIFEST_FILE.into()),
             });
         }
     }
@@ -248,6 +241,7 @@ pub fn detect(
                         name: n.to_owned(),
                         kind: "service",
                         detected_by: "backstage".into(),
+                        source: Some(p.clone()),
                     });
                 }
             }
@@ -275,19 +269,10 @@ pub fn detect(
             name: name.to_owned(),
             kind: "service",
             detected_by: "repo".into(),
+            source: None,
         });
     }
-    let aliases = aliases_at
-        .into_iter()
-        .filter_map(|(host, at, src)| {
-            let r = roots
-                .iter()
-                .filter(|r| under(&r.path, &at))
-                .max_by_key(|r| r.path.len())?;
-            Some((host, r.path.clone(), src))
-        })
-        .collect();
-    Ok(Detected { roots, aliases })
+    Ok(Detected { roots })
 }
 
 /// Rule 4: the packages a workspace manifest at the repository root lists.
@@ -308,7 +293,8 @@ fn workspace_packages(
             .unwrap_or_default()
     };
     // Folders holding `marker` that a glob matches, named by `name_of` or their folder name.
-    let packages = |patterns: &[String], marker: &str, by: &str| -> Vec<Root> {
+    // `src` is the workspace file that listed them (Nx has none: each project's own file).
+    let packages = |patterns: &[String], marker: &str, by: &str, src: Option<&str>| -> Vec<Root> {
         tree.keys()
             .filter(|p| base(p) == marker && !dir(p).is_empty())
             .filter(|p| patterns.iter().any(|g| glob_matches(g, dir(p))))
@@ -328,13 +314,19 @@ fn workspace_packages(
                     name: name.unwrap_or_else(|| base(dir(p)).to_owned()),
                     kind: "service",
                     detected_by: by.into(),
+                    source: Some(src.map_or_else(|| p.clone(), str::to_owned)),
                 }
             })
             .collect()
     };
     if let Some(t) = text("pnpm-workspace.yaml") {
         let v: Value = serde_norway::from_str(&t).unwrap_or(Value::Null);
-        let found = packages(&globs(v.get("packages")), "package.json", "pnpm");
+        let found = packages(
+            &globs(v.get("packages")),
+            "package.json",
+            "pnpm",
+            Some("pnpm-workspace.yaml"),
+        );
         if !found.is_empty() {
             return found;
         }
@@ -342,19 +334,24 @@ fn workspace_packages(
     if let Some(v) = json("package.json") {
         let w = v.get("workspaces");
         let list = globs(w.and_then(|w| w.get("packages")).or(w));
-        let found = packages(&list, "package.json", "npm-workspaces");
+        let found = packages(
+            &list,
+            "package.json",
+            "npm-workspaces",
+            Some("package.json"),
+        );
         if !found.is_empty() {
             return found;
         }
     }
     if let Some(t) = text("go.work") {
         let uses = go_work_uses(&t);
-        let found = packages(&uses, "go.mod", "go.work");
+        let found = packages(&uses, "go.mod", "go.work", Some("go.work"));
         if !found.is_empty() {
             return found;
         }
     }
-    let nx = packages(&["**".into()], "project.json", "nx");
+    let nx = packages(&["**".into()], "project.json", "nx", None);
     if !nx.is_empty() {
         return nx;
     }
@@ -372,7 +369,7 @@ fn workspace_packages(
                     .collect()
             })
             .unwrap_or_default();
-        let found = packages(&members, "Cargo.toml", "cargo");
+        let found = packages(&members, "Cargo.toml", "cargo", Some("Cargo.toml"));
         if !found.is_empty() {
             return found;
         }
@@ -389,7 +386,7 @@ fn workspace_packages(
                     .collect()
             })
             .unwrap_or_default();
-        let found = packages(&urls, "composer.json", "composer");
+        let found = packages(&urls, "composer.json", "composer", Some("composer.json"));
         if !found.is_empty() {
             return found;
         }
@@ -430,7 +427,7 @@ fn is_source(path: &str) -> bool {
 type Span = (i64, Option<i64>);
 
 /// Merges intervals; `None` is open.
-fn merge(mut v: Vec<(i64, Option<i64>)>) -> Vec<(i64, Option<i64>)> {
+pub(crate) fn merge(mut v: Vec<(i64, Option<i64>)>) -> Vec<(i64, Option<i64>)> {
     v.sort_unstable_by_key(|(f, _)| *f);
     let mut out: Vec<(i64, Option<i64>)> = Vec::new();
     for (f, t) in v {
@@ -452,14 +449,15 @@ fn upsert(
     key: &str,
     kind: &str,
     name: &str,
-    detected_by: Option<&str>,
+    detected: Option<(&str, Option<&str>)>,
 ) -> rusqlite::Result<i64> {
+    let (rule, source) = detected.unzip();
     conn.prepare_cached(
-        "INSERT INTO node (kind, key, name, detected_by) VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO node (kind, key, name, detected_by, detect_source) VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT (key) DO UPDATE SET kind = excluded.kind, name = excluded.name,
-           detected_by = excluded.detected_by",
+           detected_by = excluded.detected_by, detect_source = excluded.detect_source",
     )?
-    .execute(params![kind, key, name, detected_by])?;
+    .execute(params![kind, key, name, rule, source.flatten()])?;
     conn.prepare_cached("SELECT id FROM node WHERE key = ?1")?
         .query_row([key], |r| r.get(0))
 }
@@ -473,8 +471,7 @@ pub struct Built {
 }
 
 /// Writes one repository's structure from its roots: service and module nodes, their spans, every
-/// node's parent and service, and, when given, its aliases (otherwise they stay as they are). `prefix` is the repository's path prefix in a
-/// multi-repository index. Nodes are never deleted; a root no longer detected keeps its node with
+/// node's parent and service. `prefix` is the repository's path prefix in a multi-repository index. Nodes are never deleted; a root no longer detected keeps its node with
 /// no span and no `detected_by`.
 pub fn build(
     conn: &Connection,
@@ -482,13 +479,7 @@ pub fn build(
     repo_name: &str,
     prefix: Option<&str>,
     roots: &[Root],
-    aliases: Option<&[(String, String, String)]>,
 ) -> rusqlite::Result<Built> {
-    let ns = |p: &str| match (prefix, p.is_empty()) {
-        (Some(x), true) => x.to_owned(),
-        (Some(x), false) => format!("{x}/{p}"),
-        (None, _) => p.to_owned(),
-    };
     let rel = |p: &str| -> String {
         match prefix {
             Some(x) => p
@@ -505,6 +496,7 @@ pub fn build(
         name: repo_name.to_owned(),
         kind: "service",
         detected_by: "repo".into(),
+        source: None,
     };
     if !roots.iter().any(|r| r.path.is_empty()) {
         roots.push(remainder);
@@ -557,14 +549,8 @@ pub fn build(
            OR service IN (SELECT id FROM node WHERE key >= ?1 AND key < ?2))",
         params![prefix_key, format!("service:{repo_name};")],
     )?;
-    if aliases.is_some() {
-        conn.execute(
-            "DELETE FROM alias WHERE node IN (SELECT id FROM node WHERE key >= ?1 AND key < ?2)",
-            params![prefix_key, format!("service:{repo_name};")],
-        )?;
-    }
     conn.execute(
-        "UPDATE node SET detected_by = NULL WHERE key >= ?1 AND key < ?2",
+        "UPDATE node SET detected_by = NULL, detect_source = NULL WHERE key >= ?1 AND key < ?2",
         params![prefix_key, format!("service:{repo_name};")],
     )?;
     let mut service_id: HashMap<usize, i64> = HashMap::new();
@@ -584,7 +570,7 @@ pub fn build(
             &format!("{prefix_key}{}", r.path),
             r.kind,
             &r.name,
-            Some(&r.detected_by),
+            Some((&r.detected_by, r.source.as_deref())),
         )?;
         conn.prepare_cached("UPDATE node SET parent = NULL, service = ?1 WHERE id = ?1")?
             .execute([id])?;
@@ -631,16 +617,6 @@ pub fn build(
         if parent != Some(want) || service != Some(svc) {
             conn.prepare_cached("UPDATE node SET parent = ?2, service = ?3 WHERE id = ?1")?
                 .execute(params![node, want, svc])?;
-        }
-    }
-    for (host, at, src) in aliases.unwrap_or_default() {
-        let id: Option<i64> = conn
-            .prepare_cached("SELECT id FROM node WHERE key = ?1")?
-            .query_row([format!("{prefix_key}{at}")], |r| r.get(0))
-            .optional()?;
-        if let Some(id) = id {
-            conn.prepare_cached("INSERT INTO alias (host, node, source) VALUES (?1, ?2, ?3)")?
-                .execute(params![host, id, ns(src)])?;
         }
     }
     Ok(Built {

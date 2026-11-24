@@ -3765,6 +3765,13 @@
       },
       "Service": {
         "properties": {
+          "detect_source": {
+            "description": "The file that rule read, repository-relative: `cartograph.yaml`, a catalog or workspace file,\nor a package's own manifest; none for `repo` (board S04's \"Detected from\").",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "detected_by": {
             "description": "The C6 rule that found it: `manifest`, `scope`, `backstage`, `pnpm`, `npm-workspaces`,\n`go.work`, `nx`, `cargo`, `composer` or `repo` (board S04).",
             "type": [

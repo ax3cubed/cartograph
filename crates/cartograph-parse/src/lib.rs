@@ -8,12 +8,14 @@
 use cartograph_core as _;
 use serde::{Deserialize, Serialize};
 
+pub mod deploy;
 mod lang;
 pub mod manifest;
 mod manifest_lang;
 pub mod syntax;
 mod ts;
 
+pub use deploy::ManifestDeploy;
 pub use lang::{GoImports, PhpImports, PyImports};
 pub use manifest::ManifestJs;
 pub use manifest_lang::{ManifestGo, ManifestPhp, ManifestPy};
@@ -58,6 +60,14 @@ pub enum Fact {
     DynamicUnresolved { span: Span },
     /// One top-level field of a package.json or tsconfig, its value as canonical JSON.
     Manifest { field: String, value: String },
+    /// A host name a compose service or k8s Service answers to (XS-02). `port` is the one it
+    /// listens on, `None` for any; `context` is a compose `build` context as written (relative to
+    /// the file), `None` for k8s.
+    Host {
+        host: String,
+        port: Option<u16>,
+        context: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -108,7 +118,7 @@ pub trait Extractor: Sync {
 }
 
 /// The built-in extractors.
-pub static EXTRACTORS: [&dyn Extractor; 8] = [
+pub static EXTRACTORS: [&dyn Extractor; 9] = [
     &TsImports,
     &ManifestJs,
     &GoImports,
@@ -117,6 +127,7 @@ pub static EXTRACTORS: [&dyn Extractor; 8] = [
     &ManifestGo,
     &ManifestPy,
     &ManifestPhp,
+    &ManifestDeploy,
 ];
 
 /// The extractor for a path, with its kind. Paths under node_modules, dist, build, vendor or .next
