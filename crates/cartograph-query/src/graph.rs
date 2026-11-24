@@ -179,25 +179,38 @@ impl Snapshot<'_> {
     }
 
     /// The files live at `seq` (of `repo` when given), by path, with their stored positions.
-    fn live_files(&self, seq: i64, repo: Option<&String>) -> Result<Vec<LiveFile>, QueryError> {
+    fn live_files(
+        &self,
+        seq: i64,
+        repo: Option<&String>,
+        paths: bool,
+    ) -> Result<Vec<LiveFile>, QueryError> {
         let mut st = self.conn().prepare_cached(
-            "SELECT n.id, fp.path, n.parent, n.service, l.x, l.y, l.r
+            "SELECT n.id, fp.path, n.parent, n.service
              FROM file_path fp JOIN node n ON n.file = fp.file
              JOIN file f ON f.id = fp.file
-             LEFT JOIN layout l ON l.node = n.id AND l.from_seq <= ?1
-               AND (l.to_seq IS NULL OR l.to_seq > ?1)
              WHERE fp.from_seq <= ?1 AND (fp.to_seq IS NULL OR fp.to_seq > ?1)
-               AND (?2 IS NULL OR f.repo IN (SELECT id FROM repo WHERE name = ?2))
-             ORDER BY fp.path",
+               AND (?2 IS NULL OR f.repo IN (SELECT id FROM repo WHERE name = ?2))",
         )?;
+        // One scan of the live layout beats a per-file index probe: about 3 ms against 40-150 ms
+        // on 60k files. Two rows live for one node would be the indexer's bug: the first wins.
+        let mut pos: HashMap<i64, (f32, f32, f32)> = HashMap::new();
+        let mut lt = self.conn().prepare_cached(
+            "SELECT node, x, y, r FROM layout
+             WHERE from_seq <= ?1 AND (to_seq IS NULL OR to_seq > ?1)",
+        )?;
+        let mut lrows = lt.query([seq])?;
+        while let Some(r) = lrows.next()? {
+            pos.entry(r.get(0)?).or_insert((
+                r.get::<_, f64>(1)? as f32,
+                r.get::<_, f64>(2)? as f32,
+                r.get::<_, f64>(3)? as f32,
+            ));
+        }
         let mut rows = st.query(rusqlite::params![seq, repo])?;
         let mut out: Vec<LiveFile> = Vec::new();
         while let Some(r) = rows.next()? {
             let id: i64 = r.get(0)?;
-            // Two layout rows live at one step would be the indexer's bug: keep the first.
-            if out.last().is_some_and(|f| f.id == id) {
-                continue;
-            }
             if out.len() >= MAX_NODES {
                 return Err(QueryError::TooLarge {
                     why: format!("more than {MAX_NODES} files are live at this commit"),
@@ -205,21 +218,19 @@ impl Snapshot<'_> {
                 });
             }
             self.check_rows(out.len() + 1, NARROWER)?;
-            let pos = match (
-                r.get::<_, Option<f64>>(4)?,
-                r.get::<_, Option<f64>>(5)?,
-                r.get::<_, Option<f64>>(6)?,
-            ) {
-                (Some(x), Some(y), Some(rr)) => Some((x as f32, y as f32, rr as f32)),
-                _ => None,
-            };
             out.push(LiveFile {
                 id,
-                path: r.get(1)?,
+                // A roll-up never shows a path: skip the 60k allocations and the sort.
+                path: if paths { r.get(1)? } else { String::new() },
                 parent: r.get(2)?,
                 service: r.get(3)?,
-                pos,
+                pos: pos.get(&id).copied(),
             });
+        }
+        // Sorted here, not by ORDER BY: walking the path index costs ~5x a scan and a sort. Byte
+        // order, as SQLite's BINARY collation gives.
+        if paths {
+            out.sort_by(|a, b| a.path.cmp(&b.path));
         }
         Ok(out)
     }
@@ -240,12 +251,17 @@ impl Snapshot<'_> {
         let mut st = self.conn().prepare_cached(
             "SELECT l.id, l.src, l.dst, i.from_seq, i.to_seq
              FROM interval i JOIN link l ON l.id = i.link
-             WHERE i.from_seq <= ?1 AND (i.to_seq IS NULL OR i.to_seq > ?1)
-             ORDER BY l.id",
+             WHERE i.from_seq <= ?1 AND (i.to_seq IS NULL OR i.to_seq > ?1)",
         )?;
+        // Sorted here, not by ORDER BY: SQLite's temp B-tree costs ~3x the scan on 200k links.
+        let mut live: Vec<(i64, i64, i64, i64, Option<i64>)> = Vec::new();
         let mut rows = st.query([seq])?;
         while let Some(r) = rows.next()? {
-            each(r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(0)?)?;
+            live.push((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?));
+        }
+        live.sort_unstable_by_key(|l| l.0);
+        for (id, src, dst, from_seq, to_seq) in live {
+            each(src, dst, from_seq, to_seq, id)?;
         }
         Ok(())
     }
@@ -269,7 +285,11 @@ impl Snapshot<'_> {
             });
         }
         // repo= keeps that repo's files; links with an end outside them are dropped below.
-        let files = self.live_files(seq, q.repo.as_ref())?;
+        let files = self.live_files(
+            seq,
+            q.repo.as_ref(),
+            !matches!(q.lod, Lod::Module | Lod::Service),
+        )?;
         let (nodes, links) = match q.lod {
             Lod::Module | Lod::Service => self.rolled_up(q, seq, &files)?,
             _ => self.file_level(q, seq, files)?,
@@ -462,11 +482,22 @@ impl Snapshot<'_> {
         let mut links = empty_links();
         let mut pair: HashMap<(u32, u32), usize> = HashMap::new();
         let n = nodes.id.len();
+        // File id to holder index, dense: two hash probes per end were most of the 200k-link scan.
+        let top = files.iter().map(|f| f.id).max().unwrap_or(0).max(0) as usize;
+        let mut slot = vec![u32::MAX; top + 1];
+        for (f, h) in &of {
+            if let Some(&i) = index.get(h) {
+                slot[*f as usize] = i;
+            }
+        }
+        let slot_of = |id: i64| {
+            usize::try_from(id)
+                .ok()
+                .and_then(|i| slot.get(i))
+                .filter(|i| **i != u32::MAX)
+        };
         self.live_links(q, seq, |src, dst, from_seq, _, _| {
-            let (Some(a), Some(b)) = (
-                of.get(&src).and_then(|h| index.get(h)),
-                of.get(&dst).and_then(|h| index.get(h)),
-            ) else {
+            let (Some(a), Some(b)) = (slot_of(src), slot_of(dst)) else {
                 return Ok(());
             };
             if a == b {
