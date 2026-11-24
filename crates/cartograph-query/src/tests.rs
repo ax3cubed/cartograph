@@ -781,7 +781,7 @@ fn coverage_runs_extractors_and_services_read_what_the_index_stored() {
          INSERT INTO file_version (file, blob, from_seq, to_seq) VALUES
            (1, x'b1', 1, NULL), (2, x'b2', 1, 2), (2, x'b3', 2, NULL);
          INSERT INTO extractor (id, name, version) VALUES
-           (1, 'ts-imports', '0.9.0'), (2, 'ts-imports', '1.0.0'), (3, 'go-imports', '1.0.0');
+           (1, 'ts-imports', '0.9.0'), (2, 'ts-imports/ts', '1.0.0'), (3, 'go-imports/go', '1.0.0');
          INSERT INTO fact (blob, extractor, payload) VALUES
            (x'b1', 2, x''), (x'b2', 2, x''), (x'b3', 1, x'');
          INSERT INTO node (id, kind, file, key, name, detected_by) VALUES

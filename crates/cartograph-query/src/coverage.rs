@@ -141,20 +141,26 @@ impl Snapshot<'_> {
         })
     }
 
-    /// `GET …/extractors`: each extractor by name, its newest version, and the live files whose
-    /// content it read. An extractor no live file needs is still listed, with 0.
+    /// `GET …/extractors`: each extractor family (`go-imports` for `go-imports/go`), its newest
+    /// version, and the live files whose content it read. A family no live file needs is still
+    /// listed, with 0.
     pub fn extractors(&self) -> Result<Vec<ExtractorInfo>, QueryError> {
         let mut st = self.conn().prepare_cached(
-            "SELECT e.name,
-                    (SELECT version FROM extractor x WHERE x.name = e.name ORDER BY x.id DESC LIMIT 1),
+            "WITH x AS (
+               SELECT id, version,
+                      CASE WHEN instr(name, '/') > 0 THEN substr(name, 1, instr(name, '/') - 1)
+                           ELSE name END AS fam
+               FROM extractor)
+             SELECT e.fam,
+                    (SELECT version FROM x y WHERE y.fam = e.fam ORDER BY y.id DESC LIMIT 1),
                     coalesce(c.files, 0)
-             FROM (SELECT DISTINCT name FROM extractor) e
-             LEFT JOIN (SELECT x.name, count(DISTINCT v.file) AS files
+             FROM (SELECT DISTINCT fam FROM x) e
+             LEFT JOIN (SELECT x.fam, count(DISTINCT v.file) AS files
                         FROM file_version v
                         JOIN fact f ON f.blob = v.blob
-                        JOIN extractor x ON x.id = f.extractor
-                        WHERE v.to_seq IS NULL GROUP BY x.name) c ON c.name = e.name
-             ORDER BY e.name",
+                        JOIN x ON x.id = f.extractor
+                        WHERE v.to_seq IS NULL GROUP BY x.fam) c ON c.fam = e.fam
+             ORDER BY e.fam",
         )?;
         let rows = st.query_map([], |r| {
             Ok(ExtractorInfo {
