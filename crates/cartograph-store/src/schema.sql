@@ -129,6 +129,11 @@ CREATE TABLE link (
   kind TEXT NOT NULL,
   src INTEGER NOT NULL REFERENCES node (id),
   dst INTEGER NOT NULL REFERENCES node (id),
+  -- XS-05 confidence (begin): set when the link is written; NULL for kinds that carry no
+  -- confidence (imports). level is exact, likely, guessed or weak; score is inside its band.
+  level TEXT,
+  score REAL,
+  -- XS-05 confidence (end)
   UNIQUE (kind, src, dst)
 ) STRICT;
 

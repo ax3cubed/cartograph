@@ -128,6 +128,10 @@ fn a_fetch_links_to_the_route_until_the_route_is_deleted() {
             ),
         ]
     );
+    // Its confidence: a template call site (likely), an alias-resolved host (likely) and a full
+    // path match anchored on the express handler. No step is exact on its own, so the link is
+    // likely; the noisy-or of the three likely rows is over the band, so it takes the band's top.
+    assert_eq!(level_score(&ix), [("likely".to_owned(), 0.89)]);
     // While the route is gone the call is not-found in orders, from the commit that dropped it.
     let u: Vec<(String, String, i64, Option<i64>)> = ix
         .conn
@@ -143,6 +147,39 @@ fn a_fetch_links_to_the_route_until_the_route_is_deleted() {
         u,
         [("get /orders/{}".to_owned(), "not-found".to_owned(), 3, None)]
     );
+}
+
+fn level_score(ix: &Index) -> Vec<(String, f64)> {
+    ix.conn
+        .prepare("SELECT level, score FROM link WHERE kind = 'http'")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// With no host the only route that fits is the base evidence, which is guessed: the call site
+/// is a literal and the path a full match on a handler, but the weakest step sets the level.
+#[test]
+fn a_hostless_call_with_one_candidate_is_guessed() {
+    let d = tempfile::tempdir().unwrap();
+    let mut f = Fixture::init(&d.path().join("repo"));
+    f.write("docker-compose.yml", COMPOSE);
+    f.write("orders/package.json", r#"{"name":"orders"}"#);
+    f.write("web/package.json", r#"{"name":"web"}"#);
+    f.write("orders/src/server.ts", SERVER);
+    f.write(
+        "web/src/api.ts",
+        "export const load = () => fetch(\"/orders/42\");\n",
+    );
+    f.commit("both");
+    let w = workspace(&f, &d.path().join("ws"));
+    let mut cache = FactCache::open(&d.path().join("facts.db")).unwrap();
+    run(&w, &mut cache);
+    assert_eq!(links(&w), ["web/src/api.ts -> orders/src/server.ts 0-open"]);
+    let ix = Index::open_read(&w.index_path()).unwrap();
+    assert_eq!(level_score(&ix), [("guessed".to_owned(), 0.40)]);
 }
 
 fn hex(b: &[u8]) -> String {

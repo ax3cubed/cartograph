@@ -23,6 +23,7 @@ use cartograph_store::rusqlite::{self, Connection, params};
 
 use crate::derive::key;
 use crate::ifaces;
+use crate::links::confidence::{self, EvidenceType as Ev};
 use crate::links::http::{
     Alias, CallSite, Delta, HttpResolver, Kind, LinkResolver, LinkSink, Match, Pair, Reason,
     RouteSite, Site, SiteKey, call_target, normalise_route,
@@ -43,6 +44,8 @@ struct Info {
     raw: String,
     /// `get /orders/{}`.
     template: String,
+    /// The call spells a host out.
+    host: bool,
 }
 
 /// One version of a file at a path: its sites, over the overlap of the two intervals.
@@ -179,6 +182,7 @@ fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
                 extractor: format!("{name}@{version}"),
                 raw,
                 template,
+                host: false,
             };
             match f.kind {
                 FactKind::Route => {
@@ -231,7 +235,8 @@ fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
                         "{method} {}",
                         crate::links::http::normalise(&method, &raw).path()
                     );
-                    let info = mk_info(template, raw);
+                    let mut info = mk_info(template, raw);
+                    info.host = target.host.is_some();
                     out.push((
                         Site::Call(CallSite {
                             key: key(Kind::Call),
@@ -283,6 +288,8 @@ struct Out {
     intervals: BTreeMap<Link, Vec<(i64, Option<i64>)>>,
     /// Link -> (file, kind, text, span, extractor), deduplicated.
     evidence: BTreeMap<Link, BTreeSet<EvidenceRow>>,
+    /// Link -> what the confidence engine scores it from.
+    types: BTreeMap<Link, BTreeSet<Ev>>,
     /// (file, template, line, reason, raw, from, to)
     unresolved: Vec<UnresolvedRow>,
 }
@@ -320,6 +327,29 @@ impl Sweep {
                 .entry(l)
                 .or_insert_with(|| self.counts.get(&l).copied().unwrap_or(0));
             *self.counts.entry(l).or_default() += 1;
+            let types = self.out.types.entry(l).or_default();
+            if let Some(i) = self.info.get(&p.call) {
+                match i.kind {
+                    "literal" => types.insert(Ev::LiteralCallSiteUrl),
+                    "template" => types.insert(Ev::TemplateCallSiteUrl),
+                    _ => false,
+                };
+                if i.host {
+                    types.insert(Ev::HostAliasResolved);
+                }
+            }
+            match how {
+                Match::Partial => types.insert(Ev::PartialPathMatch),
+                Match::Unique => {
+                    types.insert(Ev::UniqueAcrossWorkspace);
+                    types.insert(Ev::FullPathMatch);
+                    types.insert(Ev::HandlerAnchored)
+                }
+                Match::Full => {
+                    types.insert(Ev::FullPathMatch);
+                    types.insert(Ev::HandlerAnchored)
+                }
+            };
             let ev = self.out.evidence.entry(l).or_default();
             for (k, partial) in [(&p.call, *how == Match::Partial), (&p.route, false)] {
                 if let Some(i) = self.info.get(k) {
@@ -447,6 +477,15 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         .into_bytes()
     }));
     inputs.push(ifaces::version().into_bytes());
+    // A re-weight re-scores the links and nothing else.
+    inputs.push(
+        format!(
+            "{}\0{}",
+            confidence::EXTRACTOR,
+            confidence::extractor_version()
+        )
+        .into_bytes(),
+    );
     let k = key("http", HTTP_VERSION, inputs, config);
     if !changed(conn, "http", "workspace", &k)? {
         return Ok(0);
@@ -484,8 +523,12 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
     )?;
     let mut written = 0;
     for (l, spans) in &out.intervals {
-        conn.prepare_cached("INSERT INTO link (kind, src, dst) VALUES ('http', ?1, ?2)")?
-            .execute(params![l.0, l.1])?;
+        let types: Vec<Ev> = out.types.get(l).into_iter().flatten().copied().collect();
+        let c = confidence::score(&types);
+        conn.prepare_cached(
+            "INSERT INTO link (kind, src, dst, level, score) VALUES ('http', ?1, ?2, ?3, ?4)",
+        )?
+        .execute(params![l.0, l.1, c.level.as_str(), c.score])?;
         let id = conn.last_insert_rowid();
         for (from, to) in spans {
             conn.prepare_cached(
@@ -495,8 +538,6 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
             written += 1;
         }
         for (file, kind, text, span, extractor) in out.evidence.get(l).into_iter().flatten() {
-            // XS-05: the confidence engine scores this link from these rows; until it is wired in
-            // a link has no level or score.
             conn.prepare_cached(
                 "INSERT INTO evidence (link, file, kind, text, start_line, start_col, end_line,
                    end_col, extractor) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",

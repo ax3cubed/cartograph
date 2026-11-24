@@ -272,6 +272,7 @@ fn verdict(call: &str, route: &str) -> &'static str {
     match match_segs(&c.segs, &r.segs) {
         Some((Match::Full, _)) => "full",
         Some((Match::Partial, _)) => "partial",
+        Some((Match::Unique, _)) => unreachable!("only the resolver says unique"),
         None => "none",
     }
 }

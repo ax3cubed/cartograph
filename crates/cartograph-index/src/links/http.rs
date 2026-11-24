@@ -323,6 +323,8 @@ pub enum Match {
     Full,
     /// A literal against `{*}`.
     Partial,
+    /// A full match of a call with no host, and the only candidate in the workspace.
+    Unique,
 }
 
 /// Direct match of a call against a route, with the number of literal segments that agreed.
@@ -793,7 +795,13 @@ impl HttpResolver {
                 all.extend(best_per_service(v));
             }
         }
-        settle(st, all, false)
+        let mut st = settle(st, all, false);
+        if st.pairs.len() == 1 {
+            for m in st.pairs.values_mut().filter(|m| **m == Match::Full) {
+                *m = Match::Unique;
+            }
+        }
+        st
     }
 }
 

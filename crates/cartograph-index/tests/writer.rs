@@ -261,7 +261,7 @@ fn rewrite(src: &Path, out: &Path, page_size: u32, shift: i64, reverse: bool) {
          INSERT INTO fact SELECT blob, extractor + {shift}, payload FROM s.fact ORDER BY blob {order};
          INSERT INTO node (id, kind, file, key) SELECT id + {shift}, kind, file + {shift}, key
            FROM s.node ORDER BY id {order};
-         INSERT INTO link SELECT id + {shift}, kind, src + {shift}, dst + {shift} FROM s.link
+         INSERT INTO link (id, kind, src, dst) SELECT id + {shift}, kind, src + {shift}, dst + {shift} FROM s.link
            ORDER BY id {order};
          INSERT INTO interval SELECT link + {shift}, from_seq + {shift}, to_seq + {shift}
            FROM s.interval ORDER BY rowid {order};

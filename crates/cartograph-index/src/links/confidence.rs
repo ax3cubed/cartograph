@@ -69,6 +69,8 @@ pub enum EvidenceType {
     ContractMatched,
     /// The call site holds the whole URL as a literal.
     LiteralCallSiteUrl,
+    /// The call site builds the URL from literals and expressions, such as `"/orders/" + id`.
+    TemplateCallSiteUrl,
     /// A framework adapter anchored the handler.
     HandlerAnchored,
     /// The base URL or host came from a resolved env or config value.
@@ -86,9 +88,10 @@ pub enum EvidenceType {
 }
 
 impl EvidenceType {
-    pub const ALL: [EvidenceType; 9] = [
+    pub const ALL: [EvidenceType; 10] = [
         EvidenceType::ContractMatched,
         EvidenceType::LiteralCallSiteUrl,
+        EvidenceType::TemplateCallSiteUrl,
         EvidenceType::HandlerAnchored,
         EvidenceType::EnvResolvedBase,
         EvidenceType::HostAliasResolved,
@@ -103,6 +106,7 @@ impl EvidenceType {
         match self {
             EvidenceType::ContractMatched => "contract_matched",
             EvidenceType::LiteralCallSiteUrl => "literal_call_site_url",
+            EvidenceType::TemplateCallSiteUrl => "template_call_site_url",
             EvidenceType::HandlerAnchored => "handler_anchored",
             EvidenceType::EnvResolvedBase => "env_resolved_base",
             EvidenceType::HostAliasResolved => "host_alias_resolved",
@@ -119,7 +123,8 @@ impl EvidenceType {
             EvidenceType::ContractMatched
             | EvidenceType::LiteralCallSiteUrl
             | EvidenceType::HandlerAnchored => Level::Exact,
-            EvidenceType::EnvResolvedBase
+            EvidenceType::TemplateCallSiteUrl
+            | EvidenceType::EnvResolvedBase
             | EvidenceType::HostAliasResolved
             | EvidenceType::FullPathMatch => Level::Likely,
             EvidenceType::PartialPathMatch | EvidenceType::UniqueAcrossWorkspace => Level::Guessed,
@@ -130,12 +135,14 @@ impl EvidenceType {
     pub fn step(self) -> Step {
         match self {
             EvidenceType::ContractMatched => Step::All,
-            EvidenceType::LiteralCallSiteUrl => Step::CallSite,
-            EvidenceType::EnvResolvedBase | EvidenceType::HostAliasResolved => Step::Base,
+            EvidenceType::LiteralCallSiteUrl | EvidenceType::TemplateCallSiteUrl => Step::CallSite,
+            // With no host, the one route that fits is what says which service is meant.
+            EvidenceType::EnvResolvedBase
+            | EvidenceType::HostAliasResolved
+            | EvidenceType::UniqueAcrossWorkspace => Step::Base,
             EvidenceType::HandlerAnchored
             | EvidenceType::FullPathMatch
             | EvidenceType::PartialPathMatch
-            | EvidenceType::UniqueAcrossWorkspace
             | EvidenceType::NameSimilarity => Step::Target,
         }
     }
@@ -285,14 +292,22 @@ mod tests {
     fn a_missing_step_or_no_evidence_is_weak() {
         assert_eq!(score(&[]).level, Level::Weak);
         assert_eq!(score(&[]).score, 0.05);
-        assert_eq!(score(&[LiteralCallSiteUrl, FullPathMatch]).level, Level::Weak);
+        assert_eq!(
+            score(&[LiteralCallSiteUrl, FullPathMatch]).level,
+            Level::Weak
+        );
     }
 
     #[test]
     fn extra_evidence_of_the_same_class_stays_in_band() {
         let base = [LiteralCallSiteUrl, EnvResolvedBase, FullPathMatch];
         let before = score(&base);
-        for t in [HostAliasResolved, FullPathMatch, EnvResolvedBase, PartialPathMatch] {
+        for t in [
+            HostAliasResolved,
+            FullPathMatch,
+            EnvResolvedBase,
+            PartialPathMatch,
+        ] {
             let mut more = base.to_vec();
             more.push(t);
             let after = score(&more);
