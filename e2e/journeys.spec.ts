@@ -41,6 +41,8 @@ test("table-only keyboard journey: what billing's charge depends on, as of 1 Jun
 
 test("keyboard walk on the map: siblings, down, up and linked files, each said aloud", async ({ page, go }) => {
   await go("/");
+  // Focus only once the map has drawn: focusing an empty map announces nothing (WebKit on CI).
+  await expect(page.locator("svg.lm-svg circle.lm-node").first()).toBeVisible();
   await page.locator("svg.lm-svg").focus();
   const said = page.locator(".lm-canvas [aria-live=polite]");
   await expect(said).toHaveText(/^folder \S+, \d+ files?$/); // the first folder, by name
