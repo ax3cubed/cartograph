@@ -2,7 +2,7 @@
 # workspace under bench/, so their dependencies never reach this lockfile or the shipped binary.
 [workspace]
 resolver = "3"
-members = ["crates/*", "fixtures/gen"]
+members = ["crates/*", "fixtures/gen", "eval"]
 
 [workspace.package]
 version = "0.2.0"

@@ -1,0 +1,73 @@
+{
+  "set": "a",
+  "labelled": 24,
+  "by_level": [
+    {
+      "name": "exact",
+      "predicted": 0,
+      "true_positive": 0,
+      "precision": null,
+      "recall": 0.0
+    },
+    {
+      "name": "likely",
+      "predicted": 15,
+      "true_positive": 15,
+      "precision": 1.0,
+      "recall": 0.625
+    },
+    {
+      "name": "guessed",
+      "predicted": 3,
+      "true_positive": 3,
+      "precision": 1.0,
+      "recall": 0.125
+    },
+    {
+      "name": "weak",
+      "predicted": 0,
+      "true_positive": 0,
+      "precision": null,
+      "recall": 0.0
+    }
+  ],
+  "by_evidence": [
+    {
+      "name": "literal",
+      "predicted": 11,
+      "true_positive": 11,
+      "precision": 1.0,
+      "recall": 0.4583333333333333
+    },
+    {
+      "name": "template",
+      "predicted": 14,
+      "true_positive": 14,
+      "precision": 1.0,
+      "recall": 0.5833333333333334
+    },
+    {
+      "name": "inferred",
+      "predicted": 2,
+      "true_positive": 2,
+      "precision": 1.0,
+      "recall": 0.08333333333333333
+    }
+  ],
+  "overall": {
+    "name": "all",
+    "predicted": 18,
+    "true_positive": 18,
+    "precision": 1.0,
+    "recall": 0.75
+  },
+  "missed": [
+    "inventory -> orders http get /orders/{}  (Go call sites are not extracted)",
+    "notifier -> users http get /users/{}  (Python call sites are not extracted)",
+    "orders -> inventory http get /stock/{}  (Go routes are not extracted)",
+    "orders -> inventory http post /stock/reserve  (Go routes are not extracted)",
+    "orders -> notifier http post /notify  (Python routes are not extracted)",
+    "users -> notifier http post /notify  (Python routes are not extracted)"
+  ],
+  "false_positives": []
+}
