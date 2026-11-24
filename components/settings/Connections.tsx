@@ -34,7 +34,7 @@ export default function Connections() {
           {repos.map((r) => (
             <li key={r.id} className="set-conn-row">
               <span className="set-conn-ic" aria-hidden>FS</span>
-              <span className="set-conn-name"><b>{r.name}</b><small className="set-mono">{r.path}</small></span>
+              <span className="set-conn-name"><b>{r.name}</b><small className="set-mono" title={r.path}>{r.path}</small></span>
               <span className="set-conn-gives"><Chip>Code</Chip><Chip>History</Chip></span>
               <span className="set-conn-state"><Chip tone="ok" dot>On this machine</Chip>{r.branch && <small>branch {r.branch}</small>}</span>
             </li>

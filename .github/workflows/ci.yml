@@ -241,10 +241,11 @@ jobs:
         run: pnpm check:export
 
   # HD-05: the real binary on the golden fixture, driven by Playwright with every request off loopback aborted.
-  # Smoke, axe and journeys run in Chromium, Firefox and WebKit; screenshots run only in the pinned Playwright
-  # image (scripts/e2e.mjs), the same one `pnpm test:e2e --visual --update` makes the baselines in.
+  # Smoke, axe and journeys run in Chromium, Firefox and WebKit on every PR. Screenshots are opt-in: they run
+  # in the pinned Playwright image (scripts/e2e.mjs) on a manual run or a PR labelled `ci:visual`, since
+  # pixel-exact baselines cost a Docker retake on every UI change and caught mostly host noise.
   e2e:
-    name: End to end and visual (HD-05)
+    name: End to end (HD-05)
     needs: changes
     if: needs.changes.outputs.web == 'true' || needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
@@ -265,7 +266,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm test:e2e
-      - name: Visual regression in the pinned image
+      - name: Visual regression in the pinned image (opt-in)
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci:visual')
         run: pnpm test:e2e --visual --no-build
       # The diff images of a failed screenshot, and traces of a failed journey.
       - if: failure()

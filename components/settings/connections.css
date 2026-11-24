@@ -8,6 +8,8 @@
 .set-conn-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .set-conn-name b { font-weight: 600; overflow-wrap: anywhere; }
 .set-conn-name small, .set-conn-state small { color: var(--muted); font-size: 0.75rem; overflow-wrap: anywhere; }
+/* A folder path stays on one line: its length differs per machine, and the row shouldn't grow with it. */
+.set-conn-name small { overflow-wrap: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .set-conn-gives { display: flex; gap: 0.375rem; flex-wrap: wrap; }
 .set-conn-state { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
 .set-conn-link { color: var(--accent); }
