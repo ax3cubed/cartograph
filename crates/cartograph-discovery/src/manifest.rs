@@ -42,6 +42,43 @@ pub struct Manifest {
     /// The baseline file of known rule violations, relative to the manifest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<String>,
+    /// What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).
+    #[serde(default, skip_serializing_if = "Retrieval::is_empty")]
+    pub retrieval: Retrieval,
+}
+
+/// The kinds of text search indexes for Ask and MCP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChunkKind {
+    /// Node cards: name, path, summary and main links.
+    Cards,
+    /// Function and class bodies.
+    Symbols,
+    /// Code changes.
+    Changes,
+    /// API operations and event channels.
+    Contracts,
+    /// READMEs, ADRs and docs.
+    Docs,
+    /// Commit messages without their changes.
+    CommitMessages,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Retrieval {
+    /// The kinds searched; absent means all but commit messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<ChunkKind>>,
+    /// Leave anything that looks like a key or password out of search and prompts. On when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scan: Option<bool>,
+}
+
+impl Retrieval {
+    fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -559,6 +596,26 @@ services:
     }
 
     #[test]
+    fn retrieval_is_a_known_section_with_closed_kinds() {
+        let p = parse(&format!(
+            "{GOOD}retrieval:\n  include: [cards, changes, commit_messages]\n  secret_scan: false\n"
+        ))
+        .unwrap();
+        assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+        assert_eq!(
+            p.manifest.retrieval.include,
+            Some(vec![
+                ChunkKind::Cards,
+                ChunkKind::Changes,
+                ChunkKind::CommitMessages
+            ])
+        );
+        assert_eq!(p.manifest.retrieval.secret_scan, Some(false));
+        assert!(!to_yaml(&parse(GOOD).unwrap().manifest).contains("retrieval"));
+        assert!(err(&format!("{GOOD}retrieval:\n  include: [embeddings]\n")).line > 0);
+    }
+
+    #[test]
     fn version_2_is_refused_with_an_upgrade_message() {
         let e = err(&GOOD.replace("version: 1", "version: 2"));
         assert!(e.message.contains("version 2"));
@@ -713,7 +770,7 @@ services:
                     scopes: vec![],
                 }).collect(),
                 options: Options::default(),
-                services: vec![], rules: vec![], baseline: None,
+                services: vec![], rules: vec![], baseline: None, retrieval: Default::default(),
             };
             let again = parse(&to_yaml(&m)).unwrap().manifest;
             proptest::prop_assert_eq!(again, m);
