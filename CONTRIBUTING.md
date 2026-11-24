@@ -71,7 +71,7 @@ The `pre-push` hook and CI check the name. To fix one, run `git branch -m <new-n
 
 ## Commits
 
-Commit messages follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). The `commit-msg` hook checks each commit, and CI checks every commit in a pull request.
+Commit messages follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). The `commit-msg` hook checks each commit, and the `pre-push` hook checks every commit on the branch again before it leaves your machine. CI does not check them.
 
 ```
 <type>(<scope>): <subject>
@@ -103,7 +103,7 @@ The hooks are installed by `pnpm install`. If they're missing, run `pnpm run pre
 
 ## Pull requests
 
-- **Squash merge only.** The pull request title becomes the one commit on `main`, so CI checks the title with the same commit rules. Write it as the commit you want in the history.
+- **Squash merge only.** The pull request title becomes the one commit on `main`, so write it as a Conventional Commit, the commit you want in the history. Nothing checks the title, so get it right before you merge.
 - **Base every pull request on `main`.** Don't stack one pull request on another's branch. GitHub only retargets a stacked pull request when its base branch is deleted, so it can merge into the wrong branch. If you need work from an open pull request, branch from that branch and still target `main`. The diff shrinks once the first one merges.
 - Keep each pull request small and focused on one change, ideally one plan item. Two unrelated fixes are two pull requests.
 - Fill in the pull request template: what changed, why, the plan items, and how you checked it.

@@ -8,3 +8,5 @@ pre-push:
   commands:
     branch-name:
       run: node scripts/check-branch.mjs
+    conventional-commits:
+      run: pnpm exec commitlint --from origin/main --to HEAD

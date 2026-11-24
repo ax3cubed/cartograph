@@ -183,22 +183,19 @@ fn perf_ten_concurrent_syncs_give_one_writer() {
     let repo = f.dir.to_str().unwrap().to_owned();
     let home = d.path().join("home");
     copy_dir(&base, &home);
-    let t = Instant::now();
-    let mut children: Vec<_> = (0..10)
-        .map(|_| (cartograph(&home, &["sync", &repo]).spawn().unwrap(), None))
+    // Each sync is timed from its own spawn to its own exit, on a thread blocked in wait(), so the
+    // cost of spawning the other nine and a test thread descheduled on a busy runner don't count.
+    let waiters: Vec<_> = (0..10)
+        .map(|_| {
+            let t = Instant::now();
+            let mut c = cartograph(&home, &["sync", &repo]).spawn().unwrap();
+            std::thread::spawn(move || {
+                assert!(c.wait().unwrap().success(), "every sync exits 0");
+                t.elapsed()
+            })
+        })
         .collect();
-    while children.iter().any(|(_, done)| done.is_none()) {
-        for (c, done) in &mut children {
-            if done.is_none()
-                && let Some(s) = c.try_wait().unwrap()
-            {
-                assert!(s.success(), "every sync exits 0");
-                *done = Some(t.elapsed());
-            }
-        }
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    let mut took: Vec<Duration> = children.into_iter().map(|(_, d)| d.unwrap()).collect();
+    let mut took: Vec<Duration> = waiters.into_iter().map(|w| w.join().unwrap()).collect();
     took.sort();
     let ninth = took[8].as_secs_f64() * 1e3;
     let writer = took[9].as_secs_f64() * 1e3;
