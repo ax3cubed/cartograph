@@ -40,7 +40,10 @@ CREATE TABLE evidence (
   start_col INTEGER NOT NULL,
   end_line INTEGER NOT NULL,
   end_col INTEGER NOT NULL,
-  extractor TEXT NOT NULL
+  extractor TEXT NOT NULL,
+  -- XS-06 link detail (begin): `get /orders/{}`, the call or route this site stands for.
+  operation TEXT
+  -- XS-06 link detail (end)
 ) STRICT;
 CREATE TABLE extractor (
   id INTEGER PRIMARY KEY,
@@ -100,6 +103,11 @@ CREATE TABLE link (
   kind TEXT NOT NULL,
   src INTEGER NOT NULL REFERENCES node (id),
   dst INTEGER NOT NULL REFERENCES node (id),
+  -- XS-05 confidence (begin): set when the link is written; NULL for kinds that carry no
+  -- confidence (imports). level is exact, likely, guessed or weak; score is inside its band.
+  level TEXT,
+  score REAL,
+  -- XS-05 confidence (end)
   UNIQUE (kind, src, dst)
 ) STRICT;
 CREATE TABLE meta (
@@ -210,8 +218,10 @@ CREATE INDEX commits_sha ON commits (sha);
 CREATE INDEX commits_time ON commits (corrected_time);
 CREATE INDEX evidence_file ON evidence (file);
 CREATE INDEX evidence_link ON evidence (link);
+CREATE INDEX fact_extractor ON fact (extractor);
 CREATE INDEX file_path_file ON file_path (file, from_seq);
 CREATE INDEX file_path_path ON file_path (path);
+CREATE INDEX file_version_blob ON file_version (blob);
 CREATE INDEX file_version_file ON file_version (file, from_seq);
 CREATE INDEX host_alias_host ON host_alias (host, valid_from);
 CREATE INDEX host_alias_service ON host_alias (service_id);

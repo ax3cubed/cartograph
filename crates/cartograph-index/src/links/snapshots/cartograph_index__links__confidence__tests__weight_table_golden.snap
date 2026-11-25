@@ -1,0 +1,14 @@
+---
+source: crates/cartograph-index/src/links/confidence.rs
+expression: out
+---
+contract_matched         exact    All       0.95
+literal_call_site_url    exact    CallSite  0.90
+template_call_site_url   likely   CallSite  0.80
+handler_anchored         exact    Target    0.85
+env_resolved_base        likely   Base      0.75
+host_alias_resolved      likely   Base      0.70
+full_path_match          likely   Target    0.70
+partial_path_match       guessed  Target    0.45
+unique_across_workspace  guessed  Base      0.40
+name_similarity          weak     Target    0.15

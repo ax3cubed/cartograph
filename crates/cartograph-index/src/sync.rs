@@ -48,6 +48,7 @@ use cartograph_store::{Index, PendingCheck, StoreError};
 
 use crate::derive::{DerivedStats, Inputs, RepoInput, coverage, refresh};
 use crate::extract::{ExtractStats, Facts, extract};
+use crate::ifaces;
 use crate::rows::Rows;
 use crate::structure::ServiceSpec;
 use crate::timeline::{RepoSpec, duplicate_packages, merge, namespaced, valid_repo_name};
@@ -730,6 +731,10 @@ fn round_on(
     if let Some(changed_at) = reextract(conn, &parts, cache, opts.workers, &mut s.extract)? {
         floor = floor.min(changed_at - 1);
     }
+    // The built-in adapters changed (XS-03): their facts are made again for every blob.
+    if !ifaces::current(conn)? {
+        reextract_ifaces(conn, &parts, cache)?;
+    }
 
     // 3. The floor: the last indexed step before every new step. Walks start at the base; a part
     // whose indexed steps reach past the floor is walked again from the floor.
@@ -843,12 +848,19 @@ fn round_on(
         .build()
         .expect("a thread pool");
     let mut ids = Vec::new();
+    let mut ifs = ifaces::Ifaces::new();
+    let mut ifs_seen = HashSet::new();
     for (p, n) in parts.iter().zip(&new) {
         let items = n
             .iter()
             .flat_map(|s| &s.changes)
             .filter_map(|c| Some((c.new?, extractor_for(&c.path)?.1)));
         let st = extract(&p.repo, items, cache, &pool, &mut facts)?;
+        let paths = n
+            .iter()
+            .flat_map(|s| &s.changes)
+            .filter_map(|c| Some((c.new?, c.path.clone())));
+        ifaces::extract(&p.repo, paths, cache, &mut ifs, &mut ifs_seen)?;
         s.extract.blobs += st.blobs;
         s.extract.parsed += st.parsed;
         s.extract.from_cache += st.from_cache;
@@ -873,6 +885,8 @@ fn round_on(
         });
     }
     rows.facts(facts.iter().filter(|(k, _)| !indexed_facts.contains(*k)))?;
+    ifaces::write(conn, &ifs)?;
+    ifaces::mark_current(conn)?;
 
     // 6. Replay the merged new steps, in batches. The first batch may commit: the index must have
     // passed its check by then.
@@ -1162,6 +1176,44 @@ fn reextract(
         )?;
     }
     Ok(first)
+}
+
+/// Interface facts for every blob a repository has, after the adapters changed or in an index that
+/// never had them. A repository dropped from the workspace has no folder to read, so its blobs
+/// have none until it is back.
+fn reextract_ifaces(
+    conn: &rusqlite::Connection,
+    parts: &[Part],
+    cache: &mut FactCache,
+) -> Result<(), SyncError> {
+    conn.execute(
+        "DELETE FROM fact WHERE extractor IN (SELECT id FROM extractor WHERE name = ?1)",
+        [ifaces::EXTRACTOR],
+    )?;
+    conn.execute("DELETE FROM extractor WHERE name = ?1", [ifaces::EXTRACTOR])?;
+    let mut found = ifaces::Ifaces::new();
+    let mut seen = HashSet::new();
+    for p in parts {
+        let items: Vec<(ObjectId, String)> = conn
+            .prepare(
+                "SELECT fv.blob, (SELECT path FROM file_path fp WHERE fp.file = fv.file
+                                  ORDER BY fp.from_seq DESC LIMIT 1)
+                 FROM file_version fv JOIN file f ON f.id = fv.file JOIN repo r ON r.id = f.repo
+                 WHERE r.name = ?1",
+            )?
+            .query_map([&p.spec.name], |r| {
+                Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Option<String>>(1)?))
+            })?
+            .filter_map(|r| match r {
+                Ok((b, Some(path))) => oid(&b).map(|o| Ok((o, path))),
+                Ok(_) => None,
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<Result<_, _>>()?;
+        ifaces::extract(&p.repo, items, cache, &mut found, &mut seen)?;
+    }
+    ifaces::write(conn, &found)?;
+    Ok(())
 }
 
 /// The version of the extractor that makes `kind`, if this binary has one.

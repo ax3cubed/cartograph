@@ -11,6 +11,8 @@ publish.workspace = true
 [dependencies]
 cartograph-core.workspace = true
 cartograph-api.workspace = true
+# Evidence snippets are read from the repo's object store (XS-06).
+cartograph-git.workspace = true
 cartograph-store.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -20,7 +22,6 @@ tracing.workspace = true
 # SRV-08's golden: the query functions against `lib/workspace.ts` on the northwind fixture.
 cartograph-fixtures = { path = "../../fixtures/gen" }
 cartograph-facts.workspace = true
-cartograph-git.workspace = true
 cartograph-index.workspace = true
 cartograph-parse.workspace = true
 tempfile.workspace = true

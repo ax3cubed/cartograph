@@ -1,0 +1,15 @@
+services:
+  gateway:
+    build: ./gateway
+  orders:
+    build: ./orders
+  users:
+    build: ./users
+  payments:
+    build: ./payments
+  inventory:
+    build: ./inventory
+  notifier:
+    build: ./notifier
+  web:
+    build: ./web

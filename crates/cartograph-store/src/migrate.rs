@@ -48,6 +48,15 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-06 link detail: begin ----
+    "ALTER TABLE evidence DROP COLUMN operation;\n",
+    // ---- XS-06 link detail: end ----
+    // ---- XS-05 confidence: begin ----
+    "ALTER TABLE link DROP COLUMN score; ALTER TABLE link DROP COLUMN level;\n",
+    // ---- XS-05 confidence: end ----
+    // ---- XS-04 http links: begin ----
+    "DROP INDEX fact_extractor; DROP INDEX file_version_blob;\n",
+    // ---- XS-04 http links: end ----
     // ---- XS-02 host aliases: begin ----
     "DROP TABLE host_alias;
      ALTER TABLE node DROP COLUMN detect_source;
@@ -72,6 +81,13 @@ pub fn undo_to_v2() -> String {
 /// The tables and columns format 4 adds, as `schema.sql` declares them; one delimited block per
 /// phase-4 item.
 const V4: &str = concat!(
+    // ---- XS-05 confidence: begin ----
+    "ALTER TABLE link ADD COLUMN level TEXT; ALTER TABLE link ADD COLUMN score REAL;\n",
+    // ---- XS-05 confidence: end ----
+    // ---- XS-04 http links: begin ----
+    "CREATE INDEX fact_extractor ON fact (extractor);
+     CREATE INDEX file_version_blob ON file_version (blob);\n",
+    // ---- XS-04 http links: end ----
     // ---- XS-23 owners: begin ----
     "CREATE TABLE codeowners (repo INTEGER NOT NULL REFERENCES repo (id), blob BLOB NOT NULL,
        from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
@@ -92,6 +108,9 @@ const V4: &str = concat!(
      CREATE INDEX evidence_link ON evidence (link);
      CREATE INDEX evidence_file ON evidence (file);\n",
     // ---- XS-01 facts: end ----
+    // ---- XS-06 link detail: begin (after the table it alters) ----
+    "ALTER TABLE evidence ADD COLUMN operation TEXT;\n",
+    // ---- XS-06 link detail: end ----
     // ---- XS-02 host aliases: begin ----
     "DROP TABLE alias;
      ALTER TABLE node ADD COLUMN detect_source TEXT;

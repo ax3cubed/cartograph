@@ -1061,6 +1061,10 @@ export interface GraphSlice {
  */
 export interface LinkColumns {
   added_seq: number[];
+  /**
+   * A correction decides this link (FE-14/XS-12); false until those exist.
+   */
+  corrected: boolean[];
   from: number[];
   id: LinkId[];
   kind: LinkKind[];
@@ -1237,11 +1241,64 @@ export interface LinkChange {
  * via the `definition` "LinkDetail".
  */
 export interface LinkDetail {
+  closed?: Commit | null;
   correction_id?: string | null;
+  /**
+   * The code behind the link, by its role in it.
+   */
+  evidence: EvidenceGroups;
   interval: Interval;
-  layer: Layer;
+  /**
+   * The layer whose answer the map shows. Null until precedence layers exist (XS-08 onwards).
+   */
+  layer?: Layer | null;
   link: Link;
-  replaced_by?: LinkId | null;
+  /**
+   * The commit that opened the link, and the one that closed it (null while live).
+   */
+  opened: Commit;
+  /**
+   * HTTP links: the call's method and route template.
+   */
+  operation?: LinkOperation | null;
+  /**
+   * A link between the same two services that closed in the commit this one opened.
+   */
+  replaced?: LinkId | null;
+}
+/**
+ * Evidence by role. Contract rows wait for contracts (XS-08).
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "EvidenceGroups".
+ */
+export interface EvidenceGroups {
+  caller: EvidenceSite[];
+  contract: EvidenceSite[];
+  handler: EvidenceSite[];
+}
+/**
+ * One place in a file that backs a link. `snippet` is repo text: show it as text, never markup.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "EvidenceSite".
+ */
+export interface EvidenceSite {
+  end_line: number;
+  extractor: string;
+  file: string;
+  /**
+   * `literal`, `template` or `inferred`.
+   */
+  kind: string;
+  /**
+   * 1-based.
+   */
+  line: number;
+  /**
+   * At most 5 lines and 400 characters, secrets masked; null when the repo can't be read.
+   */
+  snippet?: string | null;
 }
 /**
  * `[from_seq, to_seq)` on the merged first-parent timeline.
@@ -1252,6 +1309,20 @@ export interface LinkDetail {
 export interface Interval {
   from_seq: number;
   to_seq?: number | null;
+}
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "LinkOperation".
+ */
+export interface LinkOperation {
+  /**
+   * Lower case: `get`.
+   */
+  method: string;
+  /**
+   * `/orders/{}`.
+   */
+  template: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema

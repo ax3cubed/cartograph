@@ -14,7 +14,7 @@ function slice(): GraphSlice {
   return {
     lod: "file",
     nodes: { id: name.map((_, i) => `n${i}`), kind: name.map(() => "file"), name, parent: name.map(() => -1), children: name.map(() => 0), size: name.map(() => 1), x: name.map(() => 0), y: name.map(() => 0) },
-    links: { id: from.map((_, j) => `l${j}`), from, to, kind: from.map(() => "imports"), level: from.map(() => "exact"), score: from.map(() => rnd(100) / 100), weight: from.map(() => 1), added_seq: from.map(() => 0), removed_seq: from.map(() => -1) },
+    links: { id: from.map((_, j) => `l${j}`), from, to, kind: from.map(() => "imports"), level: from.map(() => "exact"), score: from.map(() => rnd(100) / 100), corrected: from.map(() => false), weight: from.map(() => 1), added_seq: from.map(() => 0), removed_seq: from.map(() => -1) },
   };
 }
 

@@ -125,7 +125,7 @@ pub fn coverage_report(conn: &Connection) -> rusqlite::Result<Option<CoverageRep
         .prepare(
             "SELECT fp.path, u.line, u.spec FROM unresolved u
              JOIN file_path fp ON fp.file = u.file AND fp.to_seq IS NULL
-             WHERE u.to_seq IS NULL ORDER BY fp.path, u.line, u.spec",
+             WHERE u.to_seq IS NULL AND u.fact_kind IS NULL ORDER BY fp.path, u.line, u.spec",
         )?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<Result<_, _>>()?;
@@ -323,6 +323,9 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
         }
         structure_keys.push(sk.to_vec());
     }
+
+    // HTTP links (XS-04) need every repository's services and host aliases.
+    crate::http::refresh(conn, config)?;
 
     let mut c_in = structure_keys;
     c_in.push(hash.digest().to_vec());

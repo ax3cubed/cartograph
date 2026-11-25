@@ -441,6 +441,8 @@ pub struct LinkColumns {
     pub kind: Vec<LinkKind>,
     pub level: Vec<ConfidenceLevel>,
     pub score: Vec<f32>,
+    /// A correction decides this link (FE-14/XS-12); false until those exist.
+    pub corrected: Vec<bool>,
     /// How many file-level links this aggregated link stands for.
     pub weight: Vec<u32>,
     pub added_seq: Vec<u64>,
@@ -495,10 +497,49 @@ pub enum Layer {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LinkDetail {
     pub link: Link,
-    pub layer: Layer,
+    /// The layer whose answer the map shows. Null until precedence layers exist (XS-08 onwards).
+    pub layer: Option<Layer>,
     pub interval: Interval,
-    pub replaced_by: Option<LinkId>,
+    /// The commit that opened the link, and the one that closed it (null while live).
+    pub opened: Commit,
+    pub closed: Option<Commit>,
+    /// HTTP links: the call's method and route template.
+    pub operation: Option<LinkOperation>,
+    /// The code behind the link, by its role in it.
+    pub evidence: EvidenceGroups,
+    /// A link between the same two services that closed in the commit this one opened.
+    pub replaced: Option<LinkId>,
     pub correction_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkOperation {
+    /// Lower case: `get`.
+    pub method: String,
+    /// `/orders/{}`.
+    pub template: String,
+}
+
+/// Evidence by role. Contract rows wait for contracts (XS-08).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct EvidenceGroups {
+    pub contract: Vec<EvidenceSite>,
+    pub caller: Vec<EvidenceSite>,
+    pub handler: Vec<EvidenceSite>,
+}
+
+/// One place in a file that backs a link. `snippet` is repo text: show it as text, never markup.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct EvidenceSite {
+    pub file: String,
+    /// 1-based.
+    pub line: u32,
+    pub end_line: u32,
+    /// `literal`, `template` or `inferred`.
+    pub kind: String,
+    pub extractor: String,
+    /// At most 5 lines and 400 characters, secrets masked; null when the repo can't be read.
+    pub snippet: Option<String>,
 }
 
 /// One row of `…/nodes/{id}/ranking`: a file in the scope and how much depends on it (blast

@@ -390,6 +390,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cartograph-eval"
+version = "0.2.0"
+dependencies = [
+ "cartograph-facts",
+ "cartograph-git",
+ "cartograph-index",
+ "cartograph-store",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "cartograph-facts"
 version = "0.2.0"
 dependencies = [
@@ -461,6 +475,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_norway",
+ "sha2",
  "tempfile",
  "thiserror",
  "toml",

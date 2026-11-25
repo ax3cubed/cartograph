@@ -28,7 +28,7 @@ use cartograph_store::rusqlite::{self, OptionalExtension};
 
 use crate::adjacency::{Adjacency, Kind, NONE};
 use crate::resolve::{link_id, node_id};
-use crate::{At, QueryError, Snapshot};
+use crate::{At, QueryError, Snapshot, level};
 
 /// Response cap: above it the request fails with `too_large` (SRV-04).
 pub const MAX_NODES: usize = 100_000;
@@ -146,6 +146,7 @@ fn empty_links() -> LinkColumns {
         kind: Vec::new(),
         level: Vec::new(),
         score: Vec::new(),
+        corrected: Vec::new(),
         weight: Vec::new(),
         added_seq: Vec::new(),
         removed_seq: Vec::new(),
@@ -171,11 +172,10 @@ fn push_node(
     nodes.children.push(0);
 }
 
-/// Phase 1 links are parsed imports: both ends anchored in the tree, so exact at 1.0. The filters
-/// keep all of them or none.
-fn keeps_links(q: &GraphQuery) -> bool {
-    let keep = |k: LinkKind| q.kinds.as_ref().is_none_or(|ks| ks.contains(&k));
-    keep(LinkKind::Imports) && rank(ConfidenceLevel::Exact) >= rank(q.min_confidence)
+/// Parsed imports are exact at 1.0; HTTP links carry the score the indexer stored (XS-05). The
+/// filters apply per link.
+fn keeps_link(q: &GraphQuery, kind: LinkKind, level: ConfidenceLevel) -> bool {
+    q.kinds.as_ref().is_none_or(|ks| ks.contains(&kind)) && rank(level) >= rank(q.min_confidence)
 }
 
 /// Refuses one more live file past the node cap or the row budget: the same at every level.
@@ -301,31 +301,45 @@ impl Snapshot<'_> {
         Ok(out)
     }
 
-    /// Calls `each(src, dst, from_seq, to_seq, link)` for every live link at `seq` the filters
-    /// keep. Phase 1's links are all exact imports.
+    /// Calls `each(src, dst, from_seq, to_seq, link, kind, score)` for every live link at `seq`
+    /// the filters keep.
     fn live_links(
         &self,
         q: &GraphQuery,
         seq: i64,
-        mut each: impl FnMut(i64, i64, i64, Option<i64>, i64) -> Result<(), QueryError>,
+        mut each: impl FnMut(i64, i64, i64, Option<i64>, i64, LinkKind, f32) -> Result<(), QueryError>,
     ) -> Result<(), QueryError> {
-        if !keeps_links(q) {
-            return Ok(());
-        }
         let mut st = self.conn().prepare_cached(
-            "SELECT l.id, l.src, l.dst, i.from_seq, i.to_seq
+            "SELECT l.id, l.src, l.dst, i.from_seq, i.to_seq, l.kind = 'http', l.score
              FROM interval i JOIN link l ON l.id = i.link
              WHERE i.from_seq <= ?1 AND (i.to_seq IS NULL OR i.to_seq > ?1)",
         )?;
         // Sorted here, not by ORDER BY: SQLite's temp B-tree costs ~3x the scan on 200k links.
-        let mut live: Vec<(i64, i64, i64, i64, Option<i64>)> = Vec::new();
+        type Live = (i64, i64, i64, i64, Option<i64>, LinkKind, f32);
+        let mut live: Vec<Live> = Vec::new();
         let mut rows = st.query([seq])?;
         while let Some(r) = rows.next()? {
-            live.push((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?));
+            let kind = if r.get::<_, bool>(5)? {
+                LinkKind::Http
+            } else {
+                LinkKind::Imports
+            };
+            let score = r.get::<_, Option<f64>>(6)?.map_or(1.0, |s| s as f32);
+            if keeps_link(q, kind, level(score)) {
+                live.push((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    kind,
+                    score,
+                ));
+            }
         }
         live.sort_unstable_by_key(|l| l.0);
-        for (id, src, dst, from_seq, to_seq) in live {
-            each(src, dst, from_seq, to_seq, id)?;
+        for (id, src, dst, from_seq, to_seq, kind, score) in live {
+            each(src, dst, from_seq, to_seq, id, kind, score)?;
         }
         Ok(())
     }
@@ -393,7 +407,7 @@ impl Snapshot<'_> {
 
         let mut links = empty_links();
         let n = nodes.id.len();
-        self.live_links(q, seq, |src, dst, from_seq, to_seq, id| {
+        self.live_links(q, seq, |src, dst, from_seq, to_seq, id, kind, score| {
             let (Some(&from), Some(&to)) = (index.get(&src), index.get(&dst)) else {
                 // With repo=, a link into another repo has its other end outside the slice.
                 // Otherwise the indexer only links files it indexed; a dangling end is its bug,
@@ -418,9 +432,10 @@ impl Snapshot<'_> {
             links.id.push(LinkId(link_id(id)));
             links.from.push(from);
             links.to.push(to);
-            links.kind.push(LinkKind::Imports);
-            links.level.push(ConfidenceLevel::Exact);
-            links.score.push(1.0);
+            links.kind.push(kind);
+            links.level.push(level(score));
+            links.score.push(score);
+            links.corrected.push(false);
             links.weight.push(1);
             links.added_seq.push(from_seq as u64);
             links.removed_seq.push(to_seq.unwrap_or(-1));
@@ -575,7 +590,7 @@ impl Snapshot<'_> {
                 .and_then(|i| slot.get(i))
                 .filter(|i| **i != u32::MAX)
         };
-        self.live_links(q, seq, |src, dst, from_seq, _, _| {
+        self.live_links(q, seq, |src, dst, from_seq, _, _, kind, score| {
             let (Some(a), Some(b)) = (slot_of(src), slot_of(dst)) else {
                 return Ok(());
             };
@@ -595,9 +610,10 @@ impl Snapshot<'_> {
             )));
             links.from.push(*a);
             links.to.push(*b);
-            links.kind.push(LinkKind::Imports);
-            links.level.push(ConfidenceLevel::Exact);
-            links.score.push(1.0);
+            links.kind.push(kind);
+            links.level.push(level(score));
+            links.score.push(score);
+            links.corrected.push(false);
             links.weight.push(1);
             links.added_seq.push(from_seq as u64);
             links.removed_seq.push(-1);
@@ -721,9 +737,6 @@ impl Snapshot<'_> {
 
         // Links: one per (holder, holder) pair, first seen in link id order.
         let mut links = empty_links();
-        if !keeps_links(q) {
-            return Ok((nodes, links));
-        }
         // Node to slice index, live files only: a link with any other end is dropped.
         let slot: Vec<u32> = of
             .iter()
@@ -740,11 +753,12 @@ impl Snapshot<'_> {
         links.kind.reserve(most);
         links.level.reserve(most);
         links.score.reserve(most);
+        links.corrected.reserve(most);
         links.weight.reserve(most);
         links.added_seq.reserve(most);
         links.removed_seq.reserve(most);
         for e in &g.edges {
-            if !e.live(seq) {
+            if !e.live(seq) || !keeps_link(q, e.kind, level(e.score)) {
                 continue;
             }
             let (a, b) = (slot[e.src as usize], slot[e.dst as usize]);
@@ -765,9 +779,10 @@ impl Snapshot<'_> {
             links.id.push(LinkId(id));
             links.from.push(a);
             links.to.push(b);
-            links.kind.push(LinkKind::Imports);
-            links.level.push(ConfidenceLevel::Exact);
-            links.score.push(1.0);
+            links.kind.push(e.kind);
+            links.level.push(level(e.score));
+            links.score.push(e.score);
+            links.corrected.push(false);
             links.weight.push(1);
             links.added_seq.push(u64::from(e.from));
             links.removed_seq.push(-1);

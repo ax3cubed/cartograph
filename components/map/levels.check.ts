@@ -39,7 +39,7 @@ function slice(n: number, m: number, tag = ""): GraphSlice {
   return {
     lod: "file",
     nodes: { id: name.map((_, i) => `n${i}`), kind: name.map(() => "file"), name, parent: name.map(() => -1), children: name.map(() => 0), size: name.map(() => 1), x: name.map(() => 0), y: name.map(() => 0) },
-    links: { id: from.map((_, j) => `l${j}`), from, to, kind: from.map(() => "imports"), level: from.map(() => "exact"), score: from.map(() => 1), weight: from.map(() => 1), added_seq: from.map((_, j) => j), removed_seq: from.map(() => -1) },
+    links: { id: from.map((_, j) => `l${j}`), from, to, kind: from.map(() => "imports"), level: from.map(() => "exact"), score: from.map(() => 1), corrected: from.map(() => false), weight: from.map(() => 1), added_seq: from.map((_, j) => j), removed_seq: from.map(() => -1) },
   };
 }
 
@@ -104,7 +104,7 @@ for (let t = 0; t < 200; t++) {
   const lv = (lod: "service" | "module", ids: string[]): GraphSlice => ({
     lod,
     nodes: { id: ids, kind: ids.map(() => lod), name: ids, parent: ids.map(() => -1), children: ids.map(() => 0), size: ids.map((_, i) => 10 + i), x: ids.map((_, i) => 1000 * (i + 1)), y: ids.map(() => 7) },
-    links: { id: [], from: [], to: [], kind: [], level: [], score: [], weight: [], added_seq: [], removed_seq: [] },
+    links: { id: [], from: [], to: [], kind: [], level: [], score: [], corrected: [], weight: [], added_seq: [], removed_seq: [] },
   });
   const served = { service: lv("service", ["s1", "s2", "s3"]), module: lv("module", ["m1", "m2", "m3", "m4"]) };
   const a = layout(s, st, undefined, served), b = layout(structuredClone(s), structuredClone(st), undefined, structuredClone(served));
@@ -130,9 +130,9 @@ for (let t = 0; t < 200; t++) {
   // B drops file 0 (and its links), adds a file and a link, and doubles one link's weight
   const keep = B.links.from.map((f, j) => f !== 0 && B.links.to[j] !== 0);
   const cut = <T,>(xs: T[]) => xs.filter((_, j) => keep[j]);
-  B.links = { id: cut(B.links.id), from: cut(B.links.from), to: cut(B.links.to), kind: cut(B.links.kind), level: cut(B.links.level), score: cut(B.links.score), weight: cut(B.links.weight), added_seq: cut(B.links.added_seq), removed_seq: cut(B.links.removed_seq) };
+  B.links = { id: cut(B.links.id), from: cut(B.links.from), to: cut(B.links.to), kind: cut(B.links.kind), level: cut(B.links.level), score: cut(B.links.score), corrected: cut(B.links.corrected), weight: cut(B.links.weight), added_seq: cut(B.links.added_seq), removed_seq: cut(B.links.removed_seq) };
   B.nodes.id[0] = "n-new";
-  B.links.id.push("l-new"); B.links.from.push(1); B.links.to.push(2); B.links.kind.push("imports"); B.links.level.push("exact"); B.links.score.push(1); B.links.weight.push(1); B.links.added_seq.push(99); B.links.removed_seq.push(-1);
+  B.links.id.push("l-new"); B.links.from.push(1); B.links.to.push(2); B.links.kind.push("imports"); B.links.level.push("exact"); B.links.score.push(1); B.links.corrected.push(false); B.links.weight.push(1); B.links.added_seq.push(99); B.links.removed_seq.push(-1);
   if (B.links.id.length > 1) B.links.weight[0] = 2;
   const c = compare(A, B);
   const st2 = (id: string) => c.node[c.slice.nodes.id.indexOf(id)];

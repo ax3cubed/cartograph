@@ -129,6 +129,11 @@ CREATE TABLE link (
   kind TEXT NOT NULL,
   src INTEGER NOT NULL REFERENCES node (id),
   dst INTEGER NOT NULL REFERENCES node (id),
+  -- XS-05 confidence (begin): set when the link is written; NULL for kinds that carry no
+  -- confidence (imports). level is exact, likely, guessed or weak; score is inside its band.
+  level TEXT,
+  score REAL,
+  -- XS-05 confidence (end)
   UNIQUE (kind, src, dst)
 ) STRICT;
 
@@ -282,6 +287,14 @@ CREATE INDEX ownership_file ON ownership (file, from_seq);
 CREATE INDEX ownership_owner ON ownership (owner);
 -- ---- XS-23 owners: end ----
 
+-- XS-04 http links (begin)
+-- The HTTP pass reads the interface facts (extractor `adapters`) with the file versions that hold
+-- them: both lookups go by the index. Its links are `link` rows of kind http, its evidence rows
+-- are the call site and the route site, its unresolved calls carry fact_kind http.call.
+CREATE INDEX fact_extractor ON fact (extractor);
+CREATE INDEX file_version_blob ON file_version (blob);
+-- XS-04 http links (end)
+
 -- >>> XS-01 (format 4): what a link stands on. One row per piece of source text, for a link (NULL
 -- while it is only a fact). text is the source cut to 200 characters with secrets masked (XS-10);
 -- kind is literal, template or inferred; extractor is `name@version`.
@@ -295,7 +308,10 @@ CREATE TABLE evidence (
   start_col INTEGER NOT NULL,
   end_line INTEGER NOT NULL,
   end_col INTEGER NOT NULL,
-  extractor TEXT NOT NULL
+  extractor TEXT NOT NULL,
+  -- XS-06 link detail (begin): `get /orders/{}`, the call or route this site stands for.
+  operation TEXT
+  -- XS-06 link detail (end)
 ) STRICT;
 CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX evidence_file ON evidence (file);

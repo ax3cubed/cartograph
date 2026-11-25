@@ -1,0 +1,13 @@
+# Evidence weights (XS-05). One weight per evidence type, in (0, 1).
+# The file's hash is part of the extractor version, so editing it re-scores links and nothing else.
+# A weight only matters inside its type's class: see `EvidenceType::class`.
+contract_matched = 0.95
+literal_call_site_url = 0.90
+template_call_site_url = 0.80
+handler_anchored = 0.85
+env_resolved_base = 0.75
+host_alias_resolved = 0.70
+full_path_match = 0.70
+partial_path_match = 0.45
+unique_across_workspace = 0.40
+name_similarity = 0.15
