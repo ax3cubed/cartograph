@@ -143,6 +143,12 @@ pub fn run(out: &Out, dir: &Path, no_index: bool, g: &Global) -> Result<(), Repo
                     path: s.path.clone(),
                 })
                 .collect(),
+            contracts: plan
+                .manifest
+                .contracts
+                .iter()
+                .map(cartograph_index::contracts::ContractSpec::from)
+                .collect(),
         };
         let cache_path = paths::facts_cache(&data);
         let mut cache = FactCache::open(&cache_path).map_err(|e| Report {

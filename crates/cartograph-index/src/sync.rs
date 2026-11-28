@@ -73,6 +73,8 @@ pub struct Workspace {
     pub config_hash: Option<String>,
     /// The manifest's `services:` entries (C6's first rule, IDX-20).
     pub services: Vec<ServiceSpec>,
+    /// The manifest's `contracts:` entries (XS-08).
+    pub contracts: Vec<crate::contracts::ContractSpec>,
 }
 
 impl Workspace {
@@ -82,8 +84,15 @@ impl Workspace {
         let mut ex = self.exclude.clone();
         ex.sort();
         // `deploy` marks the compose and k8s files the walk tracks (XS-02): an index from before
-        // them has none of their history, so it is walked again.
-        let mut lines = vec![format!("{}\0deploy", ex.join("\0"))];
+        // them has none of their history, so it is walked again. `contracts` marks the
+        // spec files (XS-08) and the manifest's globs for more.
+        let mut globs: Vec<&str> = self.contracts.iter().map(|c| c.path.as_str()).collect();
+        globs.sort_unstable();
+        let mut lines = vec![format!(
+            "{}\0deploy\0contracts\0{}",
+            ex.join("\0"),
+            globs.join("\0")
+        )];
         for r in &self.repos {
             let mut s = r.scopes.clone();
             s.sort();
@@ -438,6 +447,7 @@ pub fn restructure(ws: &Workspace, repo: &str) -> Result<DerivedStats, SyncError
             scopes: &spec.scopes,
         }],
         services: &ws.services,
+        contracts: &ws.contracts,
         exclude: &ws.exclude,
         config_hash: ws.config_hash.as_deref(),
         ..Default::default()
@@ -741,7 +751,8 @@ fn round_on(
     let t = Instant::now();
     let walk = |p: &Part, base: usize| -> Result<Vec<CommitStep>, SyncError> {
         let from = base.checked_sub(1).map(|i| &commits[p.indexed[i]]);
-        let keep = |path: &str| p.spec.keeps(&ws.exclude, path);
+        let globs: Vec<String> = ws.contracts.iter().map(|c| c.path.clone()).collect();
+        let keep = |path: &str| p.spec.keeps_with(&ws.exclude, &globs, path);
         let mut w = p
             .repo
             .walk_first_parent(from.and_then(|c| oid(&c.sha)), p.tip, keep)?;
@@ -1055,6 +1066,7 @@ fn round_on(
             })
             .collect(),
         services: &ws.services,
+        contracts: &ws.contracts,
         exclude: &ws.exclude,
         config_hash: ws.config_hash.as_deref(),
         moved,

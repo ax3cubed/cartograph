@@ -38,7 +38,15 @@ impl RepoSpec {
     /// Whether the walk keeps `path` (repository-relative): tracked by an extractor, not excluded,
     /// and inside a scope or a package.json.
     pub fn keeps(&self, exclude: &[String], path: &str) -> bool {
-        cartograph_parse::tracked(path)
+        self.keeps_with(exclude, &[], path)
+    }
+
+    /// [`RepoSpec::keeps`], also keeping the YAML and JSON files the manifest's `contracts:` globs
+    /// name (XS-08).
+    pub fn keeps_with(&self, exclude: &[String], contracts: &[String], path: &str) -> bool {
+        (cartograph_parse::tracked(path)
+            || (cartograph_parse::openapi::is_data(path)
+                && contracts.iter().any(|g| glob_matches(g, path))))
             && !excluded(exclude, path)
             && (self.scopes.is_empty()
                 || is_package_json(path)

@@ -8,6 +8,16 @@ CREATE TABLE archived_interval (
   from_sha BLOB NOT NULL,
   to_sha BLOB
 ) STRICT;
+CREATE TABLE binding (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  operation INTEGER REFERENCES operation (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  line INTEGER NOT NULL,
+  template TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
 CREATE TABLE codeowners (
   repo INTEGER NOT NULL REFERENCES repo (id),
   blob BLOB NOT NULL,
@@ -22,6 +32,20 @@ CREATE TABLE commits (
   corrected_time INTEGER NOT NULL,
   author TEXT NOT NULL,
   summary TEXT NOT NULL
+) STRICT;
+CREATE TABLE contract (
+  id INTEGER PRIMARY KEY,
+  file INTEGER NOT NULL REFERENCES file (id),
+  service INTEGER REFERENCES node (id),
+  title TEXT NOT NULL,
+  version TEXT NOT NULL
+) STRICT;
+CREATE TABLE contract_schema (
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  name TEXT NOT NULL,
+  fields TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
 ) STRICT;
 CREATE TABLE derived (
   kind TEXT NOT NULL,
@@ -136,6 +160,18 @@ CREATE TABLE note (
   kind TEXT NOT NULL,
   detail TEXT NOT NULL
 ) STRICT;
+CREATE TABLE operation (
+  id INTEGER PRIMARY KEY,
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  template TEXT NOT NULL,
+  operation_id TEXT,
+  summary TEXT,
+  line INTEGER NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
 CREATE TABLE ownership (
   file INTEGER NOT NULL REFERENCES file (id),
   owner TEXT NOT NULL,
@@ -212,10 +248,14 @@ CREATE TABLE unresolved (
   raw TEXT
 ) STRICT;
 CREATE INDEX archived_interval_rewrite ON archived_interval (rewrite);
+CREATE INDEX binding_kind ON binding (kind, from_seq);
+CREATE INDEX binding_operation ON binding (operation);
 CREATE INDEX codeowners_repo ON codeowners (repo, from_seq);
 CREATE UNIQUE INDEX commits_repo_sha ON commits (repo, sha);
 CREATE INDEX commits_sha ON commits (sha);
 CREATE INDEX commits_time ON commits (corrected_time);
+CREATE UNIQUE INDEX contract_file ON contract (file);
+CREATE INDEX contract_schema_contract ON contract_schema (contract);
 CREATE INDEX evidence_file ON evidence (file);
 CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX fact_extractor ON fact (extractor);
@@ -234,6 +274,7 @@ CREATE INDEX node_parent ON node (parent);
 CREATE INDEX node_service ON node (service);
 CREATE INDEX node_span_node ON node_span (node);
 CREATE INDEX note_seq ON note (seq);
+CREATE INDEX operation_contract ON operation (contract);
 CREATE INDEX ownership_file ON ownership (file, from_seq);
 CREATE INDEX ownership_owner ON ownership (owner);
 CREATE INDEX unresolved_at ON unresolved (from_seq, to_seq);

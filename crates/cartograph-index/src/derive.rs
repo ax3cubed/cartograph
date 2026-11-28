@@ -44,6 +44,8 @@ pub struct RepoInput<'a> {
 pub struct Inputs<'a> {
     pub repos: Vec<RepoInput<'a>>,
     pub services: &'a [ServiceSpec],
+    /// The manifest's `contracts:` entries (XS-08).
+    pub contracts: &'a [crate::contracts::ContractSpec],
     pub exclude: &'a [String],
     pub config_hash: Option<&'a str>,
     /// Lineages that got a new path this run.
@@ -324,6 +326,8 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
         structure_keys.push(sk.to_vec());
     }
 
+    // Contracts (XS-08) need the services; the HTTP pass binds them to routes and calls.
+    crate::contracts::refresh::<E>(conn, inputs)?;
     // HTTP links (XS-04) need every repository's services and host aliases.
     crate::http::refresh(conn, config)?;
 

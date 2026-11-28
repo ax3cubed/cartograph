@@ -12,6 +12,7 @@ pub mod deploy;
 mod lang;
 pub mod manifest;
 mod manifest_lang;
+pub mod openapi;
 pub mod syntax;
 mod ts;
 
@@ -19,6 +20,7 @@ pub use deploy::ManifestDeploy;
 pub use lang::{GoImports, PhpImports, PyImports};
 pub use manifest::ManifestJs;
 pub use manifest_lang::{ManifestGo, ManifestPhp, ManifestPy};
+pub use openapi::ManifestOpenapi;
 pub use ts::TsImports;
 
 /// Blobs over this size are skipped without being read.
@@ -68,6 +70,30 @@ pub enum Fact {
         port: Option<u16>,
         context: Option<String>,
     },
+    /// An OpenAPI or Swagger document (XS-08): its version, title, base paths and the relative
+    /// files its refs read. New facts go at the end: the encoding of cached facts stays the same.
+    Spec {
+        version: String,
+        title: String,
+        bases: Vec<String>,
+        files: Vec<String>,
+        truncated: bool,
+    },
+    /// One operation of a spec; the path is as the spec writes it, without a base.
+    Operation {
+        method: String,
+        path: String,
+        operation_id: Option<String>,
+        summary: Option<String>,
+        line: u32,
+    },
+    /// A schema of a spec and its fields.
+    Schema {
+        name: String,
+        fields: Vec<openapi::SchemaField>,
+    },
+    /// A `$ref` of a spec that was not followed: `remote`, `missing`, `outside`, `cycle` or `deep`.
+    SpecRef { target: String, reason: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -115,10 +141,14 @@ pub trait Extractor: Sync {
     fn kinds(&self) -> &'static [&'static str];
     /// Facts for one blob. `kind` is what [`Extractor::handles`] returned.
     fn extract(&self, kind: &'static str, bytes: &[u8]) -> BlobFacts;
+    /// The most bytes of a blob of this kind that are read.
+    fn max_bytes(&self, _kind: &'static str) -> u64 {
+        MAX_BLOB_BYTES
+    }
 }
 
 /// The built-in extractors.
-pub static EXTRACTORS: [&dyn Extractor; 9] = [
+pub static EXTRACTORS: [&dyn Extractor; 10] = [
     &TsImports,
     &ManifestJs,
     &GoImports,
@@ -128,6 +158,8 @@ pub static EXTRACTORS: [&dyn Extractor; 9] = [
     &ManifestPy,
     &ManifestPhp,
     &ManifestDeploy,
+    // Last: it handles every YAML and JSON path the ones before it did not.
+    &ManifestOpenapi,
 ];
 
 /// The extractor for a path, with its kind. Paths under node_modules, dist, build, vendor or .next
@@ -148,7 +180,7 @@ pub fn extractor_for(path: &str) -> Option<(&'static dyn Extractor, &'static str
 
 /// True when some extractor tracks this path.
 pub fn tracked(path: &str) -> bool {
-    extractor_for(path).is_some()
+    extractor_for(path).is_some_and(|(_, k)| k != openapi::KIND || openapi::named(path))
 }
 
 /// The skip rules every extractor applies before parsing (size is checked before the read).

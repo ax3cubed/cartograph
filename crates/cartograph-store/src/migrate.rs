@@ -48,6 +48,9 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-08 contracts: begin ----
+    "DROP TABLE binding; DROP TABLE contract_schema; DROP TABLE operation; DROP TABLE contract;\n",
+    // ---- XS-08 contracts: end ----
     // ---- XS-06 link detail: begin ----
     "ALTER TABLE evidence DROP COLUMN operation;\n",
     // ---- XS-06 link detail: end ----
@@ -81,6 +84,24 @@ pub fn undo_to_v2() -> String {
 /// The tables and columns format 4 adds, as `schema.sql` declares them; one delimited block per
 /// phase-4 item.
 const V4: &str = concat!(
+    // ---- XS-08 contracts: begin ----
+    "CREATE TABLE contract (id INTEGER PRIMARY KEY, file INTEGER NOT NULL REFERENCES file (id),
+       service INTEGER REFERENCES node (id), title TEXT NOT NULL, version TEXT NOT NULL) STRICT;
+     CREATE UNIQUE INDEX contract_file ON contract (file);
+     CREATE TABLE operation (id INTEGER PRIMARY KEY, contract INTEGER NOT NULL REFERENCES contract (id),
+       method TEXT NOT NULL, path TEXT NOT NULL, template TEXT NOT NULL, operation_id TEXT,
+       summary TEXT, line INTEGER NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX operation_contract ON operation (contract);
+     CREATE TABLE contract_schema (contract INTEGER NOT NULL REFERENCES contract (id),
+       name TEXT NOT NULL, fields TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX contract_schema_contract ON contract_schema (contract);
+     CREATE TABLE binding (id INTEGER PRIMARY KEY, kind TEXT NOT NULL,
+       operation INTEGER REFERENCES operation (id), file INTEGER NOT NULL REFERENCES file (id),
+       line INTEGER NOT NULL, template TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER)
+       STRICT;
+     CREATE INDEX binding_operation ON binding (operation);
+     CREATE INDEX binding_kind ON binding (kind, from_seq);\n",
+    // ---- XS-08 contracts: end ----
     // ---- XS-05 confidence: begin ----
     "ALTER TABLE link ADD COLUMN level TEXT; ALTER TABLE link ADD COLUMN score REAL;\n",
     // ---- XS-05 confidence: end ----

@@ -14,24 +14,33 @@
 //!
 //! Two files can be joined by several call and route pairs: the link counts them, opens when the
 //! first appears and closes when the last goes, in the commit where that happens.
+//!
+//! Contracts (XS-08): the operations of the specs (`crate::contracts`) are routes of a second
+//! resolver that holds the same calls, so a call is bound to the operations it consumes. An
+//! operation and a parsed route with the same method and template are bound (`handled_by`); an
+//! operation with no route is spec-only, and a route of a service that has a spec and is in none is
+//! undocumented. A link whose call consumes an operation that its route handles has the contract
+//! matched on both ends: that is the evidence that makes it exact, and the operation is a third
+//! evidence row. Bindings are `binding` rows with intervals.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use cartograph_facts::schema::{AttrValue, Attrs, EvidenceType, FactKind, Part};
 use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{self, Connection, params};
 
+use crate::contracts;
 use crate::derive::key;
 use crate::ifaces;
 use crate::links::confidence::{self, EvidenceType as Ev};
 use crate::links::http::{
     Alias, CallSite, Delta, HttpResolver, Kind, LinkResolver, LinkSink, Match, Pair, Reason,
-    RouteSite, Site, SiteKey, call_target, normalise_route,
+    RouteSite, Site, SiteKey, Template, call_target, normalise_route,
 };
 use crate::rows::cut;
 
 /// Bump when what the rows hold changes, so every index rebuilds them.
-const HTTP_VERSION: &str = "http 2";
+const HTTP_VERSION: &str = "http 3";
 
 /// What a site says about itself, for evidence rows.
 struct Info {
@@ -101,6 +110,47 @@ fn load(conn: &Connection) -> rusqlite::Result<Vec<Row>> {
         });
     }
     Ok(out)
+}
+
+/// One operation of a spec, over the time its version of the spec had it.
+struct OpRow {
+    id: i64,
+    file: i64,
+    service: i64,
+    method: String,
+    path: String,
+    line: u32,
+    from: i64,
+    to: Option<i64>,
+}
+
+fn load_ops(conn: &Connection) -> rusqlite::Result<Vec<OpRow>> {
+    let mut st = conn.prepare_cached(
+        "SELECT o.id, c.file, coalesce(c.service, 0), o.method, o.path, o.line, o.from_seq, o.to_seq
+         FROM operation o JOIN contract c ON c.id = o.contract ORDER BY o.id",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok(OpRow {
+            id: r.get(0)?,
+            file: r.get(1)?,
+            service: r.get(2)?,
+            method: r.get(3)?,
+            path: r.get(4)?,
+            line: r.get(5)?,
+            from: r.get(6)?,
+            to: r.get(7)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// What an operation's site is: unique by its row.
+fn op_key(o: &OpRow) -> SiteKey {
+    SiteKey {
+        file: o.file,
+        span: [o.id as u32, 0, 0, 0],
+        kind: Kind::Route,
+    }
 }
 
 struct Aliases {
@@ -294,8 +344,33 @@ struct Out {
     unresolved: Vec<UnresolvedRow>,
 }
 
+/// A binding of the contract layer: what joins an operation (none for an undocumented route) to
+/// the route or call at `site`.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Bind {
+    kind: &'static str,
+    op: Option<SiteKey>,
+    site: SiteKey,
+}
+
+/// The contract layer of a sweep; present only when some spec has operations.
+#[derive(Default)]
+struct Layer {
+    /// The calls and the operations.
+    resolver: HttpResolver,
+    /// Live routes and operations: (service, `get /orders/{}`).
+    routes: HashMap<SiteKey, (i64, String)>,
+    ops: HashMap<SiteKey, (i64, String)>,
+    /// Pairs the main resolver holds, and the operations each call consumes.
+    pairs: BTreeSet<Pair>,
+    consumes: HashMap<SiteKey, BTreeSet<SiteKey>>,
+    open: HashMap<Bind, usize>,
+    rows: Vec<(Bind, i64, Option<i64>)>,
+}
+
 struct Sweep {
     resolver: HttpResolver,
+    layer: Option<Layer>,
     info: HashMap<SiteKey, Info>,
     node_of: HashMap<i64, i64>,
     counts: HashMap<Link, i64>,
@@ -305,9 +380,80 @@ struct Sweep {
 }
 
 impl Sweep {
-    fn step(&mut self, seq: i64, d: &Delta) {
+    fn step(&mut self, seq: i64, d: &Delta, ops: &Delta) {
         let mut s = Step::default();
         self.resolver.apply(seq as u64, d, &mut s);
+        let mut dirty = false;
+        if let Some(l) = &mut self.layer {
+            let is_call = |k: &SiteKey| k.kind == Kind::Call;
+            let sd = Delta {
+                add: d
+                    .add
+                    .iter()
+                    .filter(|x| matches!(x, Site::Call(_)))
+                    .chain(&ops.add)
+                    .cloned()
+                    .collect(),
+                remove: d
+                    .remove
+                    .iter()
+                    .filter(|k| is_call(k))
+                    .chain(&ops.remove)
+                    .cloned()
+                    .collect(),
+                alias_add: d.alias_add.clone(),
+                alias_remove: d.alias_remove.clone(),
+            };
+            let mut t = Step::default();
+            l.resolver.apply(seq as u64, &sd, &mut t);
+            for p in &t.close {
+                if let Some(v) = l.consumes.get_mut(&p.call) {
+                    v.remove(&p.route);
+                }
+            }
+            for (p, _) in &t.open {
+                l.consumes
+                    .entry(p.call.clone())
+                    .or_default()
+                    .insert(p.route.clone());
+            }
+            for k in &d.remove {
+                dirty |= l.routes.remove(k).is_some();
+            }
+            for k in &ops.remove {
+                dirty |= l.ops.remove(k).is_some();
+            }
+            for x in &d.add {
+                if let Site::Route(r) = x {
+                    let t = Template {
+                        method: r.method.clone(),
+                        segs: r.segs.clone(),
+                    };
+                    l.routes.insert(r.key.clone(), (r.service, t.to_string()));
+                    dirty = true;
+                }
+            }
+            for x in &ops.add {
+                if let Site::Route(r) = x {
+                    let t = Template {
+                        method: r.method.clone(),
+                        segs: r.segs.clone(),
+                    };
+                    l.ops.insert(r.key.clone(), (r.service, t.to_string()));
+                    dirty = true;
+                }
+            }
+            for p in &s.close {
+                l.pairs.remove(p);
+            }
+            for (p, _) in &s.open {
+                l.pairs.insert(p.clone());
+            }
+            dirty |= !(t.open.is_empty()
+                && t.close.is_empty()
+                && s.open.is_empty()
+                && s.close.is_empty());
+        }
         let link =
             |p: &Pair, n: &HashMap<i64, i64>| Some((*n.get(&p.call.file)?, *n.get(&p.route.file)?));
         let mut before: HashMap<Link, i64> = HashMap::new();
@@ -410,6 +556,113 @@ impl Sweep {
             self.unres_open
                 .insert(k.clone(), (*r, seq, self.out.unresolved.len() - 1));
         }
+        if dirty {
+            self.contracts(seq);
+        }
+    }
+
+    /// Recomputes the bindings from what is live, and the links whose contract is matched on both
+    /// ends.
+    fn contracts(&mut self, seq: i64) {
+        let Some(l) = &mut self.layer else { return };
+        let mut routes_by: HashMap<&str, Vec<(&SiteKey, i64)>> = HashMap::new();
+        for (k, (svc, tpl)) in &l.routes {
+            routes_by.entry(tpl).or_default().push((k, *svc));
+        }
+        let mut handled: BTreeSet<(&SiteKey, &SiteKey)> = BTreeSet::new();
+        for (ok, (osvc, tpl)) in &l.ops {
+            for (rk, rsvc) in routes_by.get(tpl.as_str()).into_iter().flatten() {
+                if *osvc == 0 || osvc == rsvc {
+                    handled.insert((ok, rk));
+                }
+            }
+        }
+        let documented: HashSet<&SiteKey> = handled.iter().map(|(_, r)| *r).collect();
+        let owners: HashSet<i64> = l
+            .ops
+            .values()
+            .map(|(s, _)| *s)
+            .filter(|s| *s != 0)
+            .collect();
+        let mut now: BTreeSet<Bind> = BTreeSet::new();
+        for (o, r) in &handled {
+            now.insert(Bind {
+                kind: "handled_by",
+                op: Some((*o).clone()),
+                site: (*r).clone(),
+            });
+        }
+        for (rk, (svc, _)) in &l.routes {
+            if owners.contains(svc) && !documented.contains(rk) {
+                now.insert(Bind {
+                    kind: "undocumented",
+                    op: None,
+                    site: rk.clone(),
+                });
+            }
+        }
+        for (ck, ops) in &l.consumes {
+            for ok in ops {
+                now.insert(Bind {
+                    kind: "consumes",
+                    op: Some(ok.clone()),
+                    site: ck.clone(),
+                });
+            }
+        }
+        // The pairs whose call consumes an operation that their route handles.
+        let mut matched: Vec<(&Pair, &SiteKey)> = Vec::new();
+        for p in &l.pairs {
+            for ok in l.consumes.get(&p.call).into_iter().flatten() {
+                if handled.contains(&(ok, &p.route)) {
+                    matched.push((p, ok));
+                }
+            }
+        }
+        for (p, ok) in matched {
+            let (Some(a), Some(b)) = (
+                self.node_of.get(&p.call.file),
+                self.node_of.get(&p.route.file),
+            ) else {
+                continue;
+            };
+            if a == b {
+                continue;
+            }
+            let link = (*a, *b);
+            self.out
+                .types
+                .entry(link)
+                .or_default()
+                .insert(Ev::ContractMatched);
+            if let Some(i) = self.info.get(ok) {
+                self.out.evidence.entry(link).or_default().insert((
+                    i.file,
+                    i.kind,
+                    i.text.clone(),
+                    i.span,
+                    i.extractor.clone(),
+                    i.template.clone(),
+                ));
+            }
+        }
+        let gone: Vec<Bind> = l
+            .open
+            .keys()
+            .filter(|b| !now.contains(*b))
+            .cloned()
+            .collect();
+        for b in gone {
+            if let Some(i) = l.open.remove(&b) {
+                l.rows[i].2 = Some(seq);
+            }
+        }
+        for b in now {
+            if !l.open.contains_key(&b) {
+                l.rows.push((b.clone(), seq, None));
+                l.open.insert(b, l.rows.len() - 1);
+            }
+        }
     }
 }
 
@@ -418,9 +671,10 @@ type Timeline = (
     BTreeMap<i64, Delta>,
     HashMap<(SiteKey, i64), Info>,
     HashMap<i64, i64>,
+    BTreeMap<i64, Delta>,
 );
 
-fn timeline(rows: &[Row], aliases: &[Aliases]) -> Timeline {
+fn timeline(rows: &[Row], aliases: &[Aliases], ops: &[OpRow]) -> Timeline {
     let mut deltas: BTreeMap<i64, Delta> = BTreeMap::new();
     // What each add says about itself, by (site, commit): a later version of the same place
     // replaces it in order.
@@ -456,7 +710,40 @@ fn timeline(rows: &[Row], aliases: &[Aliases]) -> Timeline {
                 .push(a.alias.clone());
         }
     }
-    (deltas, infos, node_of)
+    // The operations: sites of the contract layer only.
+    let mut op_deltas: BTreeMap<i64, Delta> = BTreeMap::new();
+    let extractor = contracts::extractor();
+    for o in ops {
+        let t = normalise_route(&o.method, &o.path);
+        let key = op_key(o);
+        if let Some(to) = o.to {
+            op_deltas.entry(to).or_default().remove.push(key.clone());
+        }
+        op_deltas
+            .entry(o.from)
+            .or_default()
+            .add
+            .push(Site::Route(RouteSite {
+                key: key.clone(),
+                service: o.service,
+                method: t.method.clone(),
+                segs: t.segs.clone(),
+            }));
+        infos.insert(
+            (key, o.from),
+            Info {
+                file: o.file,
+                kind: "contract",
+                text: cut(&format!("{} {}", o.method.to_ascii_uppercase(), o.path)),
+                span: [o.line, 0, o.line, 0],
+                extractor: extractor.clone(),
+                raw: o.path.clone(),
+                template: t.to_string(),
+                host: false,
+            },
+        );
+    }
+    (deltas, infos, node_of, op_deltas)
 }
 
 /// Rebuilds the HTTP rows when the interface facts, the paths and versions of the files that
@@ -464,6 +751,7 @@ fn timeline(rows: &[Row], aliases: &[Aliases]) -> Timeline {
 pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Result<usize> {
     let rows = load(conn)?;
     let aliases = load_aliases(conn)?;
+    let ops = load_ops(conn)?;
     let mut inputs: Vec<Vec<u8>> = rows
         .iter()
         .map(|r| {
@@ -483,6 +771,8 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         )
         .into_bytes()
     }));
+    // The operations are rows of the contracts pass: its key says whether they changed.
+    inputs.push([b"contracts\0".as_slice(), &contracts::built_key(conn)?].concat());
     inputs.push(ifaces::version().into_bytes());
     // A re-weight re-scores the links and nothing else.
     inputs.push(
@@ -498,9 +788,10 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         return Ok(0);
     }
 
-    let (deltas, mut infos, node_of) = timeline(&rows, &aliases);
+    let (deltas, mut infos, node_of, op_deltas) = timeline(&rows, &aliases, &ops);
     let mut sweep = Sweep {
         resolver: HttpResolver::new(),
+        layer: (!ops.is_empty()).then(Layer::default),
         info: HashMap::new(),
         node_of,
         counts: HashMap::new(),
@@ -508,8 +799,14 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         unres_open: HashMap::new(),
         out: Out::default(),
     };
-    for (seq, d) in &deltas {
-        for s in &d.add {
+    let none = Delta::default();
+    let seqs: BTreeSet<i64> = deltas.keys().chain(op_deltas.keys()).copied().collect();
+    for seq in &seqs {
+        let (d, o) = (
+            deltas.get(seq).unwrap_or(&none),
+            op_deltas.get(seq).unwrap_or(&none),
+        );
+        for s in d.add.iter().chain(&o.add) {
             let k = match s {
                 Site::Call(c) => &c.key,
                 Site::Route(r) => &r.key,
@@ -518,16 +815,35 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
                 sweep.info.insert(k.clone(), i);
             }
         }
-        sweep.step(*seq, d);
+        sweep.step(*seq, d, o);
     }
+    let binds = sweep.layer.take().map(|l| l.rows).unwrap_or_default();
     let out = sweep.out;
 
     conn.execute_batch(
         "DELETE FROM evidence WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM interval WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM link WHERE kind = 'http';
-         DELETE FROM unresolved WHERE fact_kind = 'http.call';",
+         DELETE FROM unresolved WHERE fact_kind = 'http.call'; DELETE FROM binding;",
     )?;
+    for (b, from, to) in &binds {
+        let Some(i) = sweep.info.get(&b.site) else {
+            continue;
+        };
+        conn.prepare_cached(
+            "INSERT INTO binding (kind, operation, file, line, template, from_seq, to_seq)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )?
+        .execute(params![
+            b.kind,
+            b.op.as_ref().map(|k| i64::from(k.span[0])),
+            i.file,
+            i.span[0],
+            i.template,
+            from,
+            to
+        ])?;
+    }
     let mut written = 0;
     for (l, spans) in &out.intervals {
         let types: Vec<Ev> = out.types.get(l).into_iter().flatten().copied().collect();

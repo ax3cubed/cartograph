@@ -202,6 +202,8 @@ fn fact(f: &Fact) -> String {
             port,
             context,
         } => format!("host {host} {port:?} {context:?}"),
+        // XS-08: a spec's operations, schemas and unresolved refs.
+        other => format!("{other:?}"),
     }
 }
 

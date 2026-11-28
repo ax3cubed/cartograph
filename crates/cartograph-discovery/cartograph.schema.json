@@ -42,6 +42,13 @@
         "null"
       ]
     },
+    "contracts": {
+      "description": "OpenAPI and Swagger files by glob (XS-08), besides the ones named `openapi.*` or\n`swagger.*`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Contract"
+      }
+    },
     "retrieval": {
       "description": "What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).",
       "$ref": "#/$defs/Retrieval"
@@ -163,6 +170,26 @@
       "required": [
         "name",
         "repo"
+      ]
+    },
+    "Contract": {
+      "description": "A spec the index reads (XS-08).",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "A glob relative to each repo's root: `docs/api/*.yaml`. It picks among YAML and JSON files.",
+          "type": "string"
+        },
+        "service": {
+          "description": "The service that owns the specs it matches; absent, the service whose root holds each file.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
       ]
     },
     "Retrieval": {

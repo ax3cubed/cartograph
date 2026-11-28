@@ -88,6 +88,12 @@ pub fn workspace_checked(data: &Path, ws: &str) -> Result<(Workspace, Vec<String
                     path: s.path.clone(),
                 })
                 .collect(),
+            contracts: parsed
+                .manifest
+                .contracts
+                .iter()
+                .map(cartograph_index::contracts::ContractSpec::from)
+                .collect(),
         },
         not_added,
     ))

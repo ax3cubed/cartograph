@@ -316,3 +316,55 @@ CREATE TABLE evidence (
 CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX evidence_file ON evidence (file);
 -- <<< XS-01
+
+-- XS-08 contracts (begin)
+-- OpenAPI and Swagger specs (the `manifest-openapi` facts of the spec files) with intervals. One
+-- contract per spec file lineage; service is the node that owns it (the manifest's contracts[].service,
+-- else the service whose root holds the file). An operation is a method on a path (base path
+-- included, as written: path; with parameters as `{}`: template) over the time that version of the
+-- spec had it. summary is cut to 200 characters and is untrusted text. fields is a JSON array of
+-- {name, ty, required}. A binding joins an operation to code: handled_by (file is the route's),
+-- consumes (file is the call's), or, with no operation, undocumented (a route of a service that has
+-- a spec and is in none). Unresolved `$ref`s are `unresolved` rows of fact_kind openapi.ref.
+CREATE TABLE contract (
+  id INTEGER PRIMARY KEY,
+  file INTEGER NOT NULL REFERENCES file (id),
+  service INTEGER REFERENCES node (id),
+  title TEXT NOT NULL,
+  version TEXT NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX contract_file ON contract (file);
+CREATE TABLE operation (
+  id INTEGER PRIMARY KEY,
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  template TEXT NOT NULL,
+  operation_id TEXT,
+  summary TEXT,
+  line INTEGER NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX operation_contract ON operation (contract);
+CREATE TABLE contract_schema (
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  name TEXT NOT NULL,
+  fields TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX contract_schema_contract ON contract_schema (contract);
+CREATE TABLE binding (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  operation INTEGER REFERENCES operation (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  line INTEGER NOT NULL,
+  template TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX binding_operation ON binding (operation);
+CREATE INDEX binding_kind ON binding (kind, from_seq);
+-- XS-08 contracts (end)
