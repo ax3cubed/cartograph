@@ -46,6 +46,7 @@ use crate::schema::{
 };
 
 pub mod query;
+pub mod subprocess;
 mod value;
 
 #[cfg(test)]

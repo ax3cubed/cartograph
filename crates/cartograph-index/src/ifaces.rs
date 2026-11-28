@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cartograph_facts::FactCache;
+use cartograph_facts::adapters::subprocess::{Session, SubSet};
 use cartograph_facts::adapters::{AdapterSet, Limits, MAX_GENERATED_BYTES};
 use cartograph_facts::schema::{BlobFact, FactKind};
 use cartograph_git::{GitError, ObjectId, Repo, read_blob};
@@ -23,13 +24,15 @@ pub type IfaceFacts = Vec<(String, String, Vec<BlobFact>)>;
 pub type Ifaces = HashMap<ObjectId, Arc<IfaceFacts>>;
 
 /// `express@1.0.0+fetch@1.1.0`: changes whenever a built-in adapter does.
-pub fn version() -> String {
-    AdapterSet::builtin()
+pub fn version(subs: &SubSet) -> String {
+    let builtin = AdapterSet::builtin()
         .adapters()
         .iter()
         .map(|a| format!("{}@{}", a.name, a.version))
         .collect::<Vec<_>>()
-        .join("+")
+        .join("+");
+    // Approving or removing a subprocess adapter (XS-24) makes the facts again.
+    format!("{builtin}{}", subs.version())
 }
 
 /// Whether the built-in adapters read a file of this path.
@@ -42,29 +45,31 @@ pub fn applies(path: &str) -> bool {
 }
 
 /// Interface facts for each (blob, path) not in `seen`, from the fact cache or by running the
-/// built-in adapters on the blob.
+/// built-in adapters, and the approved subprocess adapters (`sub`), on the blob.
 pub fn extract(
     repo: &Repo,
     items: impl IntoIterator<Item = (ObjectId, String)>,
     cache: &mut FactCache,
     into: &mut Ifaces,
     seen: &mut HashSet<ObjectId>,
+    sub: &mut Session,
 ) -> Result<(), GitError> {
     let set = AdapterSet::builtin();
     let local = repo.local();
     for (oid, path) in items {
-        if !applies(&path) || !seen.insert(oid) {
+        let builtin = applies(&path);
+        if (!builtin && sub.is_idle()) || !seen.insert(oid) {
             continue;
         }
-        let got = set.extract(
-            cache,
-            oid.as_bytes(),
-            &path,
-            || read_blob(&local, oid, MAX_GENERATED_BYTES as u64).ok(),
-            &Limits::default(),
-        );
-        let mine: IfaceFacts = got
-            .facts
+        let read = || read_blob(&local, oid, MAX_GENERATED_BYTES as u64).ok();
+        let mut facts = if builtin {
+            set.extract(cache, oid.as_bytes(), &path, read, &Limits::default())
+                .facts
+        } else {
+            Vec::new()
+        };
+        facts.extend(sub.extract(cache, oid.as_bytes(), &path, read));
+        let mine: IfaceFacts = facts
             .into_iter()
             .filter(|a| !a.facts.is_empty())
             .map(|a| (a.name, a.version, a.facts))
@@ -80,11 +85,12 @@ pub fn extract(
 pub(crate) fn write(
     conn: &cartograph_store::rusqlite::Connection,
     facts: &Ifaces,
+    subs: &SubSet,
 ) -> cartograph_store::rusqlite::Result<()> {
     if facts.is_empty() {
         return Ok(());
     }
-    let version = version();
+    let version = version(subs);
     conn.execute(
         "INSERT INTO extractor (name, version) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
         cartograph_store::rusqlite::params![EXTRACTOR, version],
@@ -130,6 +136,7 @@ pub(crate) fn decode(payload: &[u8]) -> Option<IfaceFacts> {
 /// Whether the adapters that made the stored facts are the ones this binary has.
 pub(crate) fn current(
     conn: &cartograph_store::rusqlite::Connection,
+    subs: &SubSet,
 ) -> cartograph_store::rusqlite::Result<bool> {
     let stored: Option<String> = conn
         .query_row(
@@ -138,15 +145,16 @@ pub(crate) fn current(
             |r| r.get(0),
         )
         .ok();
-    Ok(stored.as_deref() == Some(version().as_str()))
+    Ok(stored.as_deref() == Some(version(subs).as_str()))
 }
 
 pub(crate) fn mark_current(
     conn: &cartograph_store::rusqlite::Connection,
+    subs: &SubSet,
 ) -> cartograph_store::rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('adapters_version', ?1)",
-        [version()],
+        [version(subs)],
     )?;
     Ok(())
 }

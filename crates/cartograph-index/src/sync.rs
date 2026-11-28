@@ -81,6 +81,8 @@ pub struct Workspace {
     pub default_environment: Option<String>,
     /// `cartograph.overrides.yaml` beside the manifest (XS-12), when there is a manifest.
     pub overrides: Option<PathBuf>,
+    /// The subprocess adapters the user approved, and the declared ones that won't run (XS-24).
+    pub subs: cartograph_facts::adapters::subprocess::SubSet,
 }
 
 impl Workspace {
@@ -199,6 +201,8 @@ pub struct SyncSummary {
     /// Coverage at the last step (IDX-22): (files total, files parsed, imports total, imports
     /// resolved).
     pub coverage: (i64, i64, i64, i64),
+    /// Why a subprocess adapter didn't run, or stopped (XS-24).
+    pub adapter_notes: Vec<String>,
     pub rehydrate_ms: u128,
     pub walk_ms: u128,
     pub replay_ms: u128,
@@ -751,8 +755,9 @@ fn round_on(
         floor = floor.min(changed_at - 1);
     }
     // The built-in adapters changed (XS-03): their facts are made again for every blob.
-    if !ifaces::current(conn)? {
-        reextract_ifaces(conn, &parts, cache)?;
+    let mut sub = ws.subs.session();
+    if !ifaces::current(conn, &ws.subs)? {
+        reextract_ifaces(conn, &parts, cache, &mut sub, &ws.subs)?;
     }
 
     // 3. The floor: the last indexed step before every new step. Walks start at the base; a part
@@ -880,7 +885,7 @@ fn round_on(
             .iter()
             .flat_map(|s| &s.changes)
             .filter_map(|c| Some((c.new?, c.path.clone())));
-        ifaces::extract(&p.repo, paths, cache, &mut ifs, &mut ifs_seen)?;
+        ifaces::extract(&p.repo, paths, cache, &mut ifs, &mut ifs_seen, &mut sub)?;
         s.extract.blobs += st.blobs;
         s.extract.parsed += st.parsed;
         s.extract.from_cache += st.from_cache;
@@ -905,8 +910,10 @@ fn round_on(
         });
     }
     rows.facts(facts.iter().filter(|(k, _)| !indexed_facts.contains(*k)))?;
-    ifaces::write(conn, &ifs)?;
-    ifaces::mark_current(conn)?;
+    ifaces::write(conn, &ifs, &ws.subs)?;
+    ifaces::mark_current(conn, &ws.subs)?;
+    s.adapter_notes.append(&mut sub.notes);
+    drop(sub);
 
     // 6. Replay the merged new steps, in batches. The first batch may commit: the index must have
     // passed its check by then.
@@ -1209,6 +1216,8 @@ fn reextract_ifaces(
     conn: &rusqlite::Connection,
     parts: &[Part],
     cache: &mut FactCache,
+    sub: &mut cartograph_facts::adapters::subprocess::Session,
+    subs: &cartograph_facts::adapters::subprocess::SubSet,
 ) -> Result<(), SyncError> {
     conn.execute(
         "DELETE FROM fact WHERE extractor IN (SELECT id FROM extractor WHERE name = ?1)",
@@ -1234,14 +1243,14 @@ fn reextract_ifaces(
                 Err(e) => Some(Err(e)),
             })
             .collect::<Result<_, _>>()?;
-        ifaces::extract(&p.repo, items, cache, &mut found, &mut seen)?;
+        ifaces::extract(&p.repo, items, cache, &mut found, &mut seen, sub)?;
     }
     // Every adapter fact is made again: the marker count starts over.
     conn.execute(
         "UPDATE meta SET value = 0 WHERE key = ?1",
         [ifaces::CODEGEN_BLOBS],
     )?;
-    ifaces::write(conn, &found)?;
+    ifaces::write(conn, &found, subs)?;
     Ok(())
 }
 

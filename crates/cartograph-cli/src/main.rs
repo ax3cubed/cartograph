@@ -4,6 +4,7 @@
 //! command resolves the data folder, starts logging or opens an index only once it runs. There is
 //! no async runtime here; `serve`, `open` and `mcp --http` bring their own when they land.
 
+mod adapters;
 mod agents;
 mod app;
 mod check;
@@ -145,10 +146,24 @@ enum Command {
         /// Every registered workspace, one after another (what the hourly schedule runs).
         #[arg(long, conflicts_with_all = ["background", "dir"])]
         all_workspaces: bool,
+        /// Run an approved subprocess adapter with no sandbox, on a system that has none.
+        #[arg(long, conflicts_with = "background")]
+        unsandboxed_adapters: bool,
         /// The git hook's arguments (IDX-26): a file checkout or a rebase in progress starts
         /// nothing.
         #[arg(long, hide = true, requires = "background", value_name = "ARGS")]
         hook_args: Option<String>,
+    },
+    /// List, allow or deny the subprocess adapters cartograph.yaml names; `guide` explains them.
+    // Hidden: help lists the seventeen commands of the spec's section 4.
+    #[command(hide = true)]
+    Adapters {
+        action: adapters::Action,
+        /// The adapter's name, for allow and deny.
+        name: Option<String>,
+        /// The folder to work on [default: the current folder].
+        #[arg(long = "dir", value_name = "DIR")]
+        dir: Option<PathBuf>,
     },
     /// Each repo's indexed commit, its HEAD and how far behind it is.
     Status {
@@ -405,6 +420,7 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
             wait,
             background,
             all_workspaces,
+            unsandboxed_adapters,
             hook_args,
         } => sync::run(
             out,
@@ -414,9 +430,16 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
                 wait,
                 background,
                 all_workspaces,
+                unsandboxed_adapters,
                 hook_args,
             },
             &g,
+        )?,
+        Command::Adapters { action, name, dir } => adapters::run(
+            out,
+            &named(&g, dir.unwrap_or_else(|| PathBuf::from("."))),
+            action,
+            name,
         )?,
         Command::Hooks { action, dir } => hooks::run(out, &named(&g, dir.or_cwd()), action)?,
         Command::Schedule { action } => schedule::run(out, action)?,

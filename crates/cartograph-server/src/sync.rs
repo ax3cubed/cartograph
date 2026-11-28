@@ -106,9 +106,28 @@ pub fn workspace_checked(data: &Path, ws: &str) -> Result<(Workspace, Vec<String
                 .collect(),
             default_environment: parsed.manifest.default_environment.clone(),
             overrides: Some(base.join(cartograph_discovery::overrides::FILE_NAME)),
+            subs: subprocess_adapters(&reg, ws, base, &parsed.manifest.adapters),
         },
         not_added,
     ))
+}
+
+/// The manifest's subprocess adapters (XS-24): only those this user approved, with this exact hash,
+/// can run. A sync, MCP or the background refresh only reads the approvals; none of them gives one.
+pub fn subprocess_adapters(
+    reg: &Registry,
+    ws: &str,
+    base: &Path,
+    folders: &[String],
+) -> cartograph_facts::adapters::subprocess::SubSet {
+    use cartograph_facts::adapters::subprocess::{Declared, SubSet};
+    SubSet::new(
+        folders
+            .iter()
+            .map(|f| Declared::load(base, f).map_err(|e| format!("{f}: {e}")))
+            .collect(),
+        |d| reg.adapter_allowed(ws, &d.name, &d.hash),
+    )
 }
 
 /// Registers the manifest repos of `ws` that aren't registered yet, when the user chose them in

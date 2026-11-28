@@ -56,6 +56,10 @@ pub struct Manifest {
     /// Named environments (XS-09): which files give their values, and values set by hand.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub environments: BTreeMap<String, Environment>,
+    /// Folders of subprocess adapters (XS-24), relative to this file and inside it. Naming one
+    /// runs nothing: each needs `cartograph adapters allow <name>` on every machine.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adapters: Vec<String>,
 }
 
 /// One environment of `environments:` (XS-09).
@@ -805,7 +809,7 @@ services:
                 }).collect(),
                 options: Options::default(),
                 services: vec![], rules: vec![], baseline: None, contracts: vec![], retrieval: Default::default(),
-                default_environment: None, environments: Default::default(),
+                default_environment: None, environments: Default::default(), adapters: vec![],
             };
             let again = parse(&to_yaml(&m)).unwrap().manifest;
             proptest::prop_assert_eq!(again, m);

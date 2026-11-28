@@ -164,6 +164,7 @@ pub fn run(out: &Out, dir: &Path, no_index: bool, g: &Global) -> Result<(), Repo
                 .manifest_path
                 .parent()
                 .map(|d| d.join(cartograph_discovery::overrides::FILE_NAME)),
+            subs: Default::default(),
         };
         let cache_path = paths::facts_cache(&data);
         let mut cache = FactCache::open(&cache_path).map_err(|e| Report {

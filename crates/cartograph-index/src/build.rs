@@ -157,6 +157,7 @@ pub(crate) fn build_single_with(
     let (steps, facts, extract, walk_ms, extract_ms) =
         walk_and_extract(&repo, head, cache, workers)?;
     let mut ifs = crate::ifaces::Ifaces::new();
+    let subs = cartograph_facts::adapters::subprocess::SubSet::default();
     crate::ifaces::extract(
         &repo,
         steps
@@ -166,6 +167,7 @@ pub(crate) fn build_single_with(
         cache,
         &mut ifs,
         &mut std::collections::HashSet::new(),
+        &mut subs.session(),
     )?;
     let ix = Index::create(out)?;
     let t = Instant::now();
@@ -213,8 +215,8 @@ pub(crate) fn build_single_with(
     let last = steps.len().saturating_sub(1) as i64;
     rows.flush(last)?;
     rows.facts(facts.iter())?;
-    crate::ifaces::write(&ix.conn, &ifs)?;
-    crate::ifaces::mark_current(&ix.conn)?;
+    crate::ifaces::write(&ix.conn, &ifs, &subs)?;
+    crate::ifaces::mark_current(&ix.conn, &subs)?;
     let count = |sql: &str| ix.conn.query_row(sql, [], |r| r.get::<_, i64>(0));
     s.links = count("SELECT count(*) FROM link")? as usize;
     s.intervals = count("SELECT count(*) FROM interval")? as usize;
