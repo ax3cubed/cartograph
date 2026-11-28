@@ -18,7 +18,7 @@ use cartograph_facts::adapters::{AdapterSet, Limits};
 use cartograph_facts::schema::{AttrValue, BlobFact, FactKind, Part};
 use cartograph_git::GitError;
 use cartograph_store::derived::{changed, record};
-use cartograph_store::rusqlite::{self, Connection, params};
+use cartograph_store::rusqlite::{self, Connection, OptionalExtension, params};
 
 use crate::derive::Inputs;
 use crate::ifaces;
@@ -241,6 +241,35 @@ pub(crate) fn extract_refs<E: From<GitError> + From<rusqlite::Error>>(
     conn: &Connection,
     inputs: &Inputs<'_>,
 ) -> Result<(), E> {
+    // No generated client in the index: nothing imports one. Scanning every adapter payload for a
+    // marker costs a warm sync ~15 ms, so the count kept by `ifaces::write` answers instead; an
+    // index without it (made before it existed) is counted once here.
+    let known: Option<i64> = conn
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM meta WHERE key = ?1",
+            [ifaces::CODEGEN_BLOBS],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let marked = match known {
+        Some(n) => n,
+        None => {
+            let n: i64 = conn.query_row(
+                "SELECT count(*) FROM fact fa JOIN extractor e ON e.id = fa.extractor AND e.name = ?1
+                 WHERE instr(fa.payload, CAST('codegen.marker' AS BLOB)) > 0",
+                [ifaces::EXTRACTOR],
+                |r| r.get(0),
+            )?;
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+                params![ifaces::CODEGEN_BLOBS, n],
+            )?;
+            n
+        }
+    };
+    if marked == 0 {
+        return Ok(());
+    }
     let version = refs_version();
     // Skipped when nothing that could add an importer of a generated client was added since: a
     // new import needs a new file version, and a replay after a rewrite gives new row ids.

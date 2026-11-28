@@ -1236,6 +1236,11 @@ fn reextract_ifaces(
             .collect::<Result<_, _>>()?;
         ifaces::extract(&p.repo, items, cache, &mut found, &mut seen)?;
     }
+    // Every adapter fact is made again: the marker count starts over.
+    conn.execute(
+        "UPDATE meta SET value = 0 WHERE key = ?1",
+        [ifaces::CODEGEN_BLOBS],
+    )?;
     ifaces::write(conn, &found)?;
     Ok(())
 }

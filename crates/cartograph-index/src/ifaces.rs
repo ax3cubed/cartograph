@@ -8,8 +8,12 @@ use std::sync::Arc;
 
 use cartograph_facts::FactCache;
 use cartograph_facts::adapters::{AdapterSet, Limits, MAX_GENERATED_BYTES};
-use cartograph_facts::schema::BlobFact;
+use cartograph_facts::schema::{BlobFact, FactKind};
 use cartograph_git::{GitError, ObjectId, Repo, read_blob};
+
+/// The `meta` key counting the blobs with a generated-client marker (XS-11). Absent: unknown.
+/// It can overcount after a rewrite drops facts (a wasted look), never undercount.
+pub(crate) const CODEGEN_BLOBS: &str = "codegen_blobs";
 
 /// The extractor name in the `fact` table.
 pub const EXTRACTOR: &str = "adapters";
@@ -90,6 +94,19 @@ pub(crate) fn write(
         cartograph_store::rusqlite::params![EXTRACTOR, version],
         |r| r.get(0),
     )?;
+    let marked = facts
+        .values()
+        .filter(|f| {
+            f.iter()
+                .any(|(_, _, fs)| fs.iter().any(|b| b.kind == FactKind::CodegenMarker))
+        })
+        .count();
+    if marked > 0 {
+        conn.execute(
+            "UPDATE meta SET value = CAST(value AS INTEGER) + ?1 WHERE key = ?2",
+            cartograph_store::rusqlite::params![marked as i64, CODEGEN_BLOBS],
+        )?;
+    }
     let mut rows: Vec<_> = facts.iter().collect();
     rows.sort_by_key(|(o, _)| **o);
     for (oid, f) in rows {
