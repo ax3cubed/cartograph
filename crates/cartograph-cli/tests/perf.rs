@@ -132,32 +132,43 @@ fn perf_sync_of_100_new_commits_under_500_ms() {
     let (base, f) = behind_by_100(d.path(), &monorepo_history(200));
     let repo = f.dir.to_str().unwrap().to_owned();
     // Best of five with the replay snapshot, best of three without it (the whole tree resolved).
+    // Each run gives its wall time and the time of the stages the snapshot saves: restoring the
+    // replay (or resolving the tree without it), the walk and the replay of the new commits.
     let run = |runs: usize, keep_snapshot: bool| {
-        let mut best = Duration::MAX;
+        let (mut wall, mut stages) = (f64::MAX, f64::MAX);
         for i in 0..runs {
             let home = d.path().join(format!("h{keep_snapshot}{i}"));
             copy_dir(&base, &home);
             if !keep_snapshot {
                 remove_snapshots(&home);
             }
-            best = best.min(timed(&home, &["sync", &repo]));
+            let t = Instant::now();
+            let o = cartograph(&home, &["sync", &repo, "--json"])
+                .stdout(Stdio::piped())
+                .output()
+                .unwrap();
+            wall = wall.min(t.elapsed().as_secs_f64() * 1e3);
+            assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+            let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+            let ms = |k: &str| v["ms"][k].as_f64().unwrap();
+            stages = stages.min(ms("rehydrate") + ms("walk") + ms("replay"));
         }
-        best.as_secs_f64() * 1e3
+        (wall, stages)
     };
-    let (warm, cold) = (run(5, true), run(3, false));
+    let ((warm, warm_stages), (_, cold_stages)) = (run(5, true), run(3, false));
+    let ratio = warm_stages / cold_stages;
     record("sync_100_commits_ms", warm, 500.0, "ms");
-    record(
-        "sync_100_commits_vs_full_resolve",
-        warm / cold,
-        0.5,
-        "ratio",
-    );
+    record("sync_100_commits_vs_full_resolve", ratio, 0.5, "ratio");
     // A shared CI runner is about twice as slow as a developer machine, so the absolute budget
     // holds on reference hardware (CARTOGRAPH_PERF_STRICT=1); everywhere, the snapshot must at
-    // least halve the sync, which fails the moment a sync resolves the whole tree again.
+    // least halve the stages it saves, which fails the moment a sync resolves the whole tree
+    // again. The ratio leaves out the derived passes: they cost a sync the same with or without
+    // the snapshot, so on a slow runner they pushed a whole-process ratio to the line by
+    // themselves.
     assert!(
-        warm < cold * 0.5,
-        "a sync of 100 commits took {warm:.1} ms with the snapshot, {cold:.1} ms without"
+        ratio < 0.5,
+        "restore, walk and replay took {warm_stages:.0} ms with the snapshot, {cold_stages:.0} ms \
+         without (the whole sync: {warm:.1} ms)"
     );
     if std::env::var_os("CARTOGRAPH_PERF_STRICT").is_some() {
         assert!(warm < 500.0, "a warm sync of 100 commits took {warm:.1} ms");
