@@ -1,12 +1,11 @@
 "use client";
 
-import { useRef, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
+import { useMemo, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Loader, type LucideIcon } from "lucide-react";
-import { byId } from "@/lib/workspace";
 import EmptyState from "@/components/shell/EmptyState";
-import { levelOf, type ConfidenceLevel } from "@/lib/model";
+import type { Service } from "@/lib/api";
+import { useFreshness, useGraph, useLive, useMode, useWorkspaces, useWsRead } from "@/lib/api/live";
 import "./views.css";
 import { fmtDate as fmtDay } from "@/lib/date";
 
@@ -14,10 +13,12 @@ const subscribe = (cb: () => void) => { window.addEventListener("hashchange", cb
 /** The URL hash without "#": view state that must survive a reload lives here (decision A2). */
 export const useHash = () => useSyncExternalStore(subscribe, () => decodeURIComponent(location.hash.slice(1)), () => "");
 
-export type Tone = "ok" | "warn" | "bad" | "acc" | "";
+import type { Tone } from "./risk.ts";
+export type { Tone };
 export const Chip = ({ tone = "", children }: { tone?: Tone; children: ReactNode }) => <span className={`view-chip ${tone}`}>{children}</span>;
-export const toneOf = (score: number): Tone => (levelOf(score) === "exact" ? "ok" : "");
-export const levelLabel = (l: ConfidenceLevel) => l[0].toUpperCase() + l.slice(1);
+/** How sure a link is, as a tone: only an exact one is calm. */
+export const levelTone = (l: string): Tone => (l === "exact" ? "ok" : "");
+export const levelLabel = (l: string) => l[0].toUpperCase() + l.slice(1);
 
 export const fmtDate = (iso: string) => fmtDay(iso, "dmy");
 
@@ -26,11 +27,29 @@ export const IndexingEmpty = () => (
   <EmptyState icon={Loader} title="Building your first index" body="This view fills in as the index finishes. You can keep working. Progress is in the status at the top right." action={{ label: "See indexing settings", href: "/settings/indexing" }} />
 );
 
-/** `when` is the real empty condition; `#empty` shows the same state for review (decision I9). */
-export function Page({ icon, empty, when, children }: { icon?: LucideIcon; empty: { title: string; body: string; action?: { label: string; href?: string; onClick?: () => void } }; when: boolean; children: ReactNode }) {
+/**
+ * What every view needs first: the workspace it reads, and whether its first index is still running (O1). `ws` is
+ * undefined without the binary (the demo build) or before a workspace is picked.
+ */
+export function useView() {
+  const live = useLive();
+  const ws = useWorkspaces().current?.id;
+  const fresh = useFreshness(live ? ws : undefined).data;
+  return { ws: live ? ws : undefined, live, indexing: !!fresh && (fresh.state === "none" || (fresh.state === "syncing" && fresh.builtAt === "")) };
+}
+
+/**
+ * `when` is the real empty condition; `#empty` shows the same state for review (decision I9). The view's heading stays
+ * above an empty state, so the page says where you are and what it will show.
+ */
+export function Page({ icon, head, empty, when, indexing, children }: { icon?: LucideIcon; head: { id: string; title: string; purpose: string }; empty?: { title: string; body: string; action?: { label: string; href?: string; onClick?: () => void } }; when?: boolean; indexing?: boolean; children: ReactNode }) {
   const hash = useHash();
-  if (hash === "indexing") return <IndexingEmpty />;
-  if (when || hash === "empty") return <EmptyState icon={icon} {...empty} />;
+  const mode = useMode();
+  const instead = (node: ReactNode) => <main className="view-main" aria-labelledby={`${head.id}-h`}><ViewHead {...head} />{node}</main>;
+  // Without the binary (pnpm dev, a static host) there is no index to read, and nothing stands in for one.
+  if (mode === "demo") return instead(<EmptyState icon={icon} title="These views read your index" body="Nothing answered at this address, so there is no index to read. Open the app from the command line with cartograph open." />);
+  if (hash === "indexing" || indexing) return instead(<IndexingEmpty />);
+  if (empty && (when || hash === "empty")) return instead(<EmptyState icon={icon} {...empty} />);
   return <>{children}</>;
 }
 
@@ -49,37 +68,27 @@ export function useHashState() {
   return { bare: q ? "" : h, get: (k: string) => p.get(k) ?? undefined, set };
 }
 
-/** A repo-relative path is the one path format in every view. */
-export const pathOf = (id: string) => byId.get(id)?.path ?? id;
+/** node id to name: the files from the workspace's graph (the map's own read, so it is already there), the services from …/services. */
+export function useNames(ws: string | undefined) {
+  const g = useGraph(ws, "").data;
+  const services = useWsRead<Service[]>(ws, "services").data;
+  return useMemo(() => {
+    const m = new Map<string, string>();
+    if (g) g.nodes.id.forEach((id, i) => m.set(id, g.nodes.name[i]));
+    for (const s of services ?? []) m.set(s.id, s.name);
+    return (id: string) => m.get(id) ?? id;
+  }, [g, services]);
+}
 export const mapHref = (id: string, back: string, mode: "focus" | "trace" = "focus") => `/#${mode}=${encodeURIComponent(id)}&back=${back}`;
 
 /** A node or path that opens the map. Inside a table row it is skipped by Tab, because the table is one tab stop. */
-export function NodeLink({ id, back, label, inRow, mode }: { id: string; back: string; label?: string; inRow?: boolean; mode?: "focus" | "trace" }) {
-  return <Link className="view-mono view-link view-cell" href={mapHref(id, back, mode)} tabIndex={inRow ? -1 : undefined}>{label ?? pathOf(id)}</Link>;
+export function NodeLink({ id, back, label, inRow, mode }: { id: string; back: string; label: string; inRow?: boolean; mode?: "focus" | "trace" }) {
+  return <Link className="view-mono view-link view-cell" href={mapHref(id, back, mode)} tabIndex={inRow ? -1 : undefined}>{label}</Link>;
 }
 
 export const Cell = ({ className = "", children }: { className?: string; children: ReactNode }) => <span role="gridcell" className={`view-cell ${className}`}>{children}</span>;
 
 const ASIDE = "view-aside";
-/** One tab stop for a table: arrows move and select, Enter moves focus to the aside, `t` opens the row on the map. */
-export function useRoving(ids: string[], sel: string | undefined, select: (id: string) => void, traceHref?: (id: string) => string | undefined) {
-  const ref = useRef<HTMLDivElement>(null);
-  const router = useRouter();
-  const onKeyDown = (e: KeyboardEvent) => {
-    const row = (e.target as HTMLElement).closest<HTMLElement>("[data-rid]");
-    if (!row || e.target !== row) return;
-    const id = row.dataset.rid!; const i = ids.indexOf(id);
-    const move = (n: number) => { const to = ids[Math.max(0, Math.min(ids.length - 1, n))]; if (!to) return; select(to); ref.current?.querySelector<HTMLElement>(`[data-rid="${CSS.escape(to)}"]`)?.focus(); };
-    if (e.key === "ArrowDown") { e.preventDefault(); move(i + 1); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); move(i - 1); }
-    else if (e.key === "Home") { e.preventDefault(); move(0); }
-    else if (e.key === "End") { e.preventDefault(); move(ids.length - 1); }
-    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(id); document.getElementById(ASIDE)?.focus(); }
-    else if (e.key === "t" && !e.metaKey && !e.ctrlKey) { const h = traceHref?.(id); if (h) { e.preventDefault(); router.push(h); } }
-  };
-  const row = (id: string) => ({ "data-rid": id, role: "row", tabIndex: id === sel ? 0 : -1, "aria-selected": id === sel, onClick: () => select(id) });
-  return { ref, onKeyDown, row };
-}
 
 export const KeyHint = ({ t }: { t: string }) => <p className="view-note">Arrow keys move between rows. Enter opens the details. <kbd>t</kbd> {t}</p>;
 

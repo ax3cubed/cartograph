@@ -54,6 +54,23 @@ export async function get<T>(route: string, params?: Params, opts: { signal?: Ab
   return { ...(body as Envelope<T>), state: res.headers.get("cartograph-state"), bytes: text.length * 2 };
 }
 
+/** A read whose answer is text, not the envelope (impact as Markdown). The text is the caller's to show as text. */
+export async function getText(route: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(route, { headers: { ...authHeaders(), Accept: "text/plain" }, credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" });
+  } catch {
+    setUp(false);
+    throw OFFLINE;
+  }
+  setUp(true);
+  const text = await res.text();
+  if (res.ok) return text;
+  if (res.status === 401) expire();
+  const e = (() => { try { return JSON.parse(text)?.error; } catch { return null; } })();
+  throw e ? new RequestError(e.code, e.what, e.why, e.try, res.status) : new RequestError("internal", `the server answered ${res.status}`, "the response wasn't the API's error shape", "retry, then check the server log", res.status);
+}
+
 /** A write: POST, PUT or DELETE with a JSON body. The X-Cartograph header and the JSON content type force a preflight
  *  on any cross-origin attempt, which the server refuses (CSRF). Returns the envelope's data. */
 export async function send<T>(method: "POST" | "PUT" | "DELETE", route: string, body?: unknown): Promise<T> {

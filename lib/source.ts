@@ -2,14 +2,12 @@
 // Decision A1: these become fetches to the local Rust API, so callers should treat them as async-shaped
 // (read once, keep in state) and never call them in render loops.
 import type {
-  ActivityItem, AskTurn, Commit, Concept, Correction, CoverageRow, Entrypoint,
-  Freshness, McpTool, Owner, Provider, Repo, SearchResult, Spec, WorkspaceSummary,
+  ActivityItem, AskTurn, Commit, Correction,
+  Freshness, McpTool, Owner, Provider, Repo, SearchResult, WorkspaceSummary,
 } from "./model.ts";
-import type { DiscoveredFolder, Discovery, ExtractorInfo, IndexRun, Service, Unresolved } from "./api/types.gen.ts";
-import { COMMITS, NODES, SERVICES, WORKSPACE } from "./workspace.ts";
+import type { DiscoveredFolder, Discovery, ExtractorInfo, IndexRun, Service } from "./api/types.gen.ts";
+import { COMMITS, LINKS, NODES, SERVICES, WORKSPACE } from "./workspace.ts";
 import { ACTIVITY, CORRECTIONS, FRESHNESS, NOW, OWNERS, REPOS, WORKSPACES } from "./demo/workspace.ts";
-import { SPECS } from "./demo/contracts.ts";
-import { CONCEPTS, COVERAGE, ENTRYPOINTS } from "./demo/views.ts";
 import { ASK_HISTORY, MCP_TOOLS, PROVIDERS } from "./demo/ai.ts";
 
 /** Demo switches. `noWorkspace` makes the app behave as on first run (D2): no indexes, so /welcome is shown. */
@@ -20,10 +18,6 @@ export const getWorkspaces = (): WorkspaceSummary[] => (demo.noWorkspace ? [] : 
 export const getCurrentWorkspace = (): WorkspaceSummary | undefined => getWorkspaces().find((w) => w.id === WORKSPACE);
 export const getRepos = (): Repo[] => REPOS;
 export const getFreshness = (): Freshness => FRESHNESS;
-export const getContracts = (): Spec[] => SPECS;
-export const getEntrypoints = (): Entrypoint[] => ENTRYPOINTS;
-export const getConcepts = (): Concept[] => CONCEPTS;
-export const getCoverage = (): CoverageRow[] => COVERAGE;
 export const getCorrections = (): Correction[] => CORRECTIONS;
 export const getOwners = (): Owner[] => OWNERS;
 export const getActivity = (): ActivityItem[] => ACTIVITY;
@@ -39,7 +33,8 @@ export const getAskHistory = (): AskTurn[] => ASK_HISTORY;
 
 const filesIn = (lang: string) => NODES.filter((n) => n.kind === "file" && SERVICES.find((s) => s.id === n.service)?.lang === lang).length;
 const servicesIn = (lang: string) => SERVICES.filter((s) => s.lang === lang).length;
-const cov = (id: string) => COVERAGE.find((r) => r.id === id)!;
+const files = NODES.filter((n) => n.kind === "file").length;
+const imports = LINKS.filter((l) => l.type === "imports" && !l.removed).length;
 
 export const getExtractors = (): ExtractorInfo[] => [
   ["go-imports", filesIn("GO")], ["manifest-go", servicesIn("GO")], ["manifest-js", servicesIn("TS")], ["manifest-php", 0],
@@ -48,19 +43,13 @@ export const getExtractors = (): ExtractorInfo[] => [
 
 export const getRuns = (): IndexRun[] => [{
   id: 1, started_at: new Date(Date.parse(FRESHNESS.builtAt) - 41_000).toISOString(), finished_at: FRESHNESS.builtAt, writer_version: "0.2.0",
-  files_total: cov("files").total, files_parsed: cov("files").done, imports_total: cov("imports").total, imports_resolved: cov("imports").done,
+  files_total: files, files_parsed: files, imports_total: imports, imports_resolved: imports,
 }];
 
 /** The shared libraries are a pnpm workspace; every other repo is one service. */
 export const getServices = (): Service[] => SERVICES.map((s) => ({
   id: s.id, name: s.name, repo: s.name, paths: [], domain: null, tags: [], library: s.id === "shared", detected_by: s.id === "shared" ? "pnpm" : "repo",
 }));
-
-/** The one unresolved import behind the demo's imports row. */
-export const getUnresolved = (): Unresolved[] => {
-  const path = "api-gateway/src/clients/billingClient.ts";
-  return [{ file: NODES.find((n) => n.path === path)?.id ?? "", path, line: 3, text: "@shared/money", reason: "not-found" }];
-};
 
 /** The demo's #state=stale and #state=failed boards (G02). The chip, popover, band and Activity read this one object. */
 export function getDemoFreshness(state: "stale" | "failed"): Freshness {
@@ -93,11 +82,6 @@ export function search(q: string, limit = 12): SearchResult[] {
   for (const n of NODES) {
     if (n.kind === "workspace") continue;
     if (n.name.toLowerCase().includes(t) || n.path.toLowerCase().includes(t)) hits.push({ id: n.id, kind: n.kind, name: n.name, path: n.path, service: n.service });
-  }
-  for (const c of CONCEPTS) if (c.name.toLowerCase().includes(t)) hits.push({ id: c.id, kind: "concept", name: c.name, path: c.summary, service: "" });
-  for (const s of SPECS) for (const o of s.operations) {
-    const label = `${o.method} ${o.path}`;
-    if (label.toLowerCase().includes(t)) hits.push({ id: o.id, kind: "operation", name: label, path: s.file, service: s.service });
   }
   return hits.slice(0, limit);
 }

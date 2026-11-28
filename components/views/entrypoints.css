@@ -1,5 +1,5 @@
 /* ep-: entrypoints board */
-.ep-cols { grid-template-columns: minmax(0, 1.4fr) 150px 100px 100px 120px; }
+.ep-cols { grid-template-columns: minmax(0, 1.4fr) 150px 110px 120px; }
 .ep-label { display: flex; align-items: center; gap: 8px; }
 .ep-label .view-method { width: 44px; flex: none; }
 .ep-svc { display: flex; align-items: center; gap: 8px; }
@@ -12,4 +12,4 @@
 .ep-ic { width: 30px; height: 30px; border-radius: 8px; background: var(--slab); display: grid; place-items: center; font-size: 0.75rem; font-weight: 700; color: var(--body); }
 .ep-none { margin-top: 6px; }
 .ep-trace { margin-top: auto; }
-@media (max-width: 900px) { .ep-cols { grid-template-columns: minmax(0, 1fr) 90px 70px; } .ep-cols > :nth-child(n+4) { display: none; } }
+@media (max-width: 900px) { .ep-cols { grid-template-columns: minmax(0, 1fr) 90px; } .ep-cols > :nth-child(n+3) { display: none; } }

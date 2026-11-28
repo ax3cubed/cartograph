@@ -1,110 +1,122 @@
 "use client";
 
-import { useMemo } from "react";
+// Board A2 on the index: what starts work in a service (…/entrypoints), who calls it and what it reaches. The list is
+// paged, filtered and sorted by the server, 50 rows at a time, and drawn virtualised, so a few thousand entrypoints
+// cost no more than a few. Route strings, labels and client names are repo text: rendered as text, never as markup.
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plug } from "lucide-react";
-import { getCommits, getContracts, getEntrypoints } from "@/lib/source";
-import { LINKS, byId, commitBySha, serviceColor, SERVICES } from "@/lib/workspace";
-import { chipText } from "@/lib/model";
-import type { Entrypoint } from "@/lib/model";
-import { AsideTop, Cell, Chip, KeyHint, NodeLink, Page, ViewSplit, fmtDate, mapHref, toneOf, useHashState, useRoving } from "./shared";
+import type { Entrypoint, EntrypointCounts, EntrypointDetail, EntrypointKind } from "@/lib/api";
+import { usePaged } from "@/lib/api/paged";
+import { wsRoute, useWsRead } from "@/lib/api/live";
+import { AsideTop, Cell, Chip, KeyHint, NodeLink, Page, ViewSplit, levelLabel, levelTone, mapHref, useHashState, useNames, useView } from "./shared";
+import VGrid from "./VGrid";
 import "./entrypoints.css";
 
-const KINDS: { kind: Entrypoint["kind"]; label: string; tag: string }[] = [
-  { kind: "http", label: "HTTP", tag: "HTTP" }, { kind: "event", label: "Event consumers", tag: "EVENT" },
-  { kind: "job", label: "Scheduled jobs", tag: "CRON" }, { kind: "cli", label: "CLI", tag: "CLI" },
+const KINDS: { kind: EntrypointKind; label: string; tag: string }[] = [
+  { kind: "http", label: "HTTP", tag: "HTTP" }, { kind: "event", label: "Event consumers", tag: "EVENT" }, { kind: "job", label: "Scheduled jobs", tag: "CRON" },
+  { kind: "cli", label: "CLI", tag: "CLI" }, { kind: "export", label: "Package entry points", tag: "EXPORT" }, { kind: "ui", label: "Pages", tag: "PAGE" },
 ];
-const tagOf = (e: Entrypoint) => (e.kind === "http" ? e.label.split(" ")[0] : KINDS.find((k) => k.kind === e.kind)!.tag);
+const kindOf = (k: EntrypointKind) => KINDS.find((x) => x.kind === k)!;
+const tagOf = (e: Entrypoint) => (e.kind === "http" ? e.label.split(" ")[0] : kindOf(e.kind).tag);
 const routeOf = (e: Entrypoint) => (e.kind === "http" ? e.label.split(" ").slice(1).join(" ") : e.label);
 const BACK = "/entrypoints";
-const svcName = (id: string) => SERVICES.find((s) => s.id === id)?.name ?? id;
+const SORTS = ["name", "consumers", "-consumers", "reach", "-reach"] as const;
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** Files reachable from a node over links still alive, not counting the node itself. */
-function reach(start: string): string[] {
-  const seen = new Set([start]); const stack = [start];
-  while (stack.length) { const id = stack.pop()!; for (const l of LINKS) if (l.from === id && !l.removed && !seen.has(l.to)) { seen.add(l.to); stack.push(l.to); } }
-  seen.delete(start);
-  return [...seen];
-}
-/** The newest commit that added or removed a link at this node. */
-function lastChanged(node: string): string | undefined {
-  const shas = LINKS.filter((l) => l.from === node || l.to === node).flatMap((l) => [l.added, l.removed]).filter(Boolean) as string[];
-  return shas.map((s) => commitBySha.get(s)!.date).sort().at(-1);
-}
+const HEAD = { id: "ep", title: "Entrypoints: where requests and jobs start", purpose: "Pick one to see its consumers and everything it reaches." };
 
 export default function Entrypoints() {
-  const all = useMemo(() => getEntrypoints(), []);
-  const ops = useMemo(() => new Map(getContracts().flatMap((s) => s.operations.map((o) => [o.id, o] as const))), []);
+  const { ws, indexing } = useView();
   const h = useHashState();
-  const kind = (KINDS.some((k) => k.kind === h.get("kind")) ? h.get("kind") : "all") as Entrypoint["kind"] | "all";
-  const rows = kind === "all" ? all : all.filter((e) => e.kind === kind);
-  const sel = rows.find((e) => e.id === h.get("row")) ?? rows[0];
-  const kinds = KINDS.filter((k) => all.some((e) => e.kind === k.kind));
-  const services = new Set(all.map((e) => e.service)).size;
-  const rv = useRoving(rows.map((e) => e.id), sel?.id, (row) => h.set({ row }), (id) => mapHref(id, BACK, "trace"));
+  const kind = KINDS.find((k) => k.kind === h.get("kind"))?.kind;
+  const sort = SORTS.find((s) => s === h.get("sort")) ?? "name";
+  const [text, setText] = useState(h.get("q") ?? "");
+  const [q, setQ] = useState(text);
+  useEffect(() => { const t = setTimeout(() => setQ(text.trim()), 250); return () => clearTimeout(t); }, [text]);
+
+  const counts = useWsRead<EntrypointCounts>(ws, "entrypoints/counts");
+  const list = usePaged<Entrypoint>(ws, wsRoute(ws, "entrypoints"), { kind, q, sort: sort === "name" ? undefined : sort });
+  const names = useNames(ws);
+  const sel = list.rows.find((e) => e.id === h.get("row")) ?? list.rows[0];
+  const total = counts.data?.total ?? 0;
+  const filtered = !!kind || !!q;
+  const flip = (field: "consumers" | "reach") => h.set({ sort: sort === field ? `-${field}` : field, row: undefined });
+  const sortOf = (field: string) => (sort === field ? "ascending" : sort === `-${field}` ? "descending" : "none");
+  const mark = (field: string) => (sort === field ? " ▲" : sort === `-${field}` ? " ▼" : "");
 
   return (
-    <Page icon={Plug} when={all.length === 0} empty={{ title: "No adapters found yet", body: "Entrypoints come from the adapters that read your routes, events and jobs. Add a repository with a supported framework, then index again.", action: { label: "Open repositories", href: "/settings/repositories" } }}>
+    <Page head={HEAD} icon={Plug} indexing={indexing} when={!!counts.data && total === 0}
+      empty={{ title: "No adapters found yet", body: "Entrypoints come from the adapters that read your routes, events and jobs. None of the indexed code matched one. Add a repository with a supported framework, then index again.", action: { label: "Open repositories", href: "/settings/repositories" } }}>
       <ViewSplit id="ep" title="Entrypoints: where requests and jobs start" asideLabel="Selected entrypoint"
-        purpose={`${all.length} entrypoints across ${services} services. Pick one to see its consumers and everything it reaches.`}
-        toolbar={
+        purpose={counts.data ? `${plural(total, "entrypoint")} across ${plural(counts.data.services, "service")}. Pick one to see its consumers and everything it reaches.` : "Pick one to see its consumers and everything it reaches."}
+        toolbar={<>
           <div role="group" aria-label="Entrypoint kind" className="view-chips">
-            <button type="button" className="view-filter" aria-pressed={kind === "all"} onClick={() => h.set({ kind: undefined, row: undefined })}>All {all.length}</button>
-            {kinds.map((k) => <button key={k.kind} type="button" className="view-filter" aria-pressed={kind === k.kind} onClick={() => h.set({ kind: k.kind, row: undefined })}>{k.label} {all.filter((e) => e.kind === k.kind).length}</button>)}
+            <button type="button" className="view-filter" aria-pressed={!kind} onClick={() => h.set({ kind: undefined, row: undefined })}>All {total}</button>
+            {(counts.data?.kinds ?? []).map((k) => <button key={k.kind} type="button" className="view-filter" aria-pressed={kind === k.kind} onClick={() => h.set({ kind: k.kind, row: undefined })}>{kindOf(k.kind).label} {k.count}</button>)}
           </div>
-        }
-        aside={sel ? <Detail e={sel} op={ops.get(sel.id.replace(/\.consumer$/, ""))} /> : <p className="view-note">No entrypoints of this kind.</p>}>
-        <div className="view-scroll">
-          <div className="view-card" role="grid" aria-label="Entrypoints" ref={rv.ref} onKeyDown={rv.onKeyDown}>
-            <div role="row" className="view-cols ep-cols view-head-row view-k"><span role="columnheader">Entrypoint</span><span role="columnheader">Service</span><span role="columnheader">Consumers</span><span role="columnheader">Files reached</span><span role="columnheader">Last changed</span></div>
-            {rows.map((e) => {
-              const when = lastChanged(e.node);
-              return (
-                <div key={e.id} className="view-cols ep-cols view-row" {...rv.row(e.id)}>
-                  <Cell className="ep-label"><span className="view-mono view-method">{tagOf(e)}</span><NodeLink id={e.node} back={BACK} label={routeOf(e)} inRow /></Cell>
-                  <Cell className="ep-svc"><i style={{ background: serviceColor(e.service) }} aria-hidden />{svcName(e.service)}</Cell>
-                  <Cell className={e.consumers ? "" : "view-warn"}>{e.consumers || "0 · none"}</Cell>
-                  <Cell>{reach(e.node).length}</Cell>
-                  <Cell className="view-muted">{when ? fmtDate(when) : "No changes"}</Cell>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+          <label className="view-select">Filter
+            <input type="search" className="view-search" value={text} placeholder="Route or name" onChange={(e) => { setText(e.target.value); h.set({ q: e.target.value.trim() || undefined, row: undefined }); }} />
+          </label>
+        </>}
+        aside={sel ? <Detail ws={ws} e={sel} names={names} /> : <p className="view-note">{list.loading ? "Loading…" : "No entrypoints match."}</p>}>
+        <VGrid rows={list.rows} rowId={(e) => e.id} label="Entrypoints" cols="ep-cols" sel={sel?.id} select={(row) => h.set({ row })}
+          hasMore={list.hasMore} more={list.more} loading={list.loading} traceHref={(id) => { const e = list.rows.find((x) => x.id === id); return e && mapHref(e.node, BACK, "trace"); }}
+          empty={<p className="view-sub">{filtered ? "No entrypoint matches this filter. Clear it to see all of them." : "No entrypoints."}</p>}
+          head={<>
+            <span role="columnheader">Entrypoint</span><span role="columnheader">Service</span>
+            <span role="columnheader" aria-sort={sortOf("consumers")}><button type="button" className="view-sort" onClick={() => flip("consumers")}>Consumers{mark("consumers")}</button></span>
+            <span role="columnheader" aria-sort={sortOf("reach")}><button type="button" className="view-sort" onClick={() => flip("reach")}>Files reached{mark("reach")}</button></span>
+          </>}
+          render={(e) => (
+            <>
+              <Cell className="ep-label"><span className="view-mono view-method">{tagOf(e)}</span><NodeLink id={e.node} back={BACK} label={routeOf(e)} inRow /></Cell>
+              <Cell className="ep-svc">{e.service ? names(e.service) : ""}</Cell>
+              <Cell className={e.consumers ? "" : "view-warn"}>{e.consumers || "0 · none"}</Cell>
+              <Cell>{e.reach}</Cell>
+            </>
+          )} />
         <KeyHint t="traces the entrypoint on the map." />
       </ViewSplit>
     </Page>
   );
 }
 
-function Detail({ e, op }: { e: Entrypoint; op?: ReturnType<typeof getContracts>[number]["operations"][number] }) {
-  const callers = (op?.callers ?? []).filter((c) => e.kind !== "event" || c.node === e.node);
-  const reached = reach(e.node);
-  const bySvc = new Map<string, number>();
-  for (const id of reached) { const s = byId.get(id)!.service; bySvc.set(s, (bySvc.get(s) ?? 0) + 1); }
+function Detail({ ws, e, names }: { ws: string | undefined; e: Entrypoint; names: (id: string) => string }) {
+  const d = useWsRead<EntrypointDetail>(ws, `entrypoints/${encodeURIComponent(e.id)}`).data;
+  const detail = d && d.entrypoint.id === e.id ? d : undefined;
+  const consumers = detail?.consumers ?? [];
+  const reach = detail?.reach;
   return (
     <>
-      <AsideTop map={e.node} back={BACK}><Link className="btn view-btn" href={mapHref(e.id, BACK, "trace")}>Trace on the map</Link></AsideTop>
+      <AsideTop map={e.node} back={BACK}><Link className="btn view-btn" href={mapHref(e.node, BACK, "trace")}>Trace on the map</Link></AsideTop>
       <div className="ep-title">
-        <Chip tone="acc">{KINDS.find((k) => k.kind === e.kind)!.label}{op ? " · in contract" : ""}</Chip>
+        <Chip tone="acc">{kindOf(e.kind).label}</Chip>
         <h2 className="view-mono">{e.label}</h2>
-        <span className="view-sub">{svcName(e.service)} · {e.kind === "event" ? "consumer" : "handler"} <NodeLink id={e.node} back={BACK} /></span>
+        <span className="view-sub">{e.service ? `${names(e.service)} · ` : ""}{e.kind === "event" ? "consumer" : "starts in"} <NodeLink id={e.node} back={BACK} label={names(e.node)} /></span>
       </div>
       <div>
-        <span className="view-k">Consumers · {callers.length} known</span>
-        {callers.length === 0 && <p className="view-note ep-none">No consumers found. Callers outside the workspace aren&apos;t visible. Declare them as clients in the override file to count them.</p>}
-        {callers.map((c) => (
-          <div key={c.node} className="ep-con">
-            <span className="ep-ic" aria-hidden>{svcName(byId.get(c.node)!.service).slice(0, 2).toUpperCase()}</span>
-            <span className="ep-con-t"><b>{byId.get(c.node)!.name}</b><NodeLink id={c.node} back={BACK} /><span className="view-muted">{c.confidence.evidence[0]?.note}</span></span>
-            <Chip tone={toneOf(c.confidence.score)}>{chipText(c.confidence)}</Chip>
+        <span className="view-k">Consumers · {detail ? `${consumers.length} known` : e.consumers}</span>
+        {detail && consumers.length === 0 && <p className="view-note ep-none">No consumers found. Callers outside the workspace aren&apos;t visible. Declare them as clients in cartograph.yaml to count them.</p>}
+        {consumers.map((c, i) => (
+          <div key={c.link ?? c.name ?? i} className="ep-con">
+            <span className="ep-ic" aria-hidden>{(c.node ? names(c.node) : c.name ?? "").slice(0, 2).toUpperCase()}</span>
+            <span className="ep-con-t">
+              {c.node ? <NodeLink id={c.node} back={BACK} label={names(c.node)} /> : <b>{c.name}</b>}
+              {!c.node && <span className="view-muted">Declared client</span>}
+            </span>
+            <span className="view-chips">{c.overridden && <Chip tone="acc">Overridden</Chip>}{c.node && <Chip tone={levelTone(c.level)}>{levelLabel(c.level)}</Chip>}</span>
           </div>
         ))}
       </div>
       <div className="view-slab">
         <span className="view-k">Reaches</span>
-        <b>{reached.length} {reached.length === 1 ? "file" : "files"} across {bySvc.size} {bySvc.size === 1 ? "service" : "services"}</b>
-        <span className="view-sub">{[...bySvc].map(([s, n]) => `${svcName(s)} ${n}`).join(" · ") || "Nothing downstream."}</span>
+        {reach ? (
+          <>
+            <b>{plural(reach.nodes, "file")} across {plural(reach.services.length, "service")}{reach.truncated ? " (the walk hit a cap)" : ""}</b>
+            <span className="view-sub">{reach.services.map((s) => `${names(s.service)} ${s.nodes}`).join(" · ") || "Nothing downstream."}</span>
+          </>
+        ) : <span className="view-sub">{e.reach} files</span>}
       </div>
     </>
   );

@@ -1,123 +1,114 @@
 "use client";
 
+// Board A4 on the index: the six coverage rows (…/coverage, read from the summary the indexer wrote, never counted
+// per request) and the references behind each gap (…/coverage/{row}/unresolved, 50 at a time, virtualised: a row can
+// have tens of thousands). The raw reference and the reason are repo text: rendered as text.
 import Link from "next/link";
 import { Gauge } from "lucide-react";
-import { getContracts, getCoverage, getEntrypoints, getFreshness, getRepos, getUnresolved } from "@/lib/source";
-import { useLive, useWorkspaces, wsRoute } from "@/lib/api/live";
-import { useResource } from "@/lib/api/cache";
-import type { CoverageRow as ApiCoverageRow, Unresolved } from "@/lib/api";
-import type { CoverageRow } from "@/lib/model";
-import { NODES } from "@/lib/workspace";
-import { UNRESOLVED_CALLS } from "@/lib/demo/views-extra";
-import { AsideTop, Cell, Chip, KeyHint, NodeLink, Page, ViewSplit, mapHref, pathOf, useHashState, useRoving } from "./shared";
+import type { CoverageRow, Unresolved } from "@/lib/api";
+import { usePaged } from "@/lib/api/paged";
+import { useWsRead, wsRoute } from "@/lib/api/live";
+import { AsideTop, Cell, Chip, NodeLink, Page, ViewSplit, useHashState, useView } from "./shared";
 import { specRisk } from "./risk";
+import { useContracts } from "./useContracts";
+import VGrid from "./VGrid";
 import "./coverage.css";
 import { fmtNum } from "@/lib/date";
 
 const BACK = "/coverage";
 /** Each fix button is named for the place it opens. */
 const FIX: Record<string, { label: string; href: string }> = {
+  files: { label: "Open indexing settings", href: "/settings/indexing" },
   imports: { label: "Open indexing settings", href: "/settings/indexing" },
-  calls: { label: "Open environments", href: "/settings/contracts" },
-  handlers: { label: "Open contracts", href: "/contracts#gateway" },
+  calls: { label: "Open call matching", href: "/settings/contracts" },
+  handlers: { label: "Open contracts", href: "/contracts" },
+  routes: { label: "Open contracts", href: "/contracts" },
   consumers: { label: "Open entrypoints", href: "/entrypoints" },
 };
 const pctOf = (d: number, t: number) => (t ? (d / t) * 100 : 100);
 const fmt = (p: number) => `${+p.toFixed(1)}%`;
 const sentence = (s: string) => { const t = s.replace(/^\d+\s+/, ""); return t[0].toUpperCase() + t.slice(1); };
+/** The rows the gap list holds: the unresolved references, which `gaps` counts by reason. */
+const openOf = (r: CoverageRow) => r.gaps.reduce((n, g) => n + g.rows, 0);
+const missed = (r: CoverageRow) => r.total > 0 && r.target != null && pctOf(r.done, r.total) < r.target;
 
-interface Ref { at: string; raw: string; node?: string }
-/** The rows the index answers (IDX-22). The cross-service rows (calls, handlers, routes, consumers) stay demo data
- * until XS-14. */
-const INDEX_ROWS = new Set(["files", "imports"]);
-const toRow = (r: ApiCoverageRow): CoverageRow => ({ id: r.id, label: r.label, done: r.done, total: r.total, target: r.target ?? undefined, gap: r.gap ? { what: r.gap.what, why: r.gap.why, action: r.gap.try } : undefined });
-const unresolvedRef = (u: Unresolved): Ref => ({ at: `${u.path}:${u.line}`, raw: u.text, node: u.file || undefined });
-/** The references behind a gap. Each list is as long as the gap's count, or the first page of it. */
-function refs(id: string, unresolved: Unresolved[]): Ref[] {
-  if (id === "handlers") return getContracts().flatMap((s) => s.operations.filter((o) => !o.handler).map((o) => ({ at: s.file, raw: `${o.method} ${o.path}` })));
-  if (id === "consumers") return getEntrypoints().filter((e) => e.consumers === 0).map((e) => ({ at: pathOf(e.node), raw: e.label, node: e.node }));
-  if (id === "calls") return UNRESOLVED_CALLS.map((u) => ({ ...u, node: NODES.find((n) => n.path === u.at.split(":")[0])?.id }));
-  return id === "imports" ? unresolved.map(unresolvedRef) : [];
-}
+const HEAD = { id: "cov", title: "Coverage: what the map can and can't see", purpose: "Unresolved references are kept, so each number traces back to a file and line." };
 
 export default function Coverage() {
-  const live = useLive();
-  const { current } = useWorkspaces();
-  const ws = live ? current?.id : undefined;
-  const fromIndex = useResource<ApiCoverageRow[]>(ws ?? "", wsRoute(ws, "coverage"));
-  const liveUnresolved = useResource<Unresolved[]>(ws ?? "", wsRoute(ws, "coverage/imports/unresolved"), { limit: 200 });
-  const unresolved = (live ? liveUnresolved.data : getUnresolved()) ?? [];
-  const rows = live
-    ? [...(fromIndex.data ?? []).map(toRow), ...getCoverage().filter((r) => !INDEX_ROWS.has(r.id))]
-    : getCoverage();
-  const gaps = rows.filter((r) => r.gap && r.total > r.done).sort((a, b) => b.total - b.done - (a.total - a.done));
+  const { ws, indexing } = useView();
+  const res = useWsRead<CoverageRow[]>(ws, "coverage");
+  const rows = res.data ?? [];
+  const gaps = rows.filter((r) => openOf(r) > 0).sort((a, b) => openOf(b) - openOf(a));
   const h = useHashState();
   const sel = gaps.find((g) => g.id === h.get("row")) ?? gaps[0];
-  const below = rows.filter((r) => r.target !== undefined && pctOf(r.done, r.total) < r.target).length;
-  const first = getFreshness().state === "none" || getRepos().length === 0;
-  const risky = getContracts().map((s) => ({ s, r: specRisk(s) })).filter((x) => x.r.mismatch || x.r.breaking);
-  const riskN = risky.reduce((n, x) => n + x.r.mismatch + x.r.breaking, 0);
-  const list = sel ? refs(sel.id, unresolved) : [];
-  const n = sel ? sel.total - sel.done : 0;
-  const first1 = list.find((r) => r.node)?.node;
-  const rv = useRoving(gaps.map((g) => g.id), sel?.id, (row) => h.set({ row }), (id) => { const f = refs(id, unresolved).find((r) => r.node)?.node; return f ? mapHref(f, BACK) : undefined; });
+  const below = rows.filter(missed).length;
+  const { specs, versions } = useContracts(ws);
+  const risky = specs.map((s) => ({ s, r: specRisk(s, versions?.[s.id]) })).filter((x) => x.r.breaking || x.r.undocumented || x.r.specOnly);
+  const riskN = risky.reduce((n, x) => n + x.r.breaking + x.r.undocumented + x.r.specOnly, 0);
+  const list = usePaged<Unresolved>(ws, sel ? wsRoute(ws, `coverage/${encodeURIComponent(sel.id)}/unresolved`) : null);
+  const first = list.rows.find((u) => u.file)?.file;
+  const fix = sel ? FIX[sel.id] : undefined;
 
   return (
-    <Page icon={Gauge} when={first} empty={{ title: "Building your first index", body: "Coverage shows what the map can and can't see once the first index finishes.", action: { label: "See indexing settings", href: "/settings/indexing" } }}>
+    <Page head={HEAD} icon={Gauge} indexing={indexing || (!!res.data && rows.length === 0)}>
       <ViewSplit id="cov" title="Coverage: what the map can and can't see" purpose="Unresolved references are kept, so each number traces back to a file and line." asideLabel="Unresolved references"
         actions={<span aria-live="polite"><Chip tone={below || riskN ? "warn" : "ok"}>{below ? `${below} below target` : "All targets met"}</Chip></span>}
         toolbar={
           <ul className="cov-mets">
             {rows.map((r) => {
               const p = pctOf(r.done, r.total);
-              const miss = r.target !== undefined && p < r.target;
+              const miss = missed(r);
+              const none = r.total === 0;
               return (
                 <li key={r.id} className="cov-met">
                   <span className="cov-label">{r.label}</span>
-                  <b>{fmt(p)}</b>
-                  <div className="cov-bar" role="progressbar" aria-label={r.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(p)}><i style={{ width: `${p}%` }} data-miss={miss || undefined} /></div>
-                  <span className="view-muted cov-small">{fmtNum(r.done)} of {fmtNum(r.total)}{r.target !== undefined ? ` · target ${r.target}%` : ""}</span>
-                  <span className={`cov-small cov-status ${r.target === undefined ? "view-muted" : miss ? "view-warn" : "cov-ok"}`}>{r.target === undefined ? "No target set" : miss ? "Below target" : "Meets target"}</span>
+                  <b>{none ? "—" : fmt(p)}</b>
+                  <div className="cov-bar" role="progressbar" aria-label={r.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={none ? undefined : Math.round(p)}><i style={{ width: `${none ? 0 : p}%` }} data-miss={miss || undefined} /></div>
+                  <span className="view-muted cov-small">{fmtNum(r.done)} of {fmtNum(r.total)}{r.target != null ? ` · target ${r.target}%` : ""}</span>
+                  <span className={`cov-small cov-status ${none || r.target == null ? "view-muted" : miss ? "view-warn" : "cov-ok"}`}>{none ? "Nothing to count yet" : r.target == null ? "No target set" : miss ? "Below target" : "Meets target"}</span>
                 </li>
               );
             })}
             <li className="cov-met">
               <span className="cov-label">Contract risks</span>
               <b>{riskN}</b>
-              <span className="cov-small">{riskN ? "Schema mismatches and breaking changes" : "No mismatches or breaking changes"}</span>
+              <span className="cov-small">{riskN ? "Breaking changes, undocumented routes and spec-only operations" : "No drift between specs and code"}</span>
               {risky.map(({ s, r }) => (
-                <Link key={s.id} className="cov-small view-link" href={`/contracts#${s.id}`}>{s.file}: {[r.mismatch && `${r.mismatch} mismatch`, r.breaking && "1 breaking change"].filter(Boolean).join(", ")}</Link>
+                <Link key={s.id} className="cov-small view-link" href={`/contracts#${s.id}`}>{s.file}: {[r.breaking && `${r.breaking} breaking`, r.undocumented && `${r.undocumented} undocumented`, r.specOnly && `${r.specOnly} spec-only`].filter(Boolean).join(", ")}</Link>
               ))}
             </li>
           </ul>
         }
         aside={sel ? (
           <>
-            <AsideTop map={first1} back={BACK}><Link className="btn view-btn" href={FIX[sel.id]?.href ?? "/settings/indexing"}>{FIX[sel.id]?.label ?? "Open indexing settings"}</Link></AsideTop>
-            <div className="cov-un-head"><h2>{n} · {sentence(sel.gap!.what)}</h2><Chip tone="bad">unresolved</Chip></div>
-            <span className="view-sub">{sel.gap!.why}. Each one clears when you fix the cause and index again.</span>
-            <ul className="cov-refs">
-              <li className="cov-ref view-k"><span>Reference</span><span>Raw reference</span></li>
-              {list.map((u) => <li key={u.at + u.raw} className="cov-ref">{u.node ? <NodeLink id={u.node} back={BACK} label={u.at} /> : <span className="view-mono view-cell">{u.at}</span>}<span className="view-mono view-cell">{u.raw}</span></li>)}
-            </ul>
-            {list.length < n && <p className="view-note">Showing {list.length} of {n}. The rest are in the index.</p>}
+            <AsideTop map={first} back={BACK}><Link className="btn view-btn" href={fix?.href ?? "/settings/indexing"}>{fix?.label ?? "Open indexing settings"}</Link></AsideTop>
+            <div className="cov-un-head"><h2>{fmtNum(openOf(sel))} · {sel.gap ? sentence(sel.gap.what) : sel.label}</h2><Chip tone="bad">unresolved</Chip></div>
+            <span className="view-sub">{sel.gaps.map((g) => `${fmtNum(g.rows)} ${g.reason}`).slice(0, 3).join(" · ")}. Each one clears when you fix the cause and index again.</span>
+            <VGrid rows={list.rows} rowId={(u) => `${u.path}:${u.line}:${u.text}`} label="Unresolved references" cols="cov-ref" rowHeight={52} maxHeight={420}
+              sel={undefined} select={() => {}} hasMore={list.hasMore} more={list.more} loading={list.loading}
+              empty={<p className="view-note">Nothing is unresolved here.</p>}
+              head={<><span role="columnheader">Reference</span><span role="columnheader">Raw reference</span></>}
+              render={(u) => (
+                <>
+                  <Cell>{u.file ? <NodeLink id={u.file} back={BACK} label={`${u.path}:${u.line}`} inRow /> : <span className="view-mono view-cell">{u.path}:{u.line}</span>}</Cell>
+                  <Cell className="view-mono">{u.text}</Cell>
+                </>
+              )} />
           </>
         ) : <p className="view-note">Nothing is unresolved. Every reference in the index points at something.</p>}>
         {gaps.length === 0 ? <p className="view-sub">Nothing is unresolved. Every reference in the index points at something.</p> : (
           <>
             <h2 className="view-k">Biggest gaps, by call sites or files affected</h2>
-            <div className="view-scroll">
-              <div className="view-card" role="grid" aria-label="Gaps" ref={rv.ref} onKeyDown={rv.onKeyDown}>
-                {gaps.map((g) => (
-                  <div key={g.id} className="cov-gap view-row" {...rv.row(g.id)}>
-                    <Cell className="view-mono cov-n">{g.total - g.done}</Cell>
-                    <Cell className="cov-what"><b>{sentence(g.gap!.what)}</b><span className="view-muted view-cell">{g.gap!.why}</span></Cell>
-                    <span role="gridcell"><Link className="btn view-btn" tabIndex={-1} href={FIX[g.id]?.href ?? "/settings/indexing"}>{FIX[g.id]?.label ?? "Open indexing settings"}</Link></span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <KeyHint t="shows the first affected file on the map." />
+            <VGrid rows={gaps} rowId={(g) => g.id} label="Gaps" cols="cov-gap" rowHeight={64} sel={sel?.id} select={(row) => h.set({ row })} hasMore={false} more={() => {}} loading={res.loading}
+              head={<><span role="columnheader">Count</span><span role="columnheader">Gap</span><span role="columnheader">Fix</span></>}
+              render={(g) => (
+                <>
+                  <Cell className="view-mono cov-n">{fmtNum(openOf(g))}</Cell>
+                  <Cell className="cov-what"><b>{sentence(g.gap?.what ?? g.label)}</b><span className="view-muted view-cell">{g.gap?.why ?? g.gaps[0]?.reason}</span></Cell>
+                  <span role="gridcell"><Link className="btn view-btn" tabIndex={-1} href={FIX[g.id]?.href ?? "/settings/indexing"}>{FIX[g.id]?.label ?? "Open indexing settings"}</Link></span>
+                </>
+              )} />
+            <p className="view-note">Arrow keys move between rows. Enter opens the details.</p>
           </>
         )}
       </ViewSplit>
