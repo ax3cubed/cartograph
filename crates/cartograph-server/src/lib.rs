@@ -13,6 +13,7 @@
 
 pub mod activity;
 pub mod agents;
+mod corrections;
 mod guard;
 mod live;
 pub mod mcp;

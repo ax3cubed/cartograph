@@ -223,6 +223,14 @@ pub fn router(app: Arc<App>) -> Router {
             "/api/v1/w/{ws}/config/preview",
             post(writes::preview_config),
         )
+        .route(
+            "/api/v1/w/{ws}/corrections",
+            get(crate::corrections::get).post(crate::corrections::post),
+        )
+        .route(
+            "/api/v1/w/{ws}/corrections/{id}",
+            axum::routing::delete(crate::corrections::delete),
+        )
         .fallback(fallback)
         .method_not_allowed_fallback(method_not_allowed)
         .layer(axum::middleware::from_fn_with_state(app.clone(), guard))
