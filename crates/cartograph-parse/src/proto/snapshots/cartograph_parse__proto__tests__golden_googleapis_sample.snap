@@ -1,0 +1,29 @@
+---
+source: crates/cartograph-parse/src/proto/tests.rs
+expression: out
+---
+google.pubsub.v1 proto3 files=["google/api/annotations.proto", "google/api/field_behavior.proto", "google/protobuf/timestamp.proto", "google/pubsub/v1/schema.proto"]
+RPC /google.pubsub.v1.Publisher/CreateTopic id=Some("Publisher.CreateTopic") Some("unary") line 17
+RPC /google.pubsub.v1.Publisher/Publish id=Some("Publisher.Publish") Some("unary") line 24
+RPC /google.pubsub.v1.Subscriber/StreamingPull id=Some("Subscriber.StreamingPull") Some("bidirectional stream") line 30
+RPC /google.pubsub.v1.Subscriber/Upload id=Some("Subscriber.Upload") Some("client stream") line 31
+RPC /google.pubsub.v1.Subscriber/Watch id=Some("Subscriber.Watch") Some("server stream") line 32
+message Topic
+  name string
+  labels map<string,string>
+  created ref:google.protobuf.Timestamp
+  days int64
+  policy ref:google.pubsub.v1.Policy
+message Topic.Policy
+  allowed array<string>
+message PublishRequest
+  topic string
+  messages array<ref:PubsubMessage>
+message PublishResponse
+  message_ids array<string>
+message PubsubMessage
+  data bytes
+message StreamingPullRequest
+  subscription string
+message StreamingPullResponse
+  count int32

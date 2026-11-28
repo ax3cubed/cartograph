@@ -15,6 +15,7 @@ pub mod manifest;
 mod manifest_lang;
 pub mod openapi;
 pub mod openapi_diff;
+pub mod proto;
 pub mod syntax;
 mod ts;
 
@@ -23,6 +24,7 @@ pub use lang::{GoImports, PhpImports, PyImports};
 pub use manifest::ManifestJs;
 pub use manifest_lang::{ManifestGo, ManifestPhp, ManifestPy};
 pub use openapi::ManifestOpenapi;
+pub use proto::ManifestProto;
 pub use ts::TsImports;
 
 /// Blobs over this size are skipped without being read.
@@ -177,7 +179,7 @@ pub trait Extractor: Sync {
 }
 
 /// The built-in extractors.
-pub static EXTRACTORS: [&dyn Extractor; 10] = [
+pub static EXTRACTORS: [&dyn Extractor; 11] = [
     &TsImports,
     &ManifestJs,
     &GoImports,
@@ -187,6 +189,7 @@ pub static EXTRACTORS: [&dyn Extractor; 10] = [
     &ManifestPy,
     &ManifestPhp,
     &ManifestDeploy,
+    &ManifestProto,
     // Last: it handles every YAML and JSON path the ones before it did not.
     &ManifestOpenapi,
 ];
