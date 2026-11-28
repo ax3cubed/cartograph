@@ -753,7 +753,13 @@ export interface Operation {
    * With the spec's base path, as the spec writes it: `/v1/orders/{id}`.
    */
   path: string;
+  /**
+   * For an event operation (an AsyncAPI channel, XS-16): the files that publish to the channel
+   * and the files that subscribe to it, with how sure the best event link of each is.
+   */
+  publishers?: Caller[];
   status: OperationStatus;
+  subscribers?: Caller[];
   /**
    * From the spec: untrusted text (F8), at most 200 characters.
    */

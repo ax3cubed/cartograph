@@ -829,6 +829,12 @@ pub struct Operation {
     pub status: OperationStatus,
     pub handler: Option<NodeId>,
     pub callers: Vec<Caller>,
+    /// For an event operation (an AsyncAPI channel, XS-16): the files that publish to the channel
+    /// and the files that subscribe to it, with how sure the best event link of each is.
+    #[serde(default)]
+    pub publishers: Vec<Caller>,
+    #[serde(default)]
+    pub subscribers: Vec<Caller>,
 }
 
 /// A route of a service that has a spec, which no spec lists.
