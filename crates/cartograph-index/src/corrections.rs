@@ -642,8 +642,8 @@ pub fn apply(
         };
         conn.prepare_cached(
             "INSERT INTO correction (id, line, action, kind, key, src, dst, new_dst, confidence,
-               reason, anchor_seq, status, links, by, at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+               reason, anchor_seq, status, links, by, at, fingerprint)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         )?
         .execute(params![
             id,
@@ -661,6 +661,7 @@ pub fn apply(
             n_links,
             b.by,
             b.at,
+            e.fingerprint(),
         ])?;
         if status == "ambiguous" || kind.is_none() {
             continue;

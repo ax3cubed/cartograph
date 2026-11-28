@@ -737,11 +737,14 @@ impl Snapshot<'_> {
             .flatten()
             .map(|x| LinkId(link_id(x.link)));
         // A correction (XS-12) decides over every other layer, and keeps what it replaced.
-        let corrected: Option<(i64, Option<(f64, i64)>)> = self
+        // ((correction row, its fingerprint), (base score, base dst) unless the link was added).
+        type Corrected = ((i64, String), Option<(f64, i64)>);
+        let corrected: Option<Corrected> = self
             .conn()
             .prepare_cached(
-                "SELECT b.correction, b.added, b.score, b.dst FROM link l
-                 JOIN correction_base b ON b.link = l.id WHERE l.id = ?1 AND l.layer = 'correction'",
+                "SELECT b.correction, b.added, b.score, b.dst, c.fingerprint FROM link l
+                 JOIN correction_base b ON b.link = l.id JOIN correction c ON c.id = b.correction
+                 WHERE l.id = ?1 AND l.layer = 'correction'",
             )?
             .query_row([row], |r| {
                 let added: bool = r.get(1)?;
@@ -750,7 +753,7 @@ impl Snapshot<'_> {
                 } else {
                     Some((r.get::<_, Option<f64>>(2)?.unwrap_or(0.0), r.get(3)?))
                 };
-                Ok((r.get(0)?, base))
+                Ok(((r.get(0)?, r.get(4)?), base))
             })
             .optional()?;
         let base = corrected
@@ -782,7 +785,7 @@ impl Snapshot<'_> {
             operation,
             evidence,
             replaced,
-            correction_id: corrected.map(|(id, _)| format!("c{id}")),
+            correction_id: corrected.map(|((id, fp), _)| format!("c{id}-{fp}")),
             env: resolved.env,
             envs: resolved.envs,
             config: resolved.config,

@@ -97,7 +97,9 @@ CREATE TABLE correction (
   status TEXT NOT NULL,
   links INTEGER NOT NULL,
   by TEXT,
-  at INTEGER
+  at INTEGER,
+  -- The entry's content hash (Entry::fingerprint): with id, the entry's id in the API.
+  fingerprint TEXT NOT NULL
 ) STRICT;
 CREATE TABLE correction_base (
   id INTEGER PRIMARY KEY,

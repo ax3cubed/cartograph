@@ -49,7 +49,11 @@ fn writes(ws: &str) -> Vec<(&'static str, String, Option<&'static str>)> {
                 r#"{"action":"remove","key":{"kind":"http","from":"a","to":"b","op":"GET /"},"reason":"r","dry_run":true}"#,
             ),
         ),
-        ("DELETE", format!("/api/v1/w/{ws}/corrections/c0"), None),
+        (
+            "DELETE",
+            format!("/api/v1/w/{ws}/corrections/c0-00000000"),
+            None,
+        ),
     ]
 }
 
@@ -609,10 +613,9 @@ fn a_correction_made_through_the_api_reaches_the_file_and_the_map_and_undoes() {
     wait_for("the link to be hidden", || http_link(&r).is_none());
     let listed = get(&r, &path).json();
     let one = &listed["data"][0];
-    assert_eq!(
-        (one["id"].as_str(), one["action"].as_str()),
-        (Some("c0"), Some("remove"))
-    );
+    let id = one["id"].as_str().unwrap().to_owned();
+    assert!(id.starts_with("c0-"), "{id}");
+    assert_eq!(one["action"], "remove");
     assert_eq!(one["reason"], "a log line, not a call");
     assert_eq!(one["stale"], false);
 
@@ -631,7 +634,7 @@ fn a_correction_made_through_the_api_reaches_the_file_and_the_map_and_undoes() {
     assert_eq!(get(&r, &path).json()["data"][0]["stale"], false);
 
     // Undo: the file is as the first write made it, and the link is back.
-    let undo = write(&r, "DELETE", &format!("{path}/c0"), None);
+    let undo = write(&r, "DELETE", &format!("{path}/{id}"), None);
     assert_eq!(undo.status, 200, "{}", undo.body);
     assert!(
         undo.json()["data"]["diff"]
@@ -648,7 +651,10 @@ fn a_correction_made_through_the_api_reaches_the_file_and_the_map_and_undoes() {
         http_link(&r) == Some((false, base_level.clone()))
     });
     assert_eq!(get(&r, &path).json()["data"], serde_json::json!([]));
-    assert_eq!(write(&r, "DELETE", &format!("{path}/c0"), None).status, 404);
+    assert_eq!(
+        write(&r, "DELETE", &format!("{path}/{id}"), None).status,
+        404
+    );
 }
 
 #[test]

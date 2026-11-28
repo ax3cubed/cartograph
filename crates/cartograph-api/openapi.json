@@ -2313,7 +2313,7 @@
             "type": "array"
           },
           "correction_id": {
-            "description": "The entry of `cartograph.overrides.yaml` that decided this link, `c<position>`.",
+            "description": "The entry of `cartograph.overrides.yaml` that decided this link, `c<position>-<fingerprint>`.",
             "type": [
               "string",
               "null"

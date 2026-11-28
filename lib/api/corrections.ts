@@ -20,5 +20,5 @@ export const previewCorrection = (ws: string, req: Omit<CorrectionRequest, "dry_
 /** Appends the entry to the file; the index applies it on the sync this starts. */
 export const saveCorrection = (ws: string, req: Omit<CorrectionRequest, "dry_run">) => send<FileDiff>("POST", route(ws), { ...req, dry_run: false }).then(wrote);
 
-/** Removes entry `id` (`c<position>`) from the file; the next sync restores its link. */
+/** Removes entry `id` (`c<position>-<fingerprint>`) from the file, or nothing if the file no longer holds it; the next sync restores its link. */
 export const undoCorrection = (ws: string, id: string) => send<FileDiff>("DELETE", route(ws, `/${encodeURIComponent(id)}`)).then(wrote);

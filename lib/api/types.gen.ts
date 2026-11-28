@@ -1311,7 +1311,7 @@ export interface LinkDetail {
    */
   config: LinkConfig[];
   /**
-   * The entry of `cartograph.overrides.yaml` that decided this link, `c<position>`.
+   * The entry of `cartograph.overrides.yaml` that decided this link, `c<position>-<fingerprint>`.
    */
   correction_id?: string | null;
   /**

@@ -77,7 +77,9 @@ fn a_corrected_link_names_its_layer_and_its_base() {
     );
     let d = snap.link_detail(&id, &At::Now).unwrap();
     assert!(matches!(d.layer, Some(Layer::Correction)));
-    assert_eq!(d.correction_id.as_deref(), Some("c0"));
+    // `c<position>-<fingerprint>`: the API's id of the entry.
+    let id = d.correction_id.as_deref().unwrap();
+    assert!(id.starts_with("c0-") && id.len() == 11, "{id}");
     assert_eq!(d.link.confidence.level, ConfidenceLevel::Exact);
     let base = d.base.expect("the passes' values are kept");
     assert_eq!((base.level, base.score), (ConfidenceLevel::Likely, 0.89));

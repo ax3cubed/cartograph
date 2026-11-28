@@ -121,21 +121,18 @@ pub(crate) fn add(
         .map_err(refused)
 }
 
-/// Removes entry `id` (`c<position>`).
+/// Removes entry `id` (`c<position>-<fingerprint>`).
 pub(crate) fn undo(data: &Path, ws: &str, id: &str) -> Result<FileDiff, ApiError> {
     let (file, _) = files(data, ws)?;
-    let at = id
-        .strip_prefix('c')
-        .and_then(|n| n.parse::<usize>().ok())
-        .ok_or_else(|| {
-            fail(
-                ErrorCode::NotFound,
-                "no such correction",
-                "a correction's id is c and its position in the file",
-                "list them with GET …/corrections",
-            )
-        })?;
-    corrections::remove(&file, at, false)
+    let (at, fp) = overrides::parse_entry_id(id).ok_or_else(|| {
+        fail(
+            ErrorCode::NotFound,
+            "no such correction",
+            "a correction's id is c, its position in the file, a dash and its fingerprint",
+            "list them with GET …/corrections",
+        )
+    })?;
+    corrections::remove(&file, at, fp, false)
         .map(file_diff)
         .map_err(refused)
 }
@@ -172,7 +169,7 @@ fn list(data: &Path, ws: &str) -> Result<Vec<Correction>, ApiError> {
     for (i, e) in parsed.overrides.corrections.iter().enumerate() {
         let row = rows.as_ref().map(|r| &r[i]);
         let mut v = serde_json::to_value(e).expect("an entry serialises");
-        v["id"] = json!(format!("c{i}"));
+        v["id"] = json!(overrides::entry_id(i, &e.fingerprint()));
         v["by"] = json!(row.and_then(|r| r.by.clone()).unwrap_or_default());
         v["at"] = json!(
             row.and_then(|r| r.at)

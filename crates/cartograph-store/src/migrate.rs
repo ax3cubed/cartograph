@@ -104,7 +104,7 @@ const V4: &str = concat!(
      CREATE TABLE correction (id INTEGER PRIMARY KEY, line INTEGER NOT NULL, action TEXT NOT NULL,
        kind TEXT NOT NULL, key TEXT NOT NULL, src INTEGER, dst INTEGER, new_dst INTEGER,
        confidence TEXT, reason TEXT NOT NULL, anchor_seq INTEGER NOT NULL, status TEXT NOT NULL,
-       links INTEGER NOT NULL, by TEXT, at INTEGER) STRICT;
+       links INTEGER NOT NULL, by TEXT, at INTEGER, fingerprint TEXT NOT NULL) STRICT;
      CREATE TABLE correction_base (id INTEGER PRIMARY KEY, link INTEGER NOT NULL UNIQUE REFERENCES link (id),
        correction INTEGER NOT NULL REFERENCES correction (id), added INTEGER NOT NULL,
        dst INTEGER NOT NULL, level TEXT, score REAL) STRICT;

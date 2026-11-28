@@ -481,7 +481,9 @@ CREATE TABLE correction (
   status TEXT NOT NULL,
   links INTEGER NOT NULL,
   by TEXT,
-  at INTEGER
+  at INTEGER,
+  -- The entry's content hash (Entry::fingerprint): with id, the entry's id in the API.
+  fingerprint TEXT NOT NULL
 ) STRICT;
 -- The base values of each link a correction changed, in the order they were changed (id), so
 -- undo is the reverse; an added link has no base and is deleted on undo.

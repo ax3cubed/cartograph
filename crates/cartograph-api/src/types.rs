@@ -514,7 +514,7 @@ pub struct LinkDetail {
     pub evidence: EvidenceGroups,
     /// A link between the same two services that closed in the commit this one opened.
     pub replaced: Option<LinkId>,
-    /// The entry of `cartograph.overrides.yaml` that decided this link, `c<position>`.
+    /// The entry of `cartograph.overrides.yaml` that decided this link, `c<position>-<fingerprint>`.
     pub correction_id: Option<String>,
     /// The environment `config` is for (`?env=`, else the default); null when the link doesn't
     /// depend on one (XS-09).

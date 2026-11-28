@@ -191,6 +191,27 @@ pub struct Entry {
     pub reason: String,
 }
 
+impl Entry {
+    /// Eight hex digits of the entry's content: an id names an entry by its position and this,
+    /// so an undo after the file changed removes that entry or nothing, never its neighbour.
+    pub fn fingerprint(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let d = Sha256::digest(serde_json::to_vec(self).expect("an entry serialises"));
+        d[..4].iter().map(|b| format!("{b:02x}")).collect()
+    }
+}
+
+/// `c<position>-<fingerprint>`, the id of an entry in the API.
+pub fn entry_id(position: usize, fingerprint: &str) -> String {
+    format!("c{position}-{fingerprint}")
+}
+
+/// The position and fingerprint of an id from [`entry_id`].
+pub fn parse_entry_id(id: &str) -> Option<(usize, &str)> {
+    let (n, fp) = id.strip_prefix('c')?.split_once('-')?;
+    Some((n.parse().ok()?, fp))
+}
+
 /// An end of a link, split: `service`, `service:path`, `service:path#symbol`.
 pub fn split_end(end: &str) -> (&str, Option<&str>, Option<&str>) {
     let (head, symbol) = match end.split_once('#') {

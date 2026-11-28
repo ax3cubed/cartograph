@@ -544,10 +544,10 @@ fn append_and_undo_through_the_index_with_golden_diffs() {
     );
 
     // Undo the second, then the first: the file and the links are as they were.
-    let d = corrections::remove(&path, 1, false).unwrap();
+    let d = corrections::remove(&path, 1, &fp(&path, 1), false).unwrap();
     insta::assert_snapshot!("undo_the_second", d.diff);
     assert_eq!(written(&e), text);
-    corrections::remove(&path, 0, false).unwrap();
+    corrections::remove(&path, 0, &fp(&path, 0), false).unwrap();
     assert_eq!(
         written(&e),
         "# kept\nversion: 1\ncorrections:\n# also kept\n"
@@ -555,9 +555,50 @@ fn append_and_undo_through_the_index_with_golden_diffs() {
     e.sync();
     assert_eq!(e.links(), base);
     assert_eq!(
-        corrections::remove(&path, 0, false).unwrap_err().why,
+        corrections::remove(&path, 0, "00000000", false)
+            .unwrap_err()
+            .why,
         Why::Missing
     );
+}
+
+/// The fingerprint of entry `i` of the file, as the API's id carries it.
+fn fp(path: &std::path::Path, i: usize) -> String {
+    let parsed = overrides::read(path).unwrap().unwrap().1.unwrap();
+    parsed.overrides.corrections[i].fingerprint()
+}
+
+/// An id names an entry by position and content: an undo after the file changed removes that
+/// entry where it moved to, or nothing, never a neighbour.
+#[test]
+fn undo_removes_the_entry_its_id_names_or_nothing() {
+    let mut e = env();
+    e.sync();
+    let path = e.f.dir.join(FILE_NAME);
+    let conn = e.index().conn;
+    corrections::append(&path, &conn, &fix(Level::Exact), false).unwrap();
+    let (at, kept) = (0, fp(&path, 0));
+    // Someone puts another entry first: position 0 is now a different entry.
+    let text = written(&e);
+    let other = "  - action: remove\n    key: {kind: http, from: 'web:web/src/other.ts', to: 'orders:orders/src/legacy.ts', op: 'GET /legacy'}\n    reason: \"theirs\"\n";
+    let moved = text.replacen("corrections:\n", &format!("corrections:\n{other}"), 1);
+    std::fs::write(&path, &moved).unwrap();
+    corrections::remove(&path, at, &kept, false).unwrap();
+    let left = overrides::read(&path).unwrap().unwrap().1.unwrap();
+    assert_eq!(left.overrides.corrections.len(), 1);
+    assert_eq!(left.overrides.corrections[0].reason, "theirs");
+    // The entry is edited by hand: its old id removes nothing.
+    let edited = written(&e).replace("\"theirs\"", "\"edited\"");
+    std::fs::write(&path, &edited).unwrap();
+    let theirs = fp(&path, 0);
+    let stale = format!("{}0", &theirs[..7]);
+    assert_eq!(
+        corrections::remove(&path, 0, &stale, false)
+            .unwrap_err()
+            .why,
+        Why::Missing
+    );
+    assert_eq!(written(&e), edited);
 }
 
 #[test]
@@ -572,7 +613,7 @@ fn the_file_is_appended_to_never_rewritten() {
     let d = corrections::append(&path, &conn, &fix(Level::Likely), false).unwrap();
     insta::assert_snapshot!("append_to_an_untidy_file", d.diff);
     assert!(written(&e).starts_with(old));
-    corrections::remove(&path, 1, false).unwrap();
+    corrections::remove(&path, 1, &fp(&path, 1), false).unwrap();
     assert_eq!(written(&e), old);
 }
 
@@ -633,7 +674,7 @@ fn append_then_delete_leaves_the_file_byte_identical() {
             let parsed = overrides::read(&path).unwrap().unwrap().1.unwrap();
             let last = parsed.overrides.corrections.len() - 1;
             prop_assert_eq!(&parsed.overrides.corrections[last], &entry);
-            corrections::remove(&path, last, false).unwrap();
+            corrections::remove(&path, last, &fp(&path, last), false).unwrap();
             let after = std::fs::read_to_string(&path).unwrap_or_default();
             // `corrections:` is the one thing an append adds to a file that had none (and a file made by
             // the first append is left as `version: 1` and `corrections:`).
@@ -753,7 +794,7 @@ fn a_file_with_merge_markers_or_a_link_or_a_stray_layout_is_left_alone() {
         let err = corrections::append(&path, &conn, &fix(Level::Exact), false).unwrap_err();
         assert_eq!(err.why, Why::Invalid, "{c}");
         assert_eq!(written(&e), c);
-        assert!(corrections::remove(&path, 0, false).is_err());
+        assert!(corrections::remove(&path, 0, "00000000", false).is_err());
         assert_eq!(written(&e), c);
     }
     // A link where the file should be is never followed or replaced.
@@ -817,8 +858,9 @@ fn ten_thousand_entries_append_and_undo_with_one_parse_each() {
     let t = Instant::now();
     corrections::append(&path, &ix.conn, &new, false).unwrap();
     let appended = t.elapsed();
+    let last = fp(&path, overrides::MAX_ENTRIES - 1);
     let t = Instant::now();
-    corrections::remove(&path, overrides::MAX_ENTRIES - 1, false).unwrap();
+    corrections::remove(&path, overrides::MAX_ENTRIES - 1, &last, false).unwrap();
     let removed = t.elapsed();
     assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
     println!(

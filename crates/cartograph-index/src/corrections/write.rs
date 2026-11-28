@@ -325,7 +325,9 @@ pub fn append(
 
 /// Removes entry `id` (its position in the file, from 0): the lines from its `-` to its last line
 /// go, and nothing else. One parse locates it.
-pub fn remove(path: &Path, id: usize, dry_run: bool) -> Result<Diff, Refused> {
+/// Removes the entry with fingerprint `fp`: the one at `id` when it still matches, else the only
+/// other one that does. Nothing is removed when the file no longer holds exactly that entry.
+pub fn remove(path: &Path, id: usize, fp: &str, dry_run: bool) -> Result<Diff, Refused> {
     let _writing = WRITING.lock().unwrap_or_else(|p| p.into_inner());
     let Some(text) = load(path)? else {
         return Err(refuse(
@@ -336,6 +338,26 @@ pub fn remove(path: &Path, id: usize, dry_run: bool) -> Result<Diff, Refused> {
         ));
     };
     let parsed = overrides::parse(&text).expect("load parsed it");
+    let entries = &parsed.overrides.corrections;
+    let same: Vec<usize> = (0..entries.len())
+        .filter(|&i| entries[i].fingerprint() == fp)
+        .collect();
+    let id = if same.contains(&id) {
+        id
+    } else if let [only] = same[..] {
+        only
+    } else {
+        return Err(refuse(
+            Why::Missing,
+            "no such correction",
+            if same.is_empty() {
+                "the file no longer holds that entry".to_string()
+            } else {
+                "the file holds that entry more than once, elsewhere".to_string()
+            },
+            "reload the corrections; the file changed",
+        ));
+    };
     let Some(&line) = parsed.lines.get(id) else {
         return Err(refuse(
             Why::Missing,
