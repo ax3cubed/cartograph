@@ -59,12 +59,12 @@ export type ConceptDecisionKind = "keep_separate" | "same_concept";
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "SpecKind".
  */
-export type SpecKind = "openapi" | "events";
+export type SpecKind = "openapi" | "events" | "proto";
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Method".
  */
-export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | "EVENT";
+export type Method = ("GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | "EVENT") | "RPC";
 /**
  * Whether the code agrees with the spec about an operation (XS-08 drift).
  *

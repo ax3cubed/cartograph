@@ -2504,18 +2504,27 @@
       "type": "object"
     },
     "Method": {
-      "enum": [
-        "GET",
-        "POST",
-        "PUT",
-        "PATCH",
-        "DELETE",
-        "OPTIONS",
-        "HEAD",
-        "TRACE",
-        "EVENT"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+            "HEAD",
+            "TRACE",
+            "EVENT"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "RPC",
+          "description": "A gRPC method (XS-18): `/pkg.Service/Method`.",
+          "type": "string"
+        }
+      ]
     },
     "Metrics": {
       "properties": {
@@ -4251,7 +4260,8 @@
     "SpecKind": {
       "enum": [
         "openapi",
-        "events"
+        "events",
+        "proto"
       ],
       "type": "string"
     },

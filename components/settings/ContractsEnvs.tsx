@@ -7,7 +7,7 @@ import { getContracts } from "@/lib/source";
 import { Chip, Seg, SettingsPage, useFileDraft } from "./ui";
 import "./contractsEnvs.css";
 
-const KINDS = { openapi: "OpenAPI 3.1", events: "AsyncAPI" } as const;
+const KINDS = { openapi: "OpenAPI 3.1", events: "AsyncAPI", proto: "Protobuf" } as const;
 
 export default function ContractsEnvs() {
   const specs = getContracts();

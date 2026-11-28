@@ -796,6 +796,8 @@ pub enum Method {
     Head,
     Trace,
     Event,
+    /// A gRPC method (XS-18): `/pkg.Service/Method`.
+    Rpc,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -853,6 +855,7 @@ pub struct ContractCounts {
 pub enum SpecKind {
     Openapi,
     Events,
+    Proto,
 }
 
 /// `lib/model.ts` Spec. Served from `…/contracts`.

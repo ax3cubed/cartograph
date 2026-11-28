@@ -26,6 +26,7 @@ fn method(m: &str) -> Method {
         "options" => Method::Options,
         "head" => Method::Head,
         "trace" => Method::Trace,
+        "rpc" => Method::Rpc,
         _ => Method::Get,
     }
 }
@@ -198,6 +199,11 @@ impl Snapshot<'_> {
                 spec_only: ops.len() as u32 - sync,
                 undocumented: routes.len() as u32,
             };
+            let kind = if path.ends_with(".proto") {
+                SpecKind::Proto
+            } else {
+                SpecKind::Openapi
+            };
             out.push(Contract {
                 id: format!("c{id}"),
                 name: if title.is_empty() {
@@ -206,7 +212,7 @@ impl Snapshot<'_> {
                     title
                 },
                 file: path,
-                kind: SpecKind::Openapi,
+                kind,
                 service: NodeId(node_id(service_node)),
                 operations: ops,
                 undocumented: routes,
