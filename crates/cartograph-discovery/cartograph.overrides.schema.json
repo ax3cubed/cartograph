@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cartograph.overrides.yaml",
+  "description": "Corrections to the links Cartograph found.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "The file format. This build reads version 1.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "stale": {
+      "description": "What `cartograph check` does with a correction that matches nothing: fail (the default),\nwarn or say nothing.",
+      "$ref": "#/$defs/Stale"
+    },
+    "corrections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Entry"
+      },
+      "maxItems": 10000,
+      "default": []
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "$defs": {
+    "Stale": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warn",
+        "off"
+      ]
+    },
+    "Entry": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "to": {
+          "description": "retarget: the new far end.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "description": "set: the level to fix; add: the level of the new link (default likely).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Level"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "description": "Why, for the next reader: data only, 1 to 500 characters.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "key",
+        "reason"
+      ]
+    },
+    "Action": {
+      "description": "H3's four verbs.",
+      "oneOf": [
+        {
+          "description": "Hide the link.",
+          "type": "string",
+          "const": "remove"
+        },
+        {
+          "description": "Rewrite the far end (`key.to`) to `to`.",
+          "type": "string",
+          "const": "retarget"
+        },
+        {
+          "description": "Fix the level to `confidence`.",
+          "type": "string",
+          "const": "set"
+        },
+        {
+          "description": "Open a link between two files over the time both exist.",
+          "type": "string",
+          "const": "add"
+        }
+      ]
+    },
+    "Key": {
+      "description": "The link an entry is about: kind, both ends and what the link carries.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/Kind"
+        },
+        "from": {
+          "description": "`service`, `service:path` or `service:path#symbol`.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The far end, in the same form.",
+          "type": "string"
+        },
+        "op": {
+          "description": "`GET /orders/{id}`: for kind `http`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "topic": {
+          "description": "For kind `event`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "table": {
+          "description": "For kind `db`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "from",
+        "to"
+      ]
+    },
+    "Kind": {
+      "description": "Link kinds, as on every wire.",
+      "type": "string",
+      "enum": [
+        "imports",
+        "calls",
+        "http",
+        "event",
+        "db"
+      ]
+    },
+    "Level": {
+      "oneOf": [
+        {
+          "description": "Score 0.95.",
+          "type": "string",
+          "const": "exact"
+        },
+        {
+          "description": "Score 0.75.",
+          "type": "string",
+          "const": "likely"
+        },
+        {
+          "description": "Score 0.45.",
+          "type": "string",
+          "const": "guessed"
+        }
+      ]
+    }
+  }
+}

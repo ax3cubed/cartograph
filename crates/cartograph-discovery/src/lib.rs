@@ -11,6 +11,7 @@
 pub mod branch;
 pub mod config;
 pub mod manifest;
+pub mod overrides;
 pub mod registry;
 pub mod resolve;
 pub mod setup;
