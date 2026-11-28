@@ -31,6 +31,7 @@ mod snippet;
 mod store;
 mod timeline;
 mod traverse;
+mod versions;
 
 pub use at::{At, parse_instant, rfc3339};
 pub use cartograph_store::FORMAT_VERSION;

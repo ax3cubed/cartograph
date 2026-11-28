@@ -131,6 +131,8 @@ pub fn routes() -> Vec<Route> {
         // views
         r("GET", w!("/contracts"), R, READ, None, Json(s::<Vec<Contract>>), "SRV-12", "Specs and their operations"),
         r("GET", w!("/contracts/{id}"), R, READ, None, Json(s::<Contract>), "SRV-12", "One spec"),
+        r("GET", w!("/contracts/{id}/versions"), R, &[], None, Json(s::<Vec<ContractVersion>>), "XS-19", "Spec versions with their breaking changes and callers"),
+        r("GET", w!("/contracts/{id}/diff"), R, &["from", "to"], None, Json(s::<ContractDiff>), "XS-19", "Full diff between two versions"),
         r("GET", w!("/entrypoints"), R, READ, None, Json(s::<Vec<Entrypoint>>), "SRV-12", "Entrypoints"),
         r("GET", w!("/entrypoints/{id}"), R, READ, None, Json(s::<Entrypoint>), "SRV-12", "One entrypoint"),
         r("GET", w!("/concepts"), R, READ, None, Json(s::<Vec<Concept>>), "SRV-12", "Concepts"),

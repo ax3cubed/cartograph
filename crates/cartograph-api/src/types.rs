@@ -832,6 +832,54 @@ pub struct Contract {
     pub counts: ContractCounts,
 }
 
+/// A spec's history (XS-19): one row per distinct spec along first-parent history, oldest first.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ContractVersion {
+    /// 1 for the first spec the file had.
+    pub n: u32,
+    /// The commit where this spec came to be.
+    pub commit: Commit,
+    /// Hex SHA-256 of the canonical operations and schemas.
+    pub spec_hash: String,
+    /// Changes from the version before; 0 for v1.
+    pub changes: u32,
+    /// How many of them are breaking; `breaking` lists the first 200.
+    pub breaking_count: u32,
+    /// Built from the diff, never by a model. Untrusted text (names from the spec).
+    pub summary: String,
+    pub breaking: Vec<BreakingChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BreakingChange {
+    /// `operation_removed`, `field_removed`, `type_narrowed`, ...
+    pub kind: String,
+    /// `get /orders/{id}` or `Order.status`.
+    pub subject: String,
+    pub summary: String,
+    /// Who called the operation in the commit before the change; empty for a schema change.
+    pub callers: Vec<Caller>,
+}
+
+/// One change of a diff, breaking or not.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SpecChange {
+    pub kind: String,
+    pub subject: String,
+    pub breaking: bool,
+    pub summary: String,
+}
+
+/// `…/contracts/{id}/diff`: every change between two versions, recomputed on request.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ContractDiff {
+    pub from: u32,
+    pub to: u32,
+    /// The spec reads other files; the diff is of the root file alone.
+    pub approximate: bool,
+    pub changes: Vec<SpecChange>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EntrypointKind {

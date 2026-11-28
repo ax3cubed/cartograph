@@ -54,6 +54,11 @@ pub(crate) fn router() -> Router<Arc<App>> {
         .route("/api/v1/w/{ws}/services", get(services))
         .route("/api/v1/w/{ws}/owners", get(owners))
         .route("/api/v1/w/{ws}/contracts", get(contracts))
+        .route(
+            "/api/v1/w/{ws}/contracts/{id}/versions",
+            get(contract_versions),
+        )
+        .route("/api/v1/w/{ws}/contracts/{id}/diff", get(contract_diff))
         .route("/api/v1/mcp/tools", get(mcp_tools))
         .route("/api/v1/agents", get(agents))
         .route(
@@ -659,6 +664,33 @@ async fn contracts(
         Err(e) => return e,
     };
     read(app, ws, move |s| s.contracts(&at)).await
+}
+
+/// Spec versions with their breaking changes and callers (XS-19).
+async fn contract_versions(
+    State(app): State<Arc<App>>,
+    Path((ws, id)): Path<(String, String)>,
+) -> Response {
+    read(app, ws, move |s| s.contract_versions(&id)).await
+}
+
+#[derive(Deserialize)]
+struct DiffParams {
+    from: u32,
+    to: u32,
+}
+
+/// The full diff between two versions of a spec, recomputed (XS-19).
+async fn contract_diff(
+    State(app): State<Arc<App>>,
+    Path((ws, id)): Path<(String, String)>,
+    q: Result<Query<DiffParams>, QueryRejection>,
+) -> Response {
+    let p = match params(q) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| s.contract_diff(&id, p.from, p.to)).await
 }
 
 /// Owners from CODEOWNERS (XS-23): who owns how many files now.

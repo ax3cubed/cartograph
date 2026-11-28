@@ -337,6 +337,35 @@
         ],
         "type": "string"
       },
+      "BreakingChange": {
+        "properties": {
+          "callers": {
+            "description": "Who called the operation in the commit before the change; empty for a schema change.",
+            "items": {
+              "$ref": "#/components/schemas/Caller"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "description": "`operation_removed`, `field_removed`, `type_narrowed`, ...",
+            "type": "string"
+          },
+          "subject": {
+            "description": "`get /orders/{id}` or `Order.status`.",
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "summary",
+          "callers"
+        ],
+        "type": "object"
+      },
       "Caller": {
         "properties": {
           "confidence": {
@@ -726,6 +755,89 @@
           "sync",
           "spec_only",
           "undocumented"
+        ],
+        "type": "object"
+      },
+      "ContractDiff": {
+        "description": "`…/contracts/{id}/diff`: every change between two versions, recomputed on request.",
+        "properties": {
+          "approximate": {
+            "description": "The spec reads other files; the diff is of the root file alone.",
+            "type": "boolean"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/SpecChange"
+            },
+            "type": "array"
+          },
+          "from": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "to": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "approximate",
+          "changes"
+        ],
+        "type": "object"
+      },
+      "ContractVersion": {
+        "description": "A spec's history (XS-19): one row per distinct spec along first-parent history, oldest first.",
+        "properties": {
+          "breaking": {
+            "items": {
+              "$ref": "#/components/schemas/BreakingChange"
+            },
+            "type": "array"
+          },
+          "breaking_count": {
+            "description": "How many of them are breaking; `breaking` lists the first 200.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "changes": {
+            "description": "Changes from the version before; 0 for v1.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "commit": {
+            "$ref": "#/components/schemas/Commit",
+            "description": "The commit where this spec came to be."
+          },
+          "n": {
+            "description": "1 for the first spec the file had.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "spec_hash": {
+            "description": "Hex SHA-256 of the canonical operations and schemas.",
+            "type": "string"
+          },
+          "summary": {
+            "description": "Built from the diff, never by a model. Untrusted text (names from the spec).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "commit",
+          "spec_hash",
+          "changes",
+          "breaking_count",
+          "summary",
+          "breaking"
         ],
         "type": "object"
       },
@@ -4033,6 +4145,30 @@
           "paths",
           "tags",
           "library"
+        ],
+        "type": "object"
+      },
+      "SpecChange": {
+        "description": "One change of a diff, breaking or not.",
+        "properties": {
+          "breaking": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "breaking",
+          "summary"
         ],
         "type": "object"
       },
@@ -7988,6 +8124,205 @@
         "summary": "One spec",
         "tags": [
           "SRV-12"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
+    "/api/v1/w/{ws}/contracts/{id}/diff": {
+      "get": {
+        "operationId": "getWsContractsIdDiff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ContractDiff"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Full diff between two versions",
+        "tags": [
+          "XS-19"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
+    "/api/v1/w/{ws}/contracts/{id}/versions": {
+      "get": {
+        "operationId": "getWsContractsIdVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/ContractVersion"
+                      },
+                      "type": "array"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Spec versions with their breaking changes and callers",
+        "tags": [
+          "XS-19"
         ],
         "x-cartograph-kind": "read"
       }

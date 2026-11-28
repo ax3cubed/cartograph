@@ -13,6 +13,7 @@ cartograph-core.workspace = true
 cartograph-api.workspace = true
 # Evidence snippets are read from the repo's object store (XS-06).
 cartograph-git.workspace = true
+cartograph-parse.workspace = true
 cartograph-store.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -23,7 +24,6 @@ tracing.workspace = true
 cartograph-fixtures = { path = "../../fixtures/gen" }
 cartograph-facts.workspace = true
 cartograph-index.workspace = true
-cartograph-parse.workspace = true
 tempfile.workspace = true
 
 [lints]
