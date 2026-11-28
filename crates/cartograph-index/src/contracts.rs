@@ -19,9 +19,11 @@ use std::collections::BTreeMap;
 
 use cartograph_git::{GitError, ObjectId, Repo, read_blob};
 use cartograph_parse::openapi::{self, Contract, Env, Files, MAX_SPEC_BYTES};
+use cartograph_parse::openapi_diff::{canonical, diff};
 use cartograph_parse::{BlobFacts, Extractor, ManifestOpenapi};
 use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{self, Connection, params};
+use sha2::{Digest, Sha256};
 
 use crate::derive::{Inputs, key};
 use crate::links::http::normalise_route;
@@ -29,8 +31,11 @@ use crate::rows::cut;
 use crate::structure::{dir, merge};
 use crate::timeline::glob_matches;
 
+/// Most breaking changes kept per version; the count says how many there were.
+const MAX_BREAKING: usize = 200;
+
 /// Bump when what the rows hold changes, so every index rebuilds them.
-const CONTRACTS_VERSION: &str = "contracts 1";
+const CONTRACTS_VERSION: &str = "contracts 2";
 
 /// The extractor name in the `fact` table.
 pub const EXTRACTOR: &str = openapi::KIND;
@@ -332,6 +337,9 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
 
     let mut parts: BTreeMap<i64, Parts> = BTreeMap::new();
     let mut commits: BTreeMap<i64, Vec<(i64, ObjectId)>> = BTreeMap::new();
+    // Every state of each spec file (a file keeps its id across renames): where it began, the
+    // root blob, the spec.
+    let mut history: BTreeMap<i64, Vec<(i64, Vec<u8>, Contract)>> = BTreeMap::new();
     for v in &all {
         let Some(r) = inputs.repos.iter().find(|r| r.id == v.repo) else {
             continue;
@@ -352,6 +360,10 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
         }
         let none = Vec::new();
         for s in states(r.repo, v, commits.get(&v.repo).unwrap_or(&none))? {
+            history
+                .entry(v.file)
+                .or_default()
+                .push((s.from, v.blob.clone(), s.contract.clone()));
             let p = parts.entry(v.file).or_default();
             p.title = cut(&s.contract.title);
             p.version.clone_from(&s.contract.version);
@@ -391,7 +403,7 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     }
 
     conn.execute_batch(
-        "DELETE FROM binding; DELETE FROM contract_schema; DELETE FROM operation;
+        "DELETE FROM contract_version; DELETE FROM binding; DELETE FROM contract_schema; DELETE FROM operation;
          DELETE FROM contract; DELETE FROM unresolved WHERE fact_kind = 'openapi.ref';",
     )?;
     let mut written = 0;
@@ -401,6 +413,7 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
         )
         .and_then(|mut s| s.execute(params![file, p.service, p.title, p.version]))?;
         let id = conn.last_insert_rowid();
+        versions_of(conn, id, history.remove(&file).unwrap_or_default())?;
         for ((method, path), op) in &p.ops {
             for (from, to) in merge(op.spans.clone()) {
                 conn.prepare_cached(
@@ -444,4 +457,72 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     }
     record(conn, "contracts", "workspace", &k)?;
     Ok(written)
+}
+
+/// The version rows of one contract: a new one wherever the canonical spec hash changes.
+fn versions_of(
+    conn: &Connection,
+    contract: i64,
+    mut states: Vec<(i64, Vec<u8>, Contract)>,
+) -> rusqlite::Result<()> {
+    states.sort_by_key(|s| s.0);
+    let mut prev: Option<(Vec<u8>, Contract)> = None;
+    let mut n = 0;
+    for (seq, blob, c) in states {
+        let hash = Sha256::digest(canonical(&c)).to_vec();
+        if prev.as_ref().is_some_and(|p| p.0 == hash) {
+            continue;
+        }
+        n += 1;
+        let changes = prev.as_ref().map_or_else(Vec::new, |p| diff(&p.1, &c));
+        // Names come from the spec: untrusted, masked like every other text column.
+        let breaking: Vec<_> = changes
+            .iter()
+            .filter(|c| c.breaking)
+            .take(MAX_BREAKING)
+            .map(|c| cartograph_parse::openapi_diff::Change {
+                subject: cut(&c.subject),
+                summary: cut(&c.summary),
+                ..c.clone()
+            })
+            .collect();
+        let breaking_count = changes.iter().filter(|c| c.breaking).count();
+        conn.prepare_cached(
+            "INSERT INTO contract_version (contract, n, seq, blob, spec_hash, changes,
+               breaking_count, breaking, summary) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )
+        .and_then(|mut s| {
+            s.execute(params![
+                contract,
+                n,
+                seq,
+                blob,
+                hash,
+                changes.len() as i64,
+                breaking_count as i64,
+                serde_json::to_string(&breaking).unwrap_or_default(),
+                summary(&changes, prev.is_none().then_some(&c))
+            ])
+        })?;
+        prev = Some((hash, c));
+    }
+    Ok(())
+}
+
+/// `Added POST /v1/orders; Removed GET /v1/x; +3 more`, from the diff alone.
+pub fn summary(
+    changes: &[cartograph_parse::openapi_diff::Change],
+    first: Option<&Contract>,
+) -> String {
+    if let Some(c) = first {
+        return format!("Initial spec, {} operations", c.operations.len());
+    }
+    if changes.is_empty() {
+        return "Operation ids changed".into();
+    }
+    let mut s: Vec<String> = changes.iter().take(5).map(|c| c.summary.clone()).collect();
+    if changes.len() > 5 {
+        s.push(format!("+{} more", changes.len() - 5));
+    }
+    cut(&s.join("; "))
 }
