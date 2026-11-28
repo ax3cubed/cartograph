@@ -3303,17 +3303,31 @@
       "type": "string"
     },
     "Rule": {
+      "description": "An architecture rule of cartograph.yaml with what it finds now (XS-22).",
       "properties": {
+        "baselined": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "description": {
+          "description": "The rule's `reason`: untrusted text from the repo (F8).",
           "type": "string"
         },
         "id": {
+          "description": "The rule's name, which the baseline and violations use.",
           "type": "string"
         },
         "kind": {
+          "description": "`forbid` or `no_cycles`.",
+          "type": "string"
+        },
+        "severity": {
+          "description": "`error` fails `cartograph check`; `warn` and `info` only print.",
           "type": "string"
         },
         "violations": {
+          "description": "Violations that hold now, baselined ones included.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -3322,22 +3336,64 @@
       "required": [
         "id",
         "kind",
+        "severity",
         "description",
-        "violations"
+        "violations",
+        "baselined"
       ],
       "type": "object"
     },
     "RuleViolation": {
-      "description": "Natural keys, as in cartograph.baseline.json.",
+      "description": "A link a rule forbids, in the natural keys of cartograph.baseline.json. It carries the link's\nintervals, so whether a commit passes is a lookup.",
       "properties": {
         "baselined": {
           "type": "boolean"
         },
         "from": {
-          "$ref": "#/definitions/NodeId"
+          "description": "`service:path`; untrusted text.",
+          "type": "string"
+        },
+        "intervals": {
+          "description": "The steps it held over: from, and to (none while it still holds).",
+          "items": {
+            "items": [
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         },
         "kind": {
-          "$ref": "#/definitions/LinkKind"
+          "description": "The link kind: `import`, `package`, `http`, `event` or `db`.",
+          "type": "string"
+        },
+        "level": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfidenceLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "live": {
+          "description": "It holds at the newest commit.",
+          "type": "boolean"
         },
         "op": {
           "type": [
@@ -3348,16 +3404,22 @@
         "rule": {
           "type": "string"
         },
+        "severity": {
+          "type": "string"
+        },
         "to": {
-          "$ref": "#/definitions/NodeId"
+          "type": "string"
         }
       },
       "required": [
         "rule",
+        "severity",
         "kind",
         "from",
         "to",
-        "baselined"
+        "baselined",
+        "live",
+        "intervals"
       ],
       "type": "object"
     },

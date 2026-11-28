@@ -19,6 +19,7 @@ mod live;
 pub mod mcp;
 mod reads;
 mod routes;
+mod rules;
 mod sync;
 pub mod ui;
 mod writes;
@@ -35,7 +36,7 @@ use cartograph_core::Explain;
 use serde::{Deserialize, Serialize};
 /// A registered workspace as sync and the freshness check see it (registry plus manifest); the
 /// CLI's `status` uses the same lookup.
-pub use sync::{workspace, workspace_checked, workspace_ids};
+pub use sync::{manifest_path, workspace, workspace_checked, workspace_ids};
 
 /// What `cartograph open` passes in.
 #[derive(Debug, Clone)]

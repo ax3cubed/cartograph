@@ -263,6 +263,9 @@ enum Command {
     Check {
         #[command(flatten)]
         dir: Dir,
+        /// Write cartograph.baseline.json: accept the rule violations there are now.
+        #[arg(long)]
+        update_baseline: bool,
     },
     /// Ask the map a question.
     Ask {
@@ -483,7 +486,10 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
             },
             g.yes,
         )?,
-        Command::Check { dir } => check::run(out, &named(&g, dir.or_cwd()))?,
+        Command::Check {
+            dir,
+            update_baseline,
+        } => check::run(out, &named(&g, dir.or_cwd()), update_baseline)?,
         Command::Doctor { dir, fix } => doctor::run(out, &named(&g, dir.or_cwd()), fix)?,
         _ => return Err(not_built(name)),
     }

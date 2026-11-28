@@ -1015,23 +1015,40 @@ pub struct Owner {
     pub nodes: u32,
 }
 
+/// An architecture rule of cartograph.yaml with what it finds now (XS-22).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Rule {
+    /// The rule's name, which the baseline and violations use.
     pub id: String,
+    /// `forbid` or `no_cycles`.
     pub kind: String,
+    /// `error` fails `cartograph check`; `warn` and `info` only print.
+    pub severity: String,
+    /// The rule's `reason`: untrusted text from the repo (F8).
     pub description: String,
+    /// Violations that hold now, baselined ones included.
     pub violations: u32,
+    pub baselined: u32,
 }
 
-/// Natural keys, as in cartograph.baseline.json.
+/// A link a rule forbids, in the natural keys of cartograph.baseline.json. It carries the link's
+/// intervals, so whether a commit passes is a lookup.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RuleViolation {
     pub rule: String,
-    pub kind: LinkKind,
-    pub from: NodeId,
-    pub to: NodeId,
+    pub severity: String,
+    /// The link kind: `import`, `package`, `http`, `event` or `db`.
+    pub kind: String,
+    /// `service:path`; untrusted text.
+    pub from: String,
+    pub to: String,
     pub op: Option<String>,
+    pub level: Option<ConfidenceLevel>,
     pub baselined: bool,
+    /// It holds at the newest commit.
+    pub live: bool,
+    /// The steps it held over: from, and to (none while it still holds).
+    pub intervals: Vec<(u32, Option<u32>)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

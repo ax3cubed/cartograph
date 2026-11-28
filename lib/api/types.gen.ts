@@ -1698,28 +1698,64 @@ export interface Repo {
   path: string;
 }
 /**
+ * An architecture rule of cartograph.yaml with what it finds now (XS-22).
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Rule".
  */
 export interface Rule {
+  baselined: number;
+  /**
+   * The rule's `reason`: untrusted text from the repo (F8).
+   */
   description: string;
+  /**
+   * The rule's name, which the baseline and violations use.
+   */
   id: string;
+  /**
+   * `forbid` or `no_cycles`.
+   */
   kind: string;
+  /**
+   * `error` fails `cartograph check`; `warn` and `info` only print.
+   */
+  severity: string;
+  /**
+   * Violations that hold now, baselined ones included.
+   */
   violations: number;
 }
 /**
- * Natural keys, as in cartograph.baseline.json.
+ * A link a rule forbids, in the natural keys of cartograph.baseline.json. It carries the link's
+ * intervals, so whether a commit passes is a lookup.
  *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "RuleViolation".
  */
 export interface RuleViolation {
   baselined: boolean;
-  from: NodeId;
-  kind: LinkKind;
+  /**
+   * `service:path`; untrusted text.
+   */
+  from: string;
+  /**
+   * The steps it held over: from, and to (none while it still holds).
+   */
+  intervals: [number, number | null][];
+  /**
+   * The link kind: `import`, `package`, `http`, `event` or `db`.
+   */
+  kind: string;
+  level?: ConfidenceLevel | null;
+  /**
+   * It holds at the newest commit.
+   */
+  live: boolean;
   op?: string | null;
   rule: string;
-  to: NodeId;
+  severity: string;
+  to: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema

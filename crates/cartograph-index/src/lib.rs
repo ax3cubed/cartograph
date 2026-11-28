@@ -15,6 +15,7 @@ pub mod layout;
 pub mod links;
 pub mod owners;
 mod rows;
+pub mod rules;
 pub mod structure;
 pub mod sync;
 mod tables;

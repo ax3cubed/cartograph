@@ -379,6 +379,7 @@ dependencies = [
  "json-strip-comments",
  "jsonschema",
  "proptest",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

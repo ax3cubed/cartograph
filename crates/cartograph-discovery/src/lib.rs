@@ -14,6 +14,7 @@ pub mod manifest;
 pub mod overrides;
 pub mod registry;
 pub mod resolve;
+pub mod rules;
 pub mod setup;
 pub mod workspace;
 

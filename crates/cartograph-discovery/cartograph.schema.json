@@ -31,12 +31,14 @@
       }
     },
     "rules": {
-      "description": "Architecture rules, passed through to the rules owner (H6).",
+      "description": "Architecture rules (H6, XS-22).",
       "type": "array",
-      "items": true
+      "items": {
+        "$ref": "#/$defs/Rule"
+      }
     },
     "baseline": {
-      "description": "The baseline file of known rule violations, relative to the manifest.",
+      "description": "The baseline file of known rule violations, relative to the manifest; else\n`cartograph.baseline.json` beside it.",
       "type": [
         "string",
         "null"
@@ -191,6 +193,124 @@
       "required": [
         "name",
         "repo"
+      ]
+    },
+    "Rule": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Names the rule in the baseline and in output: 1 to 100 characters, unique.",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RuleType"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "from": {
+          "$ref": "#/$defs/Selector"
+        },
+        "to": {
+          "$ref": "#/$defs/Selector"
+        },
+        "link": {
+          "description": "The link kinds the rule covers; any when empty.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LinkKind"
+          }
+        },
+        "min_confidence": {
+          "$ref": "#/$defs/MinConfidence"
+        },
+        "reason": {
+          "description": "Why, shown with a violation: data only, at most 500 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ]
+    },
+    "RuleType": {
+      "oneOf": [
+        {
+          "description": "No link from `from` to `to`.",
+          "type": "string",
+          "const": "forbid"
+        },
+        {
+          "description": "No cycle among the services `from` selects, over links of `link` kinds.",
+          "type": "string",
+          "const": "no_cycles"
+        }
+      ]
+    },
+    "Severity": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "warn",
+            "info"
+          ]
+        },
+        {
+          "description": "Fails `cartograph check`.",
+          "type": "string",
+          "const": "error"
+        }
+      ]
+    },
+    "Selector": {
+      "description": "Which nodes an end of a rule means. Every field given must hold.",
+      "type": "object",
+      "properties": {
+        "tags": {
+          "description": "Tags the service has all of: its `tags` in this file, plus `owner:<owner>` for each owner\nof one of its files (CODEOWNERS).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "service": {
+          "description": "The service's name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "A regex (unanchored) over a file's repo path, or a table's name. On `from`, groups may be\ncaptured; on `to`, `$1` to `$9` stand for what they captured.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "LinkKind": {
+      "description": "A link kind of the index.",
+      "type": "string",
+      "enum": [
+        "import",
+        "package",
+        "http",
+        "event",
+        "db"
+      ]
+    },
+    "MinConfidence": {
+      "description": "The lowest level a link may have and still be a violation. A guessed link never is one.",
+      "type": "string",
+      "enum": [
+        "likely",
+        "exact"
       ]
     },
     "Contract": {

@@ -37,10 +37,11 @@ pub struct Manifest {
     /// Services and their paths (shape only here; detection is IDX-20).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub services: Vec<Service>,
-    /// Architecture rules, passed through to the rules owner (H6).
+    /// Architecture rules (H6, XS-22).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rules: Vec<serde_json::Value>,
-    /// The baseline file of known rule violations, relative to the manifest.
+    pub rules: Vec<crate::rules::Rule>,
+    /// The baseline file of known rule violations, relative to the manifest; else
+    /// `cartograph.baseline.json` beside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<String>,
     /// OpenAPI and Swagger files by glob (XS-08), besides the ones named `openapi.*` or
@@ -406,7 +407,13 @@ fn validate(m: &Manifest) -> Result<(), Invalid> {
             ));
         }
     }
-    Ok(())
+    if let Some(b) = m.baseline.as_deref().filter(|p| !plain_relative(p, false)) {
+        return Err(invalid(
+            format!("baseline `{b}` leaves the manifest's folder"),
+            "write the path relative to cartograph.yaml, without ..",
+        ));
+    }
+    crate::rules::validate(&m.rules).map_err(|(what, fix)| invalid(what, fix))
 }
 
 /// The manifest as YAML: one comment, then the keys in a fixed order. No `yaml-language-server`
