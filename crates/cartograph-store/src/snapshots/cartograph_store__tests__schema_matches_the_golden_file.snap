@@ -363,7 +363,7 @@ CREATE INDEX interval_at ON interval (from_seq, to_seq, link);
 CREATE INDEX interval_link ON interval (link);
 CREATE INDEX layout_node ON layout (node, from_seq);
 CREATE INDEX link_config_link ON link_config (link);
-CREATE INDEX link_dst ON link (kind, dst);
+CREATE INDEX link_dst ON link (dst) WHERE kind = 'http';
 CREATE INDEX node_file ON node (file);
 CREATE UNIQUE INDEX node_key ON node (key);
 CREATE INDEX node_parent ON node (parent);

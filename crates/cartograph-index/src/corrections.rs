@@ -364,7 +364,8 @@ impl Ctx {
             return Ok(End::Service(sid));
         };
         // The file; failing that, every file under it as a directory. Both walk the path index
-        // (CROSS JOIN fixes the order: the path first, then its node).
+        // (CROSS JOIN fixes the order: the path first, then its node; `+n.service` keeps the
+        // node lookup on `node_file`, not a walk of every file of the service).
         let (dir_from, dir_to) = (format!("{path}/"), format!("{path}0"));
         for seq in [anchor, tip] {
             for (lo, hi) in [(path, path), (dir_from.as_str(), dir_to.as_str())] {
@@ -373,7 +374,7 @@ impl Ctx {
                         "SELECT n.id FROM file_path fp CROSS JOIN node n ON n.file = fp.file
                          WHERE fp.path >= ?1 AND fp.path <= ?2 AND fp.path != ?3
                            AND fp.from_seq <= ?4 AND (fp.to_seq IS NULL OR fp.to_seq > ?4)
-                           AND n.kind = 'file' AND n.service = ?5 LIMIT ?6",
+                           AND n.kind = 'file' AND +n.service = ?5 LIMIT ?6",
                     )?
                     .query_map(
                         params![lo, hi, if lo == hi { "" } else { hi }, seq, sid, MAX_NODES],
@@ -436,12 +437,14 @@ fn matches(
             }
         }
         (_, End::Files(t)) => {
+            // Only HTTP links are corrected: the partial index `link_dst` covers them alone, so
+            // import links, most of every sync's writes, don't maintain it.
+            debug_assert_eq!(kind, "http");
             for n in t {
-                let mut st = conn
-                    .prepare_cached("SELECT id, src, dst FROM link WHERE kind = ?1 AND dst = ?2")?;
-                for r in
-                    st.query_map(params![kind, n], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-                {
+                let mut st = conn.prepare_cached(
+                    "SELECT id, src, dst FROM link INDEXED BY link_dst WHERE kind = 'http' AND dst = ?1",
+                )?;
+                for r in st.query_map([n], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))? {
                     cand.push(r?);
                 }
             }

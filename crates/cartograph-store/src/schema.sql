@@ -147,7 +147,7 @@ CREATE TABLE link (
   -- XS-12 corrections (end)
   UNIQUE (kind, src, dst)
 ) STRICT;
-CREATE INDEX link_dst ON link (kind, dst);
+CREATE INDEX link_dst ON link (dst) WHERE kind = 'http';
 
 -- A link is live at step s when from_seq <= s AND (to_seq IS NULL OR to_seq > s).
 CREATE TABLE interval (

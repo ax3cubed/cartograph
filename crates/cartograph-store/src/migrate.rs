@@ -100,7 +100,7 @@ pub fn undo_to_v2() -> String {
 const V4: &str = concat!(
     // ---- XS-12 corrections: begin (after the table it alters) ----
     "ALTER TABLE link ADD COLUMN layer TEXT;
-     CREATE INDEX link_dst ON link (kind, dst);
+     CREATE INDEX link_dst ON link (dst) WHERE kind = 'http';
      CREATE TABLE correction (id INTEGER PRIMARY KEY, line INTEGER NOT NULL, action TEXT NOT NULL,
        kind TEXT NOT NULL, key TEXT NOT NULL, src INTEGER, dst INTEGER, new_dst INTEGER,
        confidence TEXT, reason TEXT NOT NULL, anchor_seq INTEGER NOT NULL, status TEXT NOT NULL,
