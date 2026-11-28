@@ -149,6 +149,17 @@ pub fn run(out: &Out, dir: &Path, no_index: bool, g: &Global) -> Result<(), Repo
                 .iter()
                 .map(cartograph_index::contracts::ContractSpec::from)
                 .collect(),
+            environments: plan
+                .manifest
+                .environments
+                .iter()
+                .map(|(name, e)| cartograph_index::config::EnvSpec {
+                    name: name.clone(),
+                    sources: e.sources.clone(),
+                    set: e.set.clone(),
+                })
+                .collect(),
+            default_environment: plan.manifest.default_environment.clone(),
         };
         let cache_path = paths::facts_cache(&data);
         let mut cache = FactCache::open(&cache_path).map_err(|e| Report {

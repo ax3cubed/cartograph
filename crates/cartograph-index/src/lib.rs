@@ -3,6 +3,7 @@
 pub mod aliases;
 pub mod build;
 pub mod contracts;
+pub mod config;
 pub mod derive;
 pub mod extract;
 pub mod freshness;

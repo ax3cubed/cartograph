@@ -19,7 +19,7 @@ pub const EXTRACTOR: &str = "adapters";
 pub type IfaceFacts = Vec<(String, String, Vec<BlobFact>)>;
 pub type Ifaces = HashMap<ObjectId, Arc<IfaceFacts>>;
 
-/// `express@1.0.0+fetch@1.0.0`: changes whenever a built-in adapter does.
+/// `express@1.0.0+fetch@1.1.0`: changes whenever a built-in adapter does.
 pub fn version() -> String {
     AdapterSet::builtin()
         .adapters()

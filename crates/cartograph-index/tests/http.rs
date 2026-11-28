@@ -124,7 +124,7 @@ fn a_fetch_links_to_the_route_until_the_route_is_deleted() {
                 "web/src/api.ts".into(),
                 "template".into(),
                 2,
-                "fetch@1.0.0".into()
+                "fetch@1.1.0".into()
             ),
         ]
     );

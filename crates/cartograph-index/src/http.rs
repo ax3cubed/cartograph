@@ -30,6 +30,7 @@ use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{self, Connection, params};
 
 use crate::contracts;
+use crate::config::{self, Env};
 use crate::derive::key;
 use crate::ifaces;
 use crate::links::confidence::{self, EvidenceType as Ev};
@@ -41,8 +42,21 @@ use crate::rows::cut;
 
 /// Bump when what the rows hold changes, so every index rebuilds them.
 const HTTP_VERSION: &str = "http 3";
+/// The `meta` key holding the env keys the call sites read, so the pass key hashes only the values
+/// those keys have (XS-09: a values-file change that touches no read key costs nothing).
+const READ_KEYS: &str = "http_env_keys";
+
+/// The config chain an environment resolved a call through.
+#[derive(Clone)]
+struct Cfg {
+    env: i64,
+    key: String,
+    value: String,
+    source: String,
+}
 
 /// What a site says about itself, for evidence rows.
+#[derive(Clone)]
 struct Info {
     file: i64,
     kind: &'static str,
@@ -55,6 +69,8 @@ struct Info {
     template: String,
     /// The call spells a host out.
     host: bool,
+    /// The environment value the call's base came from.
+    cfg: Option<Cfg>,
 }
 
 /// One version of a file at a path: its sites, over the overlap of the two intervals.
@@ -149,6 +165,7 @@ fn op_key(o: &OpRow) -> SiteKey {
     SiteKey {
         file: o.file,
         span: [o.id as u32, 0, 0, 0],
+        env: 0,
         kind: Kind::Route,
     }
 }
@@ -206,16 +223,91 @@ fn attr<'a>(a: &'a Attrs, k: &str) -> Option<&'a AttrValue> {
     a.get(k)
 }
 
+/// A call whose base is an environment variable: the sites it has depend on the environment.
+struct EnvCall {
+    key: SiteKey,
+    /// The URL's pieces; the first is the expression that reads the variable.
+    pieces: Vec<(bool, String)>,
+    /// The variable.
+    var: String,
+    service: i64,
+    method: String,
+    /// What the call is when no environment decides, if it is anything.
+    generic: Option<CallSite>,
+    info: Info,
+}
+
+enum Prep {
+    Site(Site, Box<Info>),
+    Env(Box<EnvCall>),
+}
+
+/// The variable an expression reads: `process.env.X`, `process.env["X"]`, `import.meta.env.X`, or
+/// a name the file bound to one.
+fn env_var(expr: &str, bound: &HashMap<String, String>) -> Option<String> {
+    let e = expr.trim().trim_end_matches('!');
+    if let Some(n) = bound.get(e) {
+        return Some(n.clone());
+    }
+    let rest = e
+        .strip_prefix("process.env")
+        .or_else(|| e.strip_prefix("import.meta.env"))?;
+    let name = match rest.strip_prefix('.') {
+        Some(n) => n,
+        None => rest
+            .strip_prefix('[')?
+            .strip_suffix(']')?
+            .trim_matches(['"', '\'', '`']),
+    };
+    (!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+        .then(|| name.to_owned())
+}
+
+/// The text of a one-expression or one-string value (an identifier the adapter captured).
+fn name_of(v: &AttrValue) -> Option<String> {
+    match pieces(v).as_slice() {
+        [(_, t)] => Some(t.clone()),
+        _ => None,
+    }
+}
+
 /// The sites of one version of a file.
-fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
+fn sites(row: &Row, out: &mut Vec<Prep>) {
     let Some(per) = ifaces::decode(&row.payload) else {
         return;
     };
+    // The names the file binds to an env var, and its named clients' bases.
+    let mut bound: HashMap<String, String> = HashMap::new();
+    let mut clients: HashMap<String, Vec<(bool, String)>> = HashMap::new();
+    for (_, _, facts) in &per {
+        for f in facts {
+            match f.kind {
+                FactKind::EnvRead => {
+                    if let (Some(k), Some(n)) = (
+                        attr(&f.attrs, "key").and_then(name_of),
+                        attr(&f.attrs, "name").and_then(name_of),
+                    ) {
+                        bound.insert(n, k);
+                    }
+                }
+                FactKind::ClientBase => {
+                    if let (Some(n), Some(u)) = (
+                        attr(&f.attrs, "name").and_then(name_of),
+                        attr(&f.attrs, "url"),
+                    ) {
+                        clients.insert(n, pieces(u));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     for (name, version, facts) in per {
         for f in facts {
             let key = |kind| SiteKey {
                 file: row.file,
                 span: f.span.0,
+                env: 0,
                 kind,
             };
             let kind = match f.evidence.kind {
@@ -233,6 +325,7 @@ fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
                 raw,
                 template,
                 host: false,
+                cfg: None,
             };
             match f.kind {
                 FactKind::Route => {
@@ -253,14 +346,14 @@ fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
                         .collect();
                     let t = normalise_route(&method, &raw);
                     let info = mk_info(t.to_string(), raw);
-                    out.push((
+                    out.push(Prep::Site(
                         Site::Route(RouteSite {
                             key: key(Kind::Route),
                             service: row.service,
                             method: t.method,
                             segs: t.segs,
                         }),
-                        info,
+                        Box::new(info),
                     ));
                 }
                 FactKind::HttpCall => {
@@ -270,12 +363,28 @@ fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
                     let Some(url) = attr(&f.attrs, "url") else {
                         continue;
                     };
-                    let ps = pieces(url);
+                    let mut ps = pieces(url);
+                    // A call through a named client starts with the client's base; one through a
+                    // client the file doesn't define isn't a call we know.
+                    if let Some(c) = attr(&f.attrs, "client").and_then(name_of) {
+                        match clients.get(&c) {
+                            Some(base) => {
+                                ps.splice(0..0, base.iter().cloned());
+                            }
+                            None if matches!(c.as_str(), "axios" | "got" | "ky") => {}
+                            None => continue,
+                        }
+                    }
+                    let var = ps
+                        .first()
+                        .filter(|(e, _)| *e)
+                        .and_then(|(_, t)| env_var(t, &bound));
                     let borrowed: Vec<(bool, &str)> =
                         ps.iter().map(|(e, t)| (*e, t.as_str())).collect();
-                    let Some(target) = call_target(&borrowed) else {
+                    let target = call_target(&borrowed);
+                    if target.is_none() && var.is_none() {
                         continue;
-                    };
+                    }
                     let raw: String = ps
                         .iter()
                         .map(|(e, t)| if *e { format!("${{{t}}}") } else { t.clone() })
@@ -286,16 +395,29 @@ fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
                         crate::links::http::normalise(&method, &raw).path()
                     );
                     let mut info = mk_info(template, raw);
-                    info.host = target.host.is_some();
-                    out.push((
-                        Site::Call(CallSite {
+                    info.host = target.as_ref().is_some_and(|t| t.host.is_some());
+                    let generic = target.map(|target| CallSite {
+                        key: key(Kind::Call),
+                        service: row.service,
+                        method: method.clone(),
+                        target,
+                    });
+                    match var {
+                        Some(var) => out.push(Prep::Env(Box::new(EnvCall {
                             key: key(Kind::Call),
+                            pieces: ps,
+                            var,
                             service: row.service,
                             method,
-                            target,
-                        }),
-                        info,
-                    ));
+                            generic,
+                            info,
+                        }))),
+                        None => {
+                            if let Some(g) = generic {
+                                out.push(Prep::Site(Site::Call(g), Box::new(info)));
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -305,7 +427,9 @@ fn sites(row: &Row, out: &mut Vec<(Site, Info)>) {
 
 type Link = (i64, i64);
 type EvidenceRow = (i64, &'static str, String, [u32; 4], String, String);
-type UnresolvedRow = (i64, String, u32, &'static str, String, i64, Option<i64>);
+type UnresolvedRow = (i64, String, u32, String, String, i64, Option<i64>);
+/// (link, environment, key, value, source): what a link was resolved through.
+type CfgKey = (Link, i64, String, String, String);
 
 /// One commit's events, netted before they touch a link.
 #[derive(Default)]
@@ -342,6 +466,10 @@ struct Out {
     types: BTreeMap<Link, BTreeSet<Ev>>,
     /// (file, template, line, reason, raw, from, to)
     unresolved: Vec<UnresolvedRow>,
+    /// Link -> the environments it holds in, bit i for environment id i.
+    envs: BTreeMap<Link, u32>,
+    /// What each link was resolved through, with the stretch it held: (what, from, to).
+    cfg: Vec<(CfgKey, i64, Option<i64>)>,
 }
 
 /// A binding of the contract layer: what joins an operation (none for an undocumented route) to
@@ -372,10 +500,14 @@ struct Sweep {
     resolver: HttpResolver,
     layer: Option<Layer>,
     info: HashMap<SiteKey, Info>,
+    /// What the sites that changed this commit said before it.
+    prev: HashMap<SiteKey, Info>,
     node_of: HashMap<i64, i64>,
     counts: HashMap<Link, i64>,
     open_at: HashMap<Link, usize>,
     unres_open: HashMap<SiteKey, (Reason, i64, usize)>,
+    cfg_counts: HashMap<CfgKey, i64>,
+    cfg_open: HashMap<CfgKey, usize>,
     out: Out,
 }
 
@@ -459,6 +591,17 @@ impl Sweep {
         let mut before: HashMap<Link, i64> = HashMap::new();
         for p in &s.close {
             if let Some(l) = link(p, &self.node_of).filter(|l| l.0 != l.1) {
+                let was = self.prev.get(&p.call).or_else(|| self.info.get(&p.call));
+                if let Some(c) = was.and_then(|i| i.cfg.as_ref()) {
+                    let k: CfgKey = (l, c.env, c.key.clone(), c.value.clone(), c.source.clone());
+                    let n = self.cfg_counts.entry(k.clone()).or_default();
+                    *n -= 1;
+                    if *n == 0
+                        && let Some(i) = self.cfg_open.remove(&k)
+                    {
+                        self.out.cfg[i].2 = Some(seq);
+                    }
+                }
                 before
                     .entry(l)
                     .or_insert_with(|| self.counts.get(&l).copied().unwrap_or(0));
@@ -474,6 +617,17 @@ impl Sweep {
                 .or_insert_with(|| self.counts.get(&l).copied().unwrap_or(0));
             *self.counts.entry(l).or_default() += 1;
             let types = self.out.types.entry(l).or_default();
+            if let Some(c) = self.info.get(&p.call).and_then(|i| i.cfg.as_ref()) {
+                types.insert(Ev::EnvResolvedBase);
+                *self.out.envs.entry(l).or_default() |= 1 << c.env;
+                let k: CfgKey = (l, c.env, c.key.clone(), c.value.clone(), c.source.clone());
+                let n = self.cfg_counts.entry(k.clone()).or_default();
+                *n += 1;
+                if *n == 1 {
+                    self.out.cfg.push((k.clone(), seq, None));
+                    self.cfg_open.insert(k, self.out.cfg.len() - 1);
+                }
+            }
             if let Some(i) = self.info.get(&p.call) {
                 match i.kind {
                     "literal" => types.insert(Ev::LiteralCallSiteUrl),
@@ -548,7 +702,7 @@ impl Sweep {
                 i.file,
                 i.template.clone(),
                 i.span[0],
-                r.as_str(),
+                r.as_str().to_owned(),
                 i.raw.clone(),
                 seq,
                 None,
@@ -672,28 +826,133 @@ type Timeline = (
     HashMap<(SiteKey, i64), Info>,
     HashMap<i64, i64>,
     BTreeMap<i64, Delta>,
+    // The variables the call sites read.
+    BTreeSet<String>,
+    // The calls no value reaches, as unresolved rows.
+    Vec<UnresolvedRow>,
 );
 
-fn timeline(rows: &[Row], aliases: &[Aliases], ops: &[OpRow]) -> Timeline {
+/// A config row as the resolver reads it: (source, value, from, to).
+type Cv = (String, Option<String>, i64, Option<i64>);
+
+/// Config rows by key, split into those of each environment and those of every one.
+#[derive(Default)]
+struct Values {
+    own: HashMap<(String, i64), Vec<Cv>>,
+    base: HashMap<String, Vec<Cv>>,
+}
+
+fn load_values(conn: &Connection) -> rusqlite::Result<Values> {
+    let mut v = Values::default();
+    let mut st = conn.prepare_cached(
+        "SELECT key, env_id, value, source, valid_from, valid_to FROM config_value
+         ORDER BY key, env_id, source, valid_from",
+    )?;
+    let mut rows = st.query([])?;
+    while let Some(r) = rows.next()? {
+        let key: String = r.get(0)?;
+        let cv: Cv = (r.get(3)?, r.get(2)?, r.get(4)?, r.get(5)?);
+        match r.get::<_, Option<i64>>(1)? {
+            Some(e) => v.own.entry((key, e)).or_default().push(cv),
+            None => v.base.entry(key).or_default().push(cv),
+        }
+    }
+    Ok(v)
+}
+
+fn timeline(
+    rows: &[Row],
+    aliases: &[Aliases],
+    ops: &[OpRow],
+    envs: &[Env],
+    values: &Values,
+) -> Timeline {
     let mut deltas: BTreeMap<i64, Delta> = BTreeMap::new();
     // What each add says about itself, by (site, commit): a later version of the same place
     // replaces it in order.
     let mut infos = HashMap::new();
     let mut node_of = HashMap::new();
+    let mut read = BTreeSet::new();
+    let mut unresolved: Vec<UnresolvedRow> = Vec::new();
+    let mut add = |deltas: &mut BTreeMap<i64, Delta>, site: Site, info: Info, from, to| {
+        let k = match &site {
+            Site::Call(c) => c.key.clone(),
+            Site::Route(r) => r.key.clone(),
+        };
+        if let Some(to) = to {
+            deltas.entry(to).or_default().remove.push(k.clone());
+        }
+        deltas.entry(from).or_default().add.push(site);
+        infos.insert((k, from), info);
+    };
     for row in rows {
         node_of.insert(row.file, row.node);
         let mut v = Vec::new();
         sites(row, &mut v);
-        for (site, info) in v {
-            let k = match &site {
-                Site::Call(c) => c.key.clone(),
-                Site::Route(r) => r.key.clone(),
+        for prep in v {
+            let e = match prep {
+                Prep::Site(site, info) => {
+                    add(&mut deltas, site, *info, row.from, row.to);
+                    continue;
+                }
+                Prep::Env(e) => e,
             };
-            if let Some(to) = row.to {
-                deltas.entry(to).or_default().remove.push(k.clone());
+            read.insert(e.var.clone());
+            // With no environment known, the call is what its own text says.
+            if envs.is_empty() {
+                if let Some(g) = e.generic {
+                    add(&mut deltas, Site::Call(g), e.info, row.from, row.to);
+                }
+                continue;
             }
-            deltas.entry(row.from).or_default().add.push(site);
-            infos.insert((k, row.from), info);
+            let none = Vec::new();
+            let base = values.base.get(&e.var).unwrap_or(&none);
+            for env in envs {
+                let own = values.own.get(&(e.var.clone(), env.id)).unwrap_or(&none);
+                for (from, to, found) in config::effective(own, base, (row.from, row.to)) {
+                    let Some((value, source)) = found else {
+                        unresolved.push((
+                            e.info.file,
+                            e.info.template.clone(),
+                            e.info.span[0],
+                            format!("no value for {} in {}", e.var, env.name),
+                            e.info.raw.clone(),
+                            from,
+                            to,
+                        ));
+                        continue;
+                    };
+                    let mut ps: Vec<(bool, &str)> =
+                        e.pieces.iter().map(|(x, t)| (*x, t.as_str())).collect();
+                    ps[0] = (false, value.as_str());
+                    let Some(target) = call_target(&ps) else {
+                        continue;
+                    };
+                    let mut info = e.info.clone();
+                    info.host = target.host.is_some();
+                    info.template = Template {
+                        method: e.method.clone(),
+                        segs: target.segs.clone(),
+                    }
+                    .to_string();
+                    info.cfg = Some(Cfg {
+                        env: env.id,
+                        key: e.var.clone(),
+                        value,
+                        source,
+                    });
+                    let site = CallSite {
+                        key: SiteKey {
+                            env: env.id as u8 + 1,
+                            ..e.key.clone()
+                        },
+                        service: e.service,
+                        method: e.method.clone(),
+                        target,
+                    };
+                    add(&mut deltas, Site::Call(site), info, from, to);
+                }
+            }
         }
     }
     for a in aliases {
@@ -740,10 +999,11 @@ fn timeline(rows: &[Row], aliases: &[Aliases], ops: &[OpRow]) -> Timeline {
                 raw: o.path.clone(),
                 template: t.to_string(),
                 host: false,
+                cfg: None,
             },
         );
     }
-    (deltas, infos, node_of, op_deltas)
+    (deltas, infos, node_of, op_deltas, read, unresolved)
 }
 
 /// Rebuilds the HTTP rows when the interface facts, the paths and versions of the files that
@@ -752,56 +1012,105 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
     let rows = load(conn)?;
     let aliases = load_aliases(conn)?;
     let ops = load_ops(conn)?;
-    let mut inputs: Vec<Vec<u8>> = rows
-        .iter()
-        .map(|r| {
-            let mut b = format!(
-                "site\0{}\0{}\0{}\0{:?}\0{}\0",
-                r.file, r.node, r.from, r.to, r.service
+    let contracts_key = contracts::built_key(conn)?;
+    let envs = config::environments(conn)?;
+    let values = load_values(conn)?;
+    // The keys the sites read when the pass last ran: only their values are inputs.
+    let stored: String = conn
+        .query_row(
+            "SELECT CAST(value AS TEXT) FROM meta WHERE key = ?1",
+            [READ_KEYS],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+    let inputs_key = |read: &BTreeSet<String>| {
+        let mut inputs: Vec<Vec<u8>> = rows
+            .iter()
+            .map(|r| {
+                let mut b = format!(
+                    "site\0{}\0{}\0{}\0{:?}\0{}\0",
+                    r.file, r.node, r.from, r.to, r.service
+                )
+                .into_bytes();
+                b.extend_from_slice(&r.blob);
+                b
+            })
+            .collect();
+        inputs.extend(aliases.iter().map(|a| {
+            format!(
+                "alias\0{}\0{:?}\0{}\0{}\0{:?}",
+                a.alias.host, a.alias.port, a.alias.service, a.from, a.to
             )
-            .into_bytes();
-            b.extend_from_slice(&r.blob);
-            b
-        })
+            .into_bytes()
+        }));
+        // The operations are rows of the contracts pass: its key says whether they changed.
+        inputs.push([b"contracts\0".as_slice(), &contracts_key].concat());
+        inputs.extend(
+            envs.iter()
+                .map(|e| format!("env\0{}\0{}", e.id, e.name).into_bytes()),
+        );
+        for k in read {
+            for (src, group) in [(values.base.get(k), None), (None, Some(&values.own))] {
+                let mut push = |env: Option<i64>, rows: &[Cv]| {
+                    for (source, v, f, t) in rows {
+                        inputs.push(
+                            format!("cfg\0{k}\0{env:?}\0{source}\0{v:?}\0{f}\0{t:?}").into_bytes(),
+                        );
+                    }
+                };
+                if let Some(rows) = src {
+                    push(None, rows);
+                }
+                if let Some(own) = group {
+                    for e in &envs {
+                        if let Some(rows) = own.get(&(k.clone(), e.id)) {
+                            push(Some(e.id), rows);
+                        }
+                    }
+                }
+            }
+        }
+        inputs.push(ifaces::version().into_bytes());
+        // A re-weight re-scores the links and nothing else.
+        inputs.push(
+            format!(
+                "{}\0{}",
+                confidence::EXTRACTOR,
+                confidence::extractor_version()
+            )
+            .into_bytes(),
+        );
+        key("http", HTTP_VERSION, inputs, config)
+    };
+    let before: BTreeSet<String> = stored
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
         .collect();
-    inputs.extend(aliases.iter().map(|a| {
-        format!(
-            "alias\0{}\0{:?}\0{}\0{}\0{:?}",
-            a.alias.host, a.alias.port, a.alias.service, a.from, a.to
-        )
-        .into_bytes()
-    }));
-    // The operations are rows of the contracts pass: its key says whether they changed.
-    inputs.push([b"contracts\0".as_slice(), &contracts::built_key(conn)?].concat());
-    inputs.push(ifaces::version().into_bytes());
-    // A re-weight re-scores the links and nothing else.
-    inputs.push(
-        format!(
-            "{}\0{}",
-            confidence::EXTRACTOR,
-            confidence::extractor_version()
-        )
-        .into_bytes(),
-    );
-    let k = key("http", HTTP_VERSION, inputs, config);
+    let k = inputs_key(&before);
     if !changed(conn, "http", "workspace", &k)? {
         return Ok(0);
     }
 
-    let (deltas, mut infos, node_of, op_deltas) = timeline(&rows, &aliases, &ops);
+    let (deltas, mut infos, node_of, op_deltas, read, no_value) =
+        timeline(&rows, &aliases, &ops, &envs, &values);
     let mut sweep = Sweep {
         resolver: HttpResolver::new(),
         layer: (!ops.is_empty()).then(Layer::default),
         info: HashMap::new(),
+        prev: HashMap::new(),
         node_of,
         counts: HashMap::new(),
         open_at: HashMap::new(),
         unres_open: HashMap::new(),
+        cfg_counts: HashMap::new(),
+        cfg_open: HashMap::new(),
         out: Out::default(),
     };
     let none = Delta::default();
     let seqs: BTreeSet<i64> = deltas.keys().chain(op_deltas.keys()).copied().collect();
     for seq in &seqs {
+        sweep.prev.clear();
         let (d, o) = (
             deltas.get(seq).unwrap_or(&none),
             op_deltas.get(seq).unwrap_or(&none),
@@ -811,17 +1120,24 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
                 Site::Call(c) => &c.key,
                 Site::Route(r) => &r.key,
             };
-            if let Some(i) = infos.remove(&(k.clone(), *seq)) {
-                sweep.info.insert(k.clone(), i);
+            if let Some(i) = infos.remove(&(k.clone(), *seq))
+                && let Some(old) = sweep.info.insert(k.clone(), i)
+            {
+                sweep.prev.insert(k.clone(), old);
             }
         }
         sweep.step(*seq, d, o);
     }
     let binds = sweep.layer.take().map(|l| l.rows).unwrap_or_default();
-    let out = sweep.out;
+    let mut out = sweep.out;
+    // One row per call and reason, whichever environment found it.
+    out.unresolved.extend(no_value);
+    out.unresolved.sort();
+    out.unresolved.dedup();
 
     conn.execute_batch(
-        "DELETE FROM evidence WHERE link IN (SELECT id FROM link WHERE kind = 'http');
+        "DELETE FROM link_config;
+         DELETE FROM evidence WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM interval WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM link WHERE kind = 'http';
          DELETE FROM unresolved WHERE fact_kind = 'http.call'; DELETE FROM binding;",
@@ -845,14 +1161,23 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         ])?;
     }
     let mut written = 0;
+    let mut ids: HashMap<Link, i64> = HashMap::new();
     for (l, spans) in &out.intervals {
         let types: Vec<Ev> = out.types.get(l).into_iter().flatten().copied().collect();
         let c = confidence::score(&types);
         conn.prepare_cached(
-            "INSERT INTO link (kind, src, dst, level, score) VALUES ('http', ?1, ?2, ?3, ?4)",
+            "INSERT INTO link (kind, src, dst, level, score, envs)
+             VALUES ('http', ?1, ?2, ?3, ?4, ?5)",
         )?
-        .execute(params![l.0, l.1, c.level.as_str(), c.score])?;
+        .execute(params![
+            l.0,
+            l.1,
+            c.level.as_str(),
+            c.score,
+            out.envs.get(l).map(|m| i64::from(*m))
+        ])?;
         let id = conn.last_insert_rowid();
+        ids.insert(*l, id);
         for (from, to) in spans {
             conn.prepare_cached(
                 "INSERT INTO interval (link, from_seq, to_seq) VALUES (?1, ?2, ?3)",
@@ -888,6 +1213,23 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         )?
         .execute(params![file, cut(template), line, reason, from, to, cut(raw)])?;
     }
-    record(conn, "http", "workspace", &k)?;
+    for ((l, env, key, value, source), from, to) in &out.cfg {
+        let Some(link) = ids.get(l) else { continue };
+        conn.prepare_cached(
+            "INSERT INTO link_config (link, env_id, key, value, source, from_seq, to_seq)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )?
+        .execute(params![link, env, key, value, source, from, to])?;
+    }
+    // The keys read now are the ones the next run hashes values for, so the key recorded is the
+    // one it will compute.
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+        params![
+            READ_KEYS,
+            read.iter().cloned().collect::<Vec<_>>().join("\n")
+        ],
+    )?;
+    record(conn, "http", "workspace", &inputs_key(&read))?;
     Ok(written)
 }

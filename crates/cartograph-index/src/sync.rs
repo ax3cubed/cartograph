@@ -75,6 +75,10 @@ pub struct Workspace {
     pub services: Vec<ServiceSpec>,
     /// The manifest's `contracts:` entries (XS-08).
     pub contracts: Vec<crate::contracts::ContractSpec>,
+    /// The manifest's `environments:` (XS-09).
+    pub environments: Vec<crate::config::EnvSpec>,
+    /// The manifest's `default_environment`.
+    pub default_environment: Option<String>,
 }
 
 impl Workspace {
@@ -84,12 +88,12 @@ impl Workspace {
         let mut ex = self.exclude.clone();
         ex.sort();
         // `deploy` marks the compose and k8s files the walk tracks (XS-02): an index from before
-        // them has none of their history, so it is walked again. `contracts` marks the
-        // spec files (XS-08) and the manifest's globs for more.
+        // them has none of their history, so it is walked again. `config` marks the value-source
+        // files (XS-09), `contracts` the spec files (XS-08) and the manifest's globs for more.
         let mut globs: Vec<&str> = self.contracts.iter().map(|c| c.path.as_str()).collect();
         globs.sort_unstable();
         let mut lines = vec![format!(
-            "{}\0deploy\0contracts\0{}",
+            "{}\0deploy\0config\0contracts\0{}",
             ex.join("\0"),
             globs.join("\0")
         )];
@@ -448,6 +452,8 @@ pub fn restructure(ws: &Workspace, repo: &str) -> Result<DerivedStats, SyncError
         }],
         services: &ws.services,
         contracts: &ws.contracts,
+        environments: &ws.environments,
+        default_environment: ws.default_environment.as_deref(),
         exclude: &ws.exclude,
         config_hash: ws.config_hash.as_deref(),
         ..Default::default()
@@ -1067,6 +1073,8 @@ fn round_on(
             .collect(),
         services: &ws.services,
         contracts: &ws.contracts,
+        environments: &ws.environments,
+        default_environment: ws.default_environment.as_deref(),
         exclude: &ws.exclude,
         config_hash: ws.config_hash.as_deref(),
         moved,
