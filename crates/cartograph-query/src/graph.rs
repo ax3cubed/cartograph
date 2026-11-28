@@ -328,11 +328,7 @@ impl Snapshot<'_> {
         let mut live: Vec<Live> = Vec::new();
         let mut rows = st.query([seq])?;
         while let Some(r) = rows.next()? {
-            let kind = match r.get_ref(5)?.as_str().unwrap_or("") {
-                "http" => LinkKind::Http,
-                "event" => LinkKind::Event,
-                _ => LinkKind::Imports,
-            };
+            let kind = crate::adjacency::link_kind(r.get_ref(5)?.as_str().unwrap_or(""));
             let score = r.get::<_, Option<f64>>(6)?.map_or(1.0, |s| s as f32);
             if keeps_link(q, kind, level(score)) {
                 live.push((
@@ -422,7 +418,7 @@ impl Snapshot<'_> {
                 // With repo=, a link into another repo has its other end outside the slice.
                 // Otherwise the indexer only links files it indexed; a dangling end is its bug,
                 // not ours to paper over silently.
-                if q.repo.is_none() {
+                if q.repo.is_none() && kind != LinkKind::Db {
                     tracing::warn!(
                         src,
                         dst,
@@ -654,7 +650,7 @@ impl Snapshot<'_> {
             None => None,
         };
         // Every node that isn't a file is a holder (`g.holders` has them all): one load, no hash.
-        let holder = |h: u32| h != NONE && g.kind[h as usize] != Kind::File;
+        let holder = |h: u32| h != NONE && !matches!(g.kind[h as usize], Kind::File | Kind::Table);
         let is_module = |h: u32| holder(h) && g.kind[h as usize] == Kind::Module;
         let module_level = q.lod == Lod::Module;
         // Each live file's holder at this level: its module, or its service when it is in none.
@@ -750,9 +746,18 @@ impl Snapshot<'_> {
         // Links: one per (holder, holder) pair, first seen in link id order.
         let mut links = empty_links();
         // Node to slice index, live files only: a link with any other end is dropped.
+        // A table (XS-17) stands for the service that owns it.
         let slot: Vec<u32> = of
             .iter()
-            .map(|&h| if h == NONE { NONE } else { index[h as usize] })
+            .enumerate()
+            .map(|(n, &h)| {
+                let h = if g.kind[n] == Kind::Table {
+                    g.service[n]
+                } else {
+                    h
+                };
+                if h == NONE { NONE } else { index[h as usize] }
+            })
             .collect();
         // The columns are sized for every edge or every pair, whichever is fewer, so they never
         // grow: growing them cost a fifth of the module level.
