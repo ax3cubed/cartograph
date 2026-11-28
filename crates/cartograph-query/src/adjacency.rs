@@ -37,6 +37,8 @@ pub(crate) struct Edge {
     pub to: u32,
     /// Parsed imports are 1.0 until other layers write scores (XS items).
     pub score: f32,
+    /// The environments the link holds in, bit i for environment id i; 0: every one (XS-09).
+    pub envs: u32,
 }
 
 impl Edge {
@@ -161,7 +163,7 @@ impl Adjacency {
 
         let mut edges = Vec::new();
         let mut st = c.prepare_cached(
-            "SELECT l.id, l.kind, l.src, l.dst, i.from_seq, i.to_seq, l.score
+            "SELECT l.id, l.kind, l.src, l.dst, i.from_seq, i.to_seq, l.score, l.envs
              FROM interval i JOIN link l ON l.id = i.link",
         )?;
         let mut rows = st.query([])?;
@@ -183,6 +185,7 @@ impl Adjacency {
                 to: r.get::<_, Option<i64>>(5)?.map_or(NONE, |t| t as u32),
                 // Only HTTP links carry a score (XS-05); imports are parsed, so 1.0.
                 score: r.get::<_, Option<f64>>(6)?.map_or(1.0, |s| s as f32),
+                envs: r.get::<_, Option<i64>>(7)?.map_or(0, |m| m as u32),
             });
         }
         drop(rows);

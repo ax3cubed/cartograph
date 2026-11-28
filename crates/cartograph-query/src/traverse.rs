@@ -462,6 +462,8 @@ pub struct NeighborQuery {
     /// Only links between two services.
     pub cross_service: bool,
     pub min_score: f32,
+    /// Only links that hold in this environment (XS-09); links that depend on none always do.
+    pub env: Option<String>,
 }
 
 /// One link a neighbourhood walk crossed.
@@ -489,6 +491,7 @@ impl Snapshot<'_> {
         let (c, _) = self.step(at)?;
         let g = self.adjacency()?;
         let seq = c.seq as u32;
+        let env_bit = q.env.as_deref().map(|n| self.env_bit(n)).transpose()?;
         let scope = self.scope(&g, node, c.seq)?.scope;
         let seeds = g.members(scope);
         let depth = q.depth.clamp(1, 5);
@@ -500,6 +503,7 @@ impl Snapshot<'_> {
         let keep = |e: &Edge| {
             e.live(seq)
                 && e.score >= q.min_score
+                && env_bit.is_none_or(|b| e.envs == 0 || e.envs & b != 0)
                 && q.kinds.as_ref().is_none_or(|k| k.contains(&e.kind))
                 && (!q.cross_service || g.service[e.src as usize] != g.service[e.dst as usize])
                 && !(g.within(e.src, scope) && g.within(e.dst, scope))

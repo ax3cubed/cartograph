@@ -648,6 +648,17 @@ impl Snapshot<'_> {
     /// `at`), the layer that won and its evidence. Evidence notes are fixed text; the file is the
     /// importer's path.
     pub fn link_detail(&self, id: &str, at: &At) -> Result<LinkDetail, QueryError> {
+        self.link_detail_in(id, at, None)
+    }
+
+    /// [`Self::link_detail`] with the environment (XS-09) the call is resolved in: `env`, else
+    /// the workspace's default.
+    pub fn link_detail_in(
+        &self,
+        id: &str,
+        at: &At,
+        env: Option<&str>,
+    ) -> Result<LinkDetail, QueryError> {
         let (c, _) = self.step(at)?;
         let g = self.adjacency()?;
         let missing = || QueryError::NotFound {
@@ -676,11 +687,29 @@ impl Snapshot<'_> {
         let http = e.kind == LinkKind::Http;
         let mut evidence = EvidenceGroups::default();
         let mut operation = None;
+        let mut resolved = crate::config::LinkEnv {
+            env: None,
+            envs: vec![],
+            config: vec![],
+        };
         if http {
             // Read the files as they were while the link was live, nearest to `at`.
             let last = if e.to == NONE { u32::MAX } else { e.to - 1 };
             let seq = seq.clamp(e.from, last);
             (evidence, operation) = self.http_evidence(row, i64::from(seq))?;
+            resolved = self.link_env(row, i64::from(seq), env)?;
+            if let Some(name) = &resolved.env {
+                link.confidence.evidence = resolved
+                    .config
+                    .iter()
+                    .map(|c| Evidence {
+                        kind: EvidenceKind::Env,
+                        note: format!("{} is {} in {name}", c.key, c.value),
+                        file: Some(c.source.clone()),
+                        line: None,
+                    })
+                    .collect();
+            }
         } else {
             let file = self.wire_node(g.row[e.src as usize], c.seq)?.path;
             link.confidence.evidence = vec![Evidence {
@@ -725,6 +754,9 @@ impl Snapshot<'_> {
             evidence,
             replaced,
             correction_id: None,
+            env: resolved.env,
+            envs: resolved.envs,
+            config: resolved.config,
         })
     }
 

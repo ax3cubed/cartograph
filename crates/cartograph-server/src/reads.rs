@@ -52,6 +52,7 @@ pub(crate) fn router() -> Router<Arc<App>> {
         .route("/api/v1/w/{ws}/runs", get(runs))
         .route("/api/v1/w/{ws}/extractors", get(extractors))
         .route("/api/v1/w/{ws}/services", get(services))
+        .route("/api/v1/w/{ws}/environments", get(environments))
         .route("/api/v1/w/{ws}/owners", get(owners))
         .route("/api/v1/w/{ws}/contracts", get(contracts))
         .route(
@@ -144,7 +145,11 @@ node_read!(series, |s, id, at, p| s.series(
 ));
 node_read!(history, |s, id, _at, _p| s.history(&id));
 node_read!(symbols, |s, id, _at, _p| s.symbols(&id));
-node_read!(link, |s, id, at, _p| s.link_detail(&id, &at));
+node_read!(link, |s, id, at, p| s.link_detail_in(
+    &id,
+    &at,
+    p.env.as_deref()
+));
 node_page!(children, |s, id, at, page| s.children(&id, &at, page));
 node_page!(neighbors, |s, id, at, page| s.neighbors(&id, &at, page));
 node_page!(changes, |s, id, at, page| s.changes(&id, &at, page));
@@ -691,6 +696,10 @@ async fn contract_diff(
         Err(e) => return e,
     };
     read(app, ws, move |s| s.contract_diff(&id, p.from, p.to)).await
+}
+
+async fn environments(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
+    read(app, ws, |s| s.environments()).await
 }
 
 /// Owners from CODEOWNERS (XS-23): who owns how many files now.

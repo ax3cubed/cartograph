@@ -114,7 +114,7 @@ pub fn routes() -> Vec<Route> {
         r("GET", w!("/nodes/{id}/history"), R, READ, None, Json(s::<Vec<Lineage>>), "SRV-08", "Lineage (board G10)"),
         r("GET", w!("/nodes/{id}/symbols"), R, READ, None, Json(s::<Vec<Node>>), "SRV-08", "Symbols in a file"),
         r("GET", w!("/nodes/{id}/reading-order"), R, READ, None, Json(s::<Vec<NodeId>>), "SRV-08", "Suggested reading order"),
-        r("GET", w!("/links/{id}"), R, &["at"], None, Json(s::<LinkDetail>), "SRV-08", "Evidence, level, score, layer, interval, replaced-by"),
+        r("GET", w!("/links/{id}"), R, &["at", "env"], None, Json(s::<LinkDetail>), "SRV-08", "Evidence, level, score, layer, interval, replaced-by"),
         r("GET", w!("/symbols/{id}"), R, &["at"], None, Json(s::<SymbolCalls>), "XS-25", "Callers and callees grouped by file"),
         r("GET", w!("/source"), R, &["node", "commit", "lines"], None, Text, "SRV-08", "Blob text, 400 lines and 64 KB at most"),
         r("GET", w!("/search"), R, &["q", "kinds", "at", "scope", "limit"], None, Json(s::<SearchResults>), "SRV-09", "Search, grouped by kind; the Ask @ picker"),

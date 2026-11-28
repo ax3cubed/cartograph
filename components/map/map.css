@@ -211,3 +211,6 @@ select.map-inp { font-family: var(--font-mono); font-size: 0.78rem; }
 .map-line-hint .is-touch { display: none; }
 @media (hover: none) { .map-line-hint .is-touch { display: inline; } .map-line-hint .is-mouse { display: none; } }
 .map-snip { margin: 4px 0 0; padding: 6px 8px; font-size: 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--line3); border-radius: 4px; }
+.map-cfg { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.map-cfg th { text-align: left; color: var(--muted); font-weight: 600; padding: 2px 8px 2px 0; }
+.map-cfg td { padding: 2px 8px 2px 0; overflow-wrap: anywhere; }

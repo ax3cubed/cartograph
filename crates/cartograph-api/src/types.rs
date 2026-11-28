@@ -178,6 +178,9 @@ pub struct ReadParams {
     pub cursor: Option<String>,
     /// Comma-separated optional parts, e.g. `summary,metrics`.
     pub include: Option<String>,
+    /// An environment name (XS-09), for the reads that depend on one. Absent: the workspace's
+    /// default, `default_environment` in the manifest, else `prod`, else the first.
+    pub env: Option<String>,
 }
 
 // ---------------------------------------------------------------- meta and workspaces
@@ -510,6 +513,28 @@ pub struct LinkDetail {
     /// A link between the same two services that closed in the commit this one opened.
     pub replaced: Option<LinkId>,
     pub correction_id: Option<String>,
+    /// The environment `config` is for (`?env=`, else the default); null when the link doesn't
+    /// depend on one (XS-09).
+    pub env: Option<String>,
+    /// Every environment the link holds in.
+    pub envs: Vec<String>,
+    /// How `env` resolves the call, in order: the key the call site reads, the value it has there
+    /// and the host that value names.
+    pub config: Vec<LinkConfig>,
+}
+
+/// One step of the chain from a call site to a service: key, value, host (XS-09).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkConfig {
+    /// `CATALOG_URL`.
+    pub key: String,
+    /// What the key is set to: a URL without userinfo, query or fragment, or `host[:port]`.
+    pub value: String,
+    /// The host in `value`: the column the inspector shows per environment.
+    pub host: String,
+    /// The file that sets it, repo-relative as the index sees paths; `cartograph.yaml` for a
+    /// value set by hand.
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1009,6 +1034,9 @@ pub struct Service {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Environment {
     pub name: String,
+    /// The workspace's default: `default_environment`, else `prod`, else the first.
+    pub is_default: bool,
+    /// Key to value, as of the newest commit: only values that classify as locators (XS-10).
     pub values: BTreeMap<String, String>,
 }
 

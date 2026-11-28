@@ -1209,6 +1209,10 @@
       },
       "Environment": {
         "properties": {
+          "is_default": {
+            "description": "The workspace's default: `default_environment`, else `prod`, else the first.",
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -1216,11 +1220,13 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Key to value, as of the newest commit: only values that classify as locators (XS-10).",
             "type": "object"
           }
         },
         "required": [
           "name",
+          "is_default",
           "values"
         ],
         "type": "object"
@@ -2220,6 +2226,34 @@
         ],
         "type": "object"
       },
+      "LinkConfig": {
+        "description": "One step of the chain from a call site to a service: key, value, host (XS-09).",
+        "properties": {
+          "host": {
+            "description": "The host in `value`: the column the inspector shows per environment.",
+            "type": "string"
+          },
+          "key": {
+            "description": "`CATALOG_URL`.",
+            "type": "string"
+          },
+          "source": {
+            "description": "The file that sets it, repo-relative as the index sees paths; `cartograph.yaml` for a\nvalue set by hand.",
+            "type": "string"
+          },
+          "value": {
+            "description": "What the key is set to: a URL without userinfo, query or fragment, or `host[:port]`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "host",
+          "source"
+        ],
+        "type": "object"
+      },
       "LinkDetail": {
         "properties": {
           "closed": {
@@ -2232,11 +2266,32 @@
               }
             ]
           },
+          "config": {
+            "description": "How `env` resolves the call, in order: the key the call site reads, the value it has there\nand the host that value names.",
+            "items": {
+              "$ref": "#/components/schemas/LinkConfig"
+            },
+            "type": "array"
+          },
           "correction_id": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "env": {
+            "description": "The environment `config` is for (`?env=`, else the default); null when the link doesn't\ndepend on one (XS-09).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "envs": {
+            "description": "Every environment the link holds in.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "evidence": {
             "$ref": "#/components/schemas/EvidenceGroups",
@@ -2290,7 +2345,9 @@
           "link",
           "interval",
           "opened",
-          "evidence"
+          "evidence",
+          "envs",
+          "config"
         ],
         "type": "object"
       },
@@ -9846,6 +9903,14 @@
           {
             "in": "query",
             "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "env",
             "required": false,
             "schema": {
               "type": "string"

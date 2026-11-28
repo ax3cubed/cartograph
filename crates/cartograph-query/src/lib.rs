@@ -17,6 +17,7 @@
 mod adjacency;
 mod at;
 mod contracts;
+mod config;
 mod coverage;
 mod detail;
 mod error;
