@@ -118,7 +118,7 @@ fn a_fetch_links_to_the_route_until_the_route_is_deleted() {
                 "orders/src/server.ts".into(),
                 "literal".into(),
                 4,
-                "express@1.0.0".into()
+                "express@1.1.0".into()
             ),
             (
                 "web/src/api.ts".into(),
