@@ -82,6 +82,9 @@ pub struct Contract {
     pub unresolved: Vec<Unresolved>,
     /// A cap cut the operations or the schemas short.
     pub truncated: bool,
+    /// An AsyncAPI document (XS-16): operations are `publish` or `subscribe` on a channel address,
+    /// seen from the application.
+    pub events: bool,
 }
 
 /// Why a document was not read.
@@ -108,7 +111,7 @@ pub struct Env<'a> {
 pub fn named(path: &str) -> bool {
     let b = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     (b.ends_with(".yaml") || b.ends_with(".yml") || b.ends_with(".json"))
-        && (b.contains("openapi") || b.contains("swagger"))
+        && (b.contains("openapi") || b.contains("swagger") || b.contains("asyncapi"))
 }
 
 /// Whether the file is YAML or JSON at all.
@@ -191,7 +194,7 @@ fn unescape(seg: &str) -> String {
 }
 
 /// The value a JSON pointer (`/components/schemas/Order`, or empty for the document) names.
-fn pointer<'a>(doc: &'a Value, ptr: &str) -> Option<&'a Value> {
+pub(crate) fn pointer<'a>(doc: &'a Value, ptr: &str) -> Option<&'a Value> {
     let mut cur = doc;
     for seg in ptr.strip_prefix('/').into_iter().flat_map(|p| p.split('/')) {
         let seg = unescape(seg);
@@ -443,12 +446,18 @@ pub fn parse(bytes: &[u8], env: Option<Env<'_>>) -> Result<Option<Contract>, Ref
     }
     // A cheap look first: most YAML and JSON files are not specs.
     let has = |n: &[u8]| bytes.windows(n.len()).any(|w| w == n);
-    if !has(b"openapi") && !has(b"swagger") {
+    if !has(b"openapi") && !has(b"swagger") && !has(b"asyncapi") {
         return Ok(None);
     }
     let Some(root) = load(bytes) else {
         return Ok(None);
     };
+    if let Some(Value::String(v)) = root.get("asyncapi") {
+        if too_deep(&root) {
+            return Err(Refused::Hostile);
+        }
+        return Ok(crate::asyncapi::read(&root, v, bytes));
+    }
     let version = match (root.get("openapi"), root.get("swagger")) {
         (Some(Value::String(v)), _) if v.starts_with("3.") => v.clone(),
         (_, Some(Value::String(v))) if v == "2.0" => v.clone(),
@@ -597,7 +606,7 @@ impl Extractor for ManifestOpenapi {
         KIND
     }
     fn version(&self) -> &'static str {
-        "1.1.0"
+        "1.2.0"
     }
     fn kinds(&self) -> &'static [&'static str] {
         &[KIND]
@@ -647,6 +656,9 @@ pub fn facts(c: &Contract) -> Vec<Fact> {
         target: u.target.clone(),
         reason: u.reason.clone(),
     }));
+    if c.events {
+        out.push(Fact::AsyncApi);
+    }
     out.sort();
     out.dedup();
     out
@@ -693,6 +705,7 @@ pub fn from_facts(facts: &[Fact]) -> Option<Contract> {
                 target: target.clone(),
                 reason: reason.clone(),
             }),
+            Fact::AsyncApi => c.events = true,
             _ => {}
         }
     }

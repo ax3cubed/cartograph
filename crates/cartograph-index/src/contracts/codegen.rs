@@ -141,6 +141,30 @@ fn names(symbol: &str) -> Vec<String> {
     }
 }
 
+/// A def of generated gRPC code (XS-18): `RPC` for one rpc, `SERVE` for a service.
+fn grpc(attrs: &cartograph_facts::schema::Attrs) -> bool {
+    matches!(attrs.get("method"), Some(AttrValue::Str(s)) if matches!(s.as_str(), "RPC" | "SERVE"))
+}
+
+/// The names callers use for a generated gRPC def: `client.Get` (Go) and `client.get` (connect-es)
+/// for the rpc `/pkg.Orders/Get`, and `RegisterOrdersServer` for the service `/pkg.Orders`.
+fn grpc_names(method: &str, path: &str) -> Vec<String> {
+    let last = |s: &'static str, p: &str| p.rsplit(s).next().unwrap_or_default().to_owned();
+    if method == "SERVE" {
+        return vec![format!("Register{}Server", last(".", path))];
+    }
+    let m = last("/", path);
+    let mut lower = m.clone();
+    if let Some(c) = lower.get_mut(..1) {
+        c.make_ascii_lowercase();
+    }
+    let mut v = vec![m];
+    if v[0] != lower {
+        v.push(lower);
+    }
+    v
+}
+
 /// What the adapters' facts of one blob say, in `found`.
 pub(crate) fn read(payload: &[u8], found: &mut Found) {
     let has = |n: &[u8]| payload.windows(n.len()).any(|w| w == n);
@@ -158,6 +182,24 @@ pub(crate) fn read(payload: &[u8], found: &mut Found) {
                     found
                         .generator
                         .get_or_insert(attr("generator", true).unwrap_or_default());
+                }
+                FactKind::SymbolDef if grpc(&f.attrs) => {
+                    let (Some(method), Some(path)) = (
+                        attr("method", true),
+                        attr("path", false).or_else(|| {
+                            Some(format!(
+                                "{}/{}",
+                                attr("service", false)?,
+                                attr("rpc", false)?
+                            ))
+                        }),
+                    ) else {
+                        continue;
+                    };
+                    let path = format!("/{}", path.trim_start_matches('/'));
+                    found
+                        .defs
+                        .push((grpc_names(&method, &path), method, path, f.span.0[0]));
                 }
                 FactKind::SymbolDef => {
                     let (Some(symbol), Some(method), Some(path)) = (
@@ -226,6 +268,59 @@ pub(crate) fn link(defs: &[Def], refs: &[Ref], ops: &[Op]) -> (Vec<Alias>, Vec<C
         }
     }
     (aliases, calls)
+}
+
+/// A route of a gRPC service that a file registers (XS-18): `RegisterOrdersServer(s, impl)` serves
+/// every rpc of the service the generated code says it registers.
+pub(crate) struct Served {
+    pub file: i64,
+    pub service: i64,
+    pub at: [u32; 4],
+    pub op: i64,
+    pub method: String,
+    pub path: String,
+    pub name: String,
+    pub extractor: String,
+    pub span: Span,
+}
+
+/// The routes of the services that files of the same service register, by the operations of the
+/// protos that have the service's rpcs.
+pub(crate) fn serve(defs: &[Def], refs: &[Ref], ops: &[Op]) -> Vec<Served> {
+    let mut out = Vec::new();
+    for d in defs
+        .iter()
+        .filter(|d| d.method == "serve" && !d.segs.is_empty())
+    {
+        for o in ops
+            .iter()
+            .filter(|o| o.method == "rpc" && o.segs.starts_with(&d.segs))
+        {
+            let Some(span) = meet(d.span, o.span) else {
+                continue;
+            };
+            for r in refs
+                .iter()
+                .filter(|r| d.names.contains(&r.name) && r.service == d.service && r.file != d.file)
+            {
+                let Some(span) = meet(span, r.span) else {
+                    continue;
+                };
+                out.push(Served {
+                    file: r.file,
+                    service: r.service,
+                    at: r.at,
+                    op: o.id,
+                    method: o.method.clone(),
+                    path: o.path.clone(),
+                    name: r.name.clone(),
+                    extractor: r.extractor.clone(),
+                    span,
+                });
+            }
+        }
+    }
+    out
 }
 
 /// A def's method and path as the matcher reads them.

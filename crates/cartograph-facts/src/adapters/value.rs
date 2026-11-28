@@ -46,9 +46,26 @@ fn push_lit(out: &mut Vec<Seg>, s: &str) {
 
 fn collect(n: Node, src: &[u8], out: &mut Vec<Seg>) {
     match n.kind() {
-        "string" | "interpreted_string_literal" | "raw_string_literal" => {
-            push_lit(out, unquote(text(n, src)))
+        // Python's strings hold their own pieces: `f"/orders/{id}"` is text and an interpolation.
+        "string" if n.child(0).is_some_and(|c| c.kind() == "string_start") => {
+            let mut c = n.walk();
+            for k in n.named_children(&mut c) {
+                match k.kind() {
+                    "string_content" => push_lit(out, text(k, src)),
+                    "interpolation" => {
+                        out.push(expr(k.named_child(0).map_or("", |i| text(i, src))))
+                    }
+                    _ => {}
+                }
+            }
         }
+        "string"
+        | "encapsed_string"
+        | "interpreted_string_literal"
+        | "raw_string_literal"
+        | "string_scalar"
+        | "double_quote_scalar"
+        | "single_quote_scalar" => push_lit(out, unquote(text(n, src))),
         // A name the code spells out (`.get` in `axios.get(…)`), not a value worked out at run time.
         "property_identifier" => push_lit(out, text(n, src)),
         "template_string" => {
@@ -71,9 +88,10 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Seg>) {
                 None => out.push(expr(text(n, src))),
             }
         }
-        "binary_expression"
+        // `+` in JS, Go and Python; `.` in PHP.
+        "binary_expression" | "binary_operator"
             if n.child_by_field_name("operator")
-                .is_some_and(|o| text(o, src) == "+") =>
+                .is_some_and(|o| matches!(text(o, src), "+" | ".")) =>
         {
             for side in ["left", "right"] {
                 match n.child_by_field_name(side) {

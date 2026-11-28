@@ -6,6 +6,7 @@ pub mod config;
 pub mod contracts;
 pub mod corrections;
 pub mod derive;
+pub mod events;
 pub mod extract;
 pub mod freshness;
 pub mod http;
@@ -16,6 +17,7 @@ pub mod owners;
 mod rows;
 pub mod structure;
 pub mod sync;
+mod tables;
 pub mod timeline;
 
 use std::path::Path;

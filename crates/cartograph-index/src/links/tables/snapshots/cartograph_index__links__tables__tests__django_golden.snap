@@ -1,0 +1,6 @@
+---
+source: crates/cartograph-index/src/links/tables/tests.rs
+expression: "show(\"shop/models.py\", src)"
+---
+db.table.def shop_order django convention - line 1
+db.table.def line_items django literal - line 4

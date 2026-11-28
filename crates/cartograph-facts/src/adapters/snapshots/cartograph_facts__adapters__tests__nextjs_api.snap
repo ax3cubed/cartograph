@@ -1,0 +1,6 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"route","span":[3,0,5,1],"attrs":{"method":"ANY"},"evidence":{"type":"literal","text":"export default function handler(req: NextApiRequest, res: NextApiResponse) { res.status(200).json({}); }"}}
+path_rule route /api/orders

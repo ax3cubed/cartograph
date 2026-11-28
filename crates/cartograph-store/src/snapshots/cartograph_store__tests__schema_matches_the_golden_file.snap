@@ -23,6 +23,15 @@ CREATE TABLE blob_ref (
   version TEXT NOT NULL,
   payload BLOB NOT NULL
 ) STRICT, WITHOUT ROWID;
+CREATE TABLE channel_edge (
+  broker TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  file INTEGER NOT NULL REFERENCES file (id),
+  line INTEGER NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
 CREATE TABLE client_alias (
   operation INTEGER NOT NULL REFERENCES operation (id),
   file INTEGER NOT NULL REFERENCES file (id),
@@ -61,7 +70,8 @@ CREATE TABLE contract (
   file INTEGER NOT NULL REFERENCES file (id),
   service INTEGER REFERENCES node (id),
   title TEXT NOT NULL,
-  version TEXT NOT NULL
+  version TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'openapi'
 ) STRICT;
 CREATE TABLE contract_schema (
   contract INTEGER NOT NULL REFERENCES contract (id),
@@ -343,6 +353,8 @@ CREATE TABLE unresolved (
 CREATE INDEX archived_interval_rewrite ON archived_interval (rewrite);
 CREATE INDEX binding_kind ON binding (kind, from_seq);
 CREATE INDEX binding_operation ON binding (operation);
+CREATE INDEX channel_edge_file ON channel_edge (file);
+CREATE INDEX channel_edge_name ON channel_edge (name, broker);
 CREATE INDEX client_alias_operation ON client_alias (operation);
 CREATE INDEX codeowners_repo ON codeowners (repo, from_seq);
 CREATE UNIQUE INDEX commits_repo_sha ON commits (repo, sha);

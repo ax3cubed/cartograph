@@ -1,0 +1,8 @@
+---
+source: crates/cartograph-index/src/links/tables/tests.rs
+expression: "show(\"db/migrations/001.sql\", sql)"
+---
+db.table.def orders sql literal create line 1
+db.table.def orders sql literal alter line 3
+db.table.def legacy sql literal drop line 5
+db.table.def items sql literal create line 7

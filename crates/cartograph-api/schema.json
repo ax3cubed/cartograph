@@ -2504,18 +2504,27 @@
       "type": "object"
     },
     "Method": {
-      "enum": [
-        "GET",
-        "POST",
-        "PUT",
-        "PATCH",
-        "DELETE",
-        "OPTIONS",
-        "HEAD",
-        "TRACE",
-        "EVENT"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+            "HEAD",
+            "TRACE",
+            "EVENT"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "RPC",
+          "description": "A gRPC method (XS-18): `/pkg.Service/Method`.",
+          "type": "string"
+        }
+      ]
     },
     "Metrics": {
       "properties": {
@@ -2792,8 +2801,23 @@
           "description": "With the spec's base path, as the spec writes it: `/v1/orders/{id}`.",
           "type": "string"
         },
+        "publishers": {
+          "default": [],
+          "description": "For an event operation (an AsyncAPI channel, XS-16): the files that publish to the channel\nand the files that subscribe to it, with how sure the best event link of each is.",
+          "items": {
+            "$ref": "#/definitions/Caller"
+          },
+          "type": "array"
+        },
         "status": {
           "$ref": "#/definitions/OperationStatus"
+        },
+        "subscribers": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/Caller"
+          },
+          "type": "array"
         },
         "summary": {
           "description": "From the spec: untrusted text (F8), at most 200 characters.",
@@ -4251,7 +4275,8 @@
     "SpecKind": {
       "enum": [
         "openapi",
-        "events"
+        "events",
+        "proto"
       ],
       "type": "string"
     },

@@ -1,0 +1,5 @@
+name = "grpc"
+version = "1.0.0"
+language = "go"
+files = ["**/*.go"]
+requires = ["grpc"]

@@ -1,0 +1,8 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"http.call","span":[8,4,8,57],"attrs":{"method":"GET","url":{"parts":[{"lit":"http://orders:8080/orders/"},{"expr":"order_id"}]}},"evidence":{"type":"template","text":"requests.get(f\"http://orders:8080/orders/{order_id}\")"}}
+{"kind":"http.call","span":[9,4,9,55],"attrs":{"method":"POST","url":"http://orders:8080/orders"},"evidence":{"type":"literal","text":"requests.post(\"http://orders:8080/orders\", json={})"}}
+{"kind":"http.call","span":[10,11,10,31],"attrs":{"client":{"parts":[{"expr":"api"}]},"method":"GET","url":"/orders/1"},"evidence":{"type":"template","text":"api.get(\"/orders/1\")"}}
+{"kind":"client.base","span":[4,0,4,49],"attrs":{"name":{"parts":[{"expr":"api"}]},"url":"http://orders:8080"},"evidence":{"type":"template","text":"api = httpx.Client(base_url=\"http://orders:8080\")"}}

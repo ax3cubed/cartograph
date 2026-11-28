@@ -1,0 +1,8 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"route","span":[5,0,5,60],"attrs":{"method":"GET","path":"/orders/{id}"},"evidence":{"type":"literal","text":"Route::get('/orders/{id}', [OrderController::class, 'show'])"}}
+{"kind":"route","span":[6,0,6,57],"attrs":{"method":"POST","path":"/orders"},"evidence":{"type":"literal","text":"Route::post('/orders', [OrderController::class, 'store'])"}}
+{"kind":"route","span":[9,4,9,70],"attrs":{"method":"DELETE","path":"/orders/{id}","prefix":"admin"},"evidence":{"type":"literal","text":"Route::delete('/orders/{id}', [AdminController::class, 'destroy'])"}}
+path_rule prefix /api

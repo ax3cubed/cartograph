@@ -23,6 +23,20 @@ pub(crate) enum Kind {
     Module,
     Service,
     Library,
+    /// A table node (XS-17): in no scope, and owned by a service.
+    Table,
+}
+
+/// The wire kind of a stored link kind: `package` links are imports of a workspace package, and
+/// the wire has one kind for both.
+pub(crate) fn link_kind(stored: &str) -> LinkKind {
+    match stored {
+        "http" => LinkKind::Http,
+        "db" => LinkKind::Db,
+        "event" => LinkKind::Event,
+        // `package` links are imports of a workspace package; the wire has one kind for both.
+        _ => LinkKind::Imports,
+    }
 }
 
 /// One interval of one link: the link is live at steps `from <= s < to`.
@@ -126,6 +140,7 @@ impl Adjacency {
                 "module" => Kind::Module,
                 "service" => Kind::Service,
                 "library" => Kind::Library,
+                "table" => Kind::Table,
                 _ => Kind::File,
             });
             parent_row.push(r.get::<_, Option<i64>>(2)?);
@@ -175,12 +190,7 @@ impl Adjacency {
                 link: r.get(0)?,
                 src,
                 dst,
-                // `package` links are imports of a workspace package; the wire has one kind for both.
-                kind: if r.get_ref(1)?.as_str() == Ok("http") {
-                    LinkKind::Http
-                } else {
-                    LinkKind::Imports
-                },
+                kind: link_kind(r.get_ref(1)?.as_str().unwrap_or("")),
                 from: r.get::<_, i64>(4)? as u32,
                 to: r.get::<_, Option<i64>>(5)?.map_or(NONE, |t| t as u32),
                 // Only HTTP links carry a score (XS-05); imports are parsed, so 1.0.

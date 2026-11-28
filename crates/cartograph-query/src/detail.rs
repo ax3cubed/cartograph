@@ -183,6 +183,15 @@ impl Snapshot<'_> {
                     .to_owned(),
                 None,
             ),
+            // `table:<owner's key>:<name>` (XS-17): known by its name.
+            ("table", None) => (
+                NodeKind::Table,
+                key.as_deref()
+                    .and_then(|k| k.rsplit(':').next())
+                    .unwrap_or_default()
+                    .to_owned(),
+                None,
+            ),
             (_, None) => (
                 // A library is a service that deploys nothing (C6); the wire has one kind for both.
                 NodeKind::Service,
@@ -685,7 +694,8 @@ impl Snapshot<'_> {
             .copied()
             .ok_or_else(missing)?;
         let mut link = self.wire_link(&g, e)?;
-        let http = e.kind == LinkKind::Http;
+        // HTTP calls, events (XS-16) and table reads and writes (XS-17) are read from evidence rows.
+        let http = matches!(e.kind, LinkKind::Http | LinkKind::Event | LinkKind::Db);
         let mut evidence = EvidenceGroups::default();
         let mut operation = None;
         let mut resolved = crate::config::LinkEnv {
@@ -725,7 +735,7 @@ impl Snapshot<'_> {
         let replaced = http
             .then(|| {
                 g.edges.iter().find(|x| {
-                    x.kind == e.kind
+                    matches!(x.kind, LinkKind::Http | LinkKind::Db)
                         && x.link != e.link
                         && x.to == e.from
                         && ss != NONE

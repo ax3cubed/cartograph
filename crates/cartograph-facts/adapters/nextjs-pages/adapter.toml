@@ -1,0 +1,21 @@
+name = "nextjs-pages"
+version = "1.0.0"
+language = "ecmascript"
+files = ["**/app/**/page.tsx", "**/app/**/page.jsx", "**/app/**/page.js", "**/pages/**/*.tsx", "**/pages/**/*.jsx"]
+requires = ["export default"]
+
+# A page is a ui entrypoint at the file's path. API routes and _app, _document are not pages.
+[[path_rule]]
+kind = "entrypoint"
+match = "^(?:.*?/)?pages/(?:api/|(?:.*/)?_[^/]*$)"
+path = ""
+
+[[path_rule]]
+kind = "entrypoint"
+match = "^(?:.*?/)?app/(.*?)/?page\\.[a-z]+$"
+path = "$1"
+
+[[path_rule]]
+kind = "entrypoint"
+match = "^(?:.*?/)?pages/(.*?)(?:/?index)?\\.[a-z]+$"
+path = "$1"

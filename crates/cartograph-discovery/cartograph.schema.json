@@ -66,6 +66,13 @@
       "additionalProperties": {
         "$ref": "#/$defs/Environment"
       }
+    },
+    "adapters": {
+      "description": "Folders of subprocess adapters (XS-24), relative to this file and inside it. Naming one\nruns nothing: each needs `cartograph adapters allow <name>` on every machine.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

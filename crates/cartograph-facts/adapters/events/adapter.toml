@@ -1,0 +1,6 @@
+name = "events"
+version = "1.0.0"
+language = "ecmascript"
+files = ["**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx"]
+# A file that names none of these brokers' packages isn't parsed for it.
+requires = ["kafkajs", "amqp", "bullmq", "aws-sdk", "client-sqs", "client-sns", "nats", "redis"]

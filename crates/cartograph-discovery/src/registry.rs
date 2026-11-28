@@ -21,6 +21,44 @@ pub struct Registry {
     pub workspaces: Vec<WorkspaceEntry>,
     #[serde(default, rename = "repo")]
     pub repos: Vec<RepoEntry>,
+    /// Subprocess adapters the user approved (XS-24). Kept here, outside every repo.
+    #[serde(default, rename = "adapter", skip_serializing_if = "Vec::is_empty")]
+    pub adapters: Vec<AdapterGrant>,
+}
+
+/// An approval: this workspace may run the adapter `name` while its hash is `hash`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterGrant {
+    pub workspace: String,
+    pub name: String,
+    /// `Declared::hash`: the adapter folder and the resolved command path.
+    pub hash: String,
+}
+
+impl Registry {
+    pub fn adapter_allowed(&self, workspace: &str, name: &str, hash: &str) -> bool {
+        self.adapters
+            .iter()
+            .any(|g| g.workspace == workspace && g.name == name && g.hash == hash)
+    }
+
+    /// Records an approval, replacing an older one for the name. Only `cartograph adapters allow`
+    /// calls it.
+    pub fn allow_adapter(&mut self, workspace: &str, name: &str, hash: &str) {
+        self.deny_adapter(workspace, name);
+        self.adapters.push(AdapterGrant {
+            workspace: workspace.into(),
+            name: name.into(),
+            hash: hash.into(),
+        });
+    }
+
+    pub fn deny_adapter(&mut self, workspace: &str, name: &str) -> bool {
+        let n = self.adapters.len();
+        self.adapters
+            .retain(|g| !(g.workspace == workspace && g.name == name));
+        self.adapters.len() != n
+    }
 }
 
 fn one() -> u32 {
@@ -289,6 +327,7 @@ mod tests {
             version: 1,
             workspaces: vec![ws("0000000a"), ws("not-an-id")],
             repos: vec![repo(Path::new("relative/x"), "0000000a")],
+            adapters: vec![],
         };
         let file = paths::registry_file(d.path());
         std::fs::write(&file, toml::to_string(&raw).unwrap()).unwrap();

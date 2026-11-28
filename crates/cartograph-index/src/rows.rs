@@ -77,7 +77,7 @@ impl<'c> Rows<'c> {
         let mut open = HashMap::new();
         let mut st = conn.prepare(
             "SELECT l.kind, l.src, l.dst, l.id, i.from_seq FROM interval i
-             JOIN link l ON l.id = i.link WHERE i.to_seq IS NULL AND l.kind != 'http'",
+             JOIN link l ON l.id = i.link WHERE i.to_seq IS NULL AND l.kind IN ('import', 'package')",
         )?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {

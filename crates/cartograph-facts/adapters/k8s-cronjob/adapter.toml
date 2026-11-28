@@ -1,0 +1,5 @@
+name = "k8s-cronjob"
+version = "1.0.0"
+language = "yaml"
+files = ["**/*.yaml", "**/*.yml"]
+requires = ["CronJob"]

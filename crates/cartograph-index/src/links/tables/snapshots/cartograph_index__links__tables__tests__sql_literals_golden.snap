@@ -1,0 +1,11 @@
+---
+source: crates/cartograph-index/src/links/tables/tests.rs
+expression: "show(\"src/repo.ts\", src)"
+---
+db.read orders sql - - line 1
+db.read users sql - - line 1
+db.read users sql - - line 2
+db.read base sql - - line 4
+db.write audit_log sql - - line 2
+db.write carts sql - - line 3
+db.write sessions sql - - line 6

@@ -25,6 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use cartograph_facts::adapters::AdapterSet;
 use cartograph_facts::schema::{AttrValue, Attrs, EvidenceType, FactKind, Part};
 use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{self, Connection, params};
@@ -74,21 +75,31 @@ struct Info {
 }
 
 /// One version of a file at a path: its sites, over the overlap of the two intervals.
-struct Row {
-    file: i64,
-    node: i64,
-    service: i64,
-    blob: Vec<u8>,
-    from: i64,
-    to: Option<i64>,
-    payload: Vec<u8>,
+pub(crate) struct Row {
+    pub(crate) file: i64,
+    pub(crate) path: String,
+    pub(crate) node: i64,
+    pub(crate) service: i64,
+    pub(crate) blob: Vec<u8>,
+    pub(crate) from: i64,
+    pub(crate) to: Option<i64>,
+    pub(crate) payload: Vec<u8>,
 }
 
 /// The rows of the interface facts, or (`refs`) of the names the importers of generated clients call.
-fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
+pub(crate) fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
+    load_from(conn, ifaces::EXTRACTOR, refs)
+}
+
+/// [`load`] for the facts of another extractor (the table facts, XS-17).
+pub(crate) fn load_from(
+    conn: &Connection,
+    extractor: &str,
+    refs: bool,
+) -> rusqlite::Result<Vec<Row>> {
     let mut st = conn.prepare_cached(
         "SELECT fp.file, n.id, coalesce(n.service, 0), fv.blob, fp.from_seq, fp.to_seq,
-                fv.from_seq, fv.to_seq, fa.payload
+                fv.from_seq, fv.to_seq, fa.payload, fp.path
          FROM (SELECT fa.blob, fa.payload FROM fact fa JOIN extractor e ON e.id = fa.extractor
                  WHERE e.name = ?1 AND NOT ?2
                UNION ALL SELECT blob, payload FROM blob_ref WHERE ?2) fa
@@ -97,7 +108,7 @@ fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
            JOIN node n ON n.file = fv.file AND n.kind = 'file'
          ORDER BY fp.file, fv.blob, fp.from_seq, fv.from_seq",
     )?;
-    let mut rows = st.query(params![ifaces::EXTRACTOR, refs])?;
+    let mut rows = st.query(params![extractor, refs])?;
     let mut out: Vec<Row> = Vec::new();
     while let Some(r) = rows.next()? {
         let from = r.get::<_, i64>(4)?.max(r.get(6)?);
@@ -109,10 +120,12 @@ fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
             continue;
         }
         let (file, blob): (i64, Vec<u8>) = (r.get(0)?, r.get(3)?);
+        let path: String = r.get(9)?;
         // A rename keeps the blob: one stretch, not two.
         if let Some(last) = out.last_mut()
             && last.file == file
             && last.blob == blob
+            && last.path == path
             && last.to == Some(from)
         {
             last.to = to;
@@ -120,6 +133,7 @@ fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
         }
         out.push(Row {
             file,
+            path,
             node: r.get(1)?,
             service: r.get(2)?,
             blob,
@@ -146,7 +160,8 @@ struct OpRow {
 fn load_ops(conn: &Connection) -> rusqlite::Result<Vec<OpRow>> {
     let mut st = conn.prepare_cached(
         "SELECT o.id, c.file, coalesce(c.service, 0), o.method, o.path, o.line, o.from_seq, o.to_seq
-         FROM operation o JOIN contract c ON c.id = o.contract ORDER BY o.id",
+         FROM operation o JOIN contract c ON c.id = o.contract WHERE c.kind = 'openapi'
+         ORDER BY o.id",
     )?;
     let rows = st.query_map([], |r| {
         Ok(OpRow {
@@ -200,7 +215,7 @@ fn load_aliases(conn: &Connection) -> rusqlite::Result<Vec<Aliases>> {
     rows.collect()
 }
 
-fn text_of(v: &AttrValue) -> Option<String> {
+pub(crate) fn text_of(v: &AttrValue) -> Option<String> {
     match v {
         AttrValue::Str(s) => Some(s.as_str().to_owned()),
         AttrValue::Parts { .. } => None,
@@ -208,7 +223,7 @@ fn text_of(v: &AttrValue) -> Option<String> {
 }
 
 /// `(is_expression, text)` pieces of a value, and the same as source-like text.
-fn pieces(v: &AttrValue) -> Vec<(bool, String)> {
+pub(crate) fn pieces(v: &AttrValue) -> Vec<(bool, String)> {
     match v {
         AttrValue::Str(s) => vec![(false, s.as_str().to_owned())],
         AttrValue::Parts { parts } => parts
@@ -222,7 +237,7 @@ fn pieces(v: &AttrValue) -> Vec<(bool, String)> {
     }
 }
 
-fn attr<'a>(a: &'a Attrs, k: &str) -> Option<&'a AttrValue> {
+pub(crate) fn attr<'a>(a: &'a Attrs, k: &str) -> Option<&'a AttrValue> {
     a.get(k)
 }
 
@@ -247,7 +262,7 @@ enum Prep {
 
 /// The variable an expression reads: `process.env.X`, `process.env["X"]`, `import.meta.env.X`, or
 /// a name the file bound to one.
-fn env_var(expr: &str, bound: &HashMap<String, String>) -> Option<String> {
+pub(crate) fn env_var(expr: &str, bound: &HashMap<String, String>) -> Option<String> {
     let e = expr.trim().trim_end_matches('!');
     if let Some(n) = bound.get(e) {
         return Some(n.clone());
@@ -267,10 +282,52 @@ fn env_var(expr: &str, bound: &HashMap<String, String>) -> Option<String> {
 }
 
 /// The text of a one-expression or one-string value (an identifier the adapter captured).
-fn name_of(v: &AttrValue) -> Option<String> {
+pub(crate) fn name_of(v: &AttrValue) -> Option<String> {
     match pieces(v).as_slice() {
         [(_, t)] => Some(t.clone()),
         _ => None,
+    }
+}
+
+/// A route's path text, an expression as `${}`.
+fn raw_path(v: &AttrValue) -> String {
+    pieces(v)
+        .iter()
+        .map(|(e, t)| if *e { "${}".to_owned() } else { t.clone() })
+        .collect()
+}
+
+/// `a` and `b` as one path: `/api` and `orders/:id` are `/api/orders/:id`.
+fn join_path(a: &str, b: &str) -> String {
+    let (a, b) = (a.trim_matches('/'), b.trim_matches('/'));
+    match (a.is_empty(), b.is_empty()) {
+        (true, true) => "/".to_owned(),
+        (true, false) => format!("/{b}"),
+        (false, true) => format!("/{a}"),
+        _ => format!("/{a}/{b}"),
+    }
+}
+
+/// The prefixes a file gives its routers: a router's own (`APIRouter(prefix=)`, `r.Group()` after
+/// its parent's) and the one it was included with, which goes first.
+#[derive(Default)]
+struct Prefixes(HashMap<String, Vec<(String, Option<String>, bool)>>);
+
+impl Prefixes {
+    fn of(&self, router: &str, depth: u8) -> String {
+        let Some(defs) = self.0.get(router).filter(|_| depth < 8) else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for outer in [true, false] {
+            for (path, parent, _) in defs.iter().filter(|d| d.2 == outer) {
+                if let Some(p) = parent {
+                    out = join_path(&out, &self.of(p, depth + 1));
+                }
+                out = join_path(&out, path);
+            }
+        }
+        out
     }
 }
 
@@ -282,9 +339,26 @@ fn sites(row: &Row, out: &mut Vec<Prep>) {
     // The names the file binds to an env var, and its named clients' bases.
     let mut bound: HashMap<String, String> = HashMap::new();
     let mut clients: HashMap<String, Vec<(bool, String)>> = HashMap::new();
+    let mut prefixes = Prefixes::default();
     for (_, _, facts) in &per {
         for f in facts {
             match f.kind {
+                FactKind::Route
+                    if attr(&f.attrs, "method")
+                        .and_then(text_of)
+                        .is_some_and(|m| m == "PREFIX") =>
+                {
+                    if let (Some(r), Some(p)) = (
+                        attr(&f.attrs, "router").and_then(name_of),
+                        attr(&f.attrs, "path"),
+                    ) {
+                        prefixes.0.entry(r).or_default().push((
+                            raw_path(p),
+                            attr(&f.attrs, "parent").and_then(name_of),
+                            attr(&f.attrs, "outer").is_some(),
+                        ));
+                    }
+                }
                 FactKind::EnvRead => {
                     if let (Some(k), Some(n)) = (
                         attr(&f.attrs, "key").and_then(name_of),
@@ -336,17 +410,37 @@ fn sites(row: &Row, out: &mut Vec<Prep>) {
                         continue;
                     };
                     let method = method.to_ascii_lowercase();
-                    // A mount (`app.use("/api", router)`) names no route of its own.
-                    if method == "use" {
+                    // A mount (`app.use("/api", router)`) names no route of its own, nor does a prefix.
+                    if method == "use" || method == "prefix" {
                         continue;
                     }
-                    let Some(path) = attr(&f.attrs, "path") else {
-                        continue;
-                    };
-                    let raw: String = pieces(path)
+                    // The path is in the fact, or (Next.js) in the file's own path.
+                    let adapter = AdapterSet::builtin()
+                        .adapters()
                         .iter()
-                        .map(|(e, t)| if *e { "${}".to_owned() } else { t.clone() })
-                        .collect();
+                        .find(|a| a.name == name);
+                    let own = match attr(&f.attrs, "path") {
+                        Some(p) => raw_path(p),
+                        None => match adapter.and_then(|a| a.path_for("route", &row.path)) {
+                            Some(p) => p,
+                            None => continue,
+                        },
+                    };
+                    // Prefixes: the file's (Laravel's /api), a router's, the controller's.
+                    let mut raw = adapter
+                        .and_then(|a| a.path_for("prefix", &row.path))
+                        .unwrap_or_default();
+                    if let Some(r) = attr(&f.attrs, "router").and_then(name_of) {
+                        raw = join_path(&raw, &prefixes.of(&r, 0));
+                    }
+                    if let Some(p) = attr(&f.attrs, "prefix") {
+                        raw = join_path(&raw, &raw_path(p));
+                    }
+                    let raw = if raw.is_empty() && !own.is_empty() {
+                        own
+                    } else {
+                        join_path(&raw, &own)
+                    };
                     let t = normalise_route(&method, &raw);
                     let info = mk_info(t.to_string(), raw);
                     out.push(Prep::Site(
@@ -839,16 +933,16 @@ type Timeline = (
 );
 
 /// A config row as the resolver reads it: (source, value, from, to).
-type Cv = (String, Option<String>, i64, Option<i64>);
+pub(crate) type Cv = (String, Option<String>, i64, Option<i64>);
 
 /// Config rows by key, split into those of each environment and those of every one.
 #[derive(Default)]
-struct Values {
-    own: HashMap<(String, i64), Vec<Cv>>,
-    base: HashMap<String, Vec<Cv>>,
+pub(crate) struct Values {
+    pub(crate) own: HashMap<(String, i64), Vec<Cv>>,
+    pub(crate) base: HashMap<String, Vec<Cv>>,
 }
 
-fn load_values(conn: &Connection) -> rusqlite::Result<Values> {
+pub(crate) fn load_values(conn: &Connection) -> rusqlite::Result<Values> {
     let mut v = Values::default();
     let mut st = conn.prepare_cached(
         "SELECT key, env_id, value, source, valid_from, valid_to FROM config_value
@@ -1076,6 +1170,46 @@ fn timeline(
             },
         );
     }
+    // gRPC servers (XS-18): registering a generated service serves each rpc of its proto.
+    for s in codegen::serve(&defs, &called, &views) {
+        let t = normalise_route(&s.method, &s.path);
+        let key = SiteKey {
+            file: s.file,
+            span: [s.at[0], s.at[1], s.op as u32, 0],
+            env: 0,
+            kind: Kind::Route,
+        };
+        if infos.contains_key(&(key.clone(), s.span.0)) {
+            continue;
+        }
+        if let Some(to) = s.span.1 {
+            deltas.entry(to).or_default().remove.push(key.clone());
+        }
+        deltas
+            .entry(s.span.0)
+            .or_default()
+            .add
+            .push(Site::Route(RouteSite {
+                key: key.clone(),
+                service: s.service,
+                method: t.method.clone(),
+                segs: t.segs.clone(),
+            }));
+        infos.insert(
+            (key, s.span.0),
+            Info {
+                file: s.file,
+                kind: "generated",
+                text: cut(&format!("{} -> {} {}", s.name, s.method, s.path)),
+                span: s.at,
+                extractor: s.extractor,
+                raw: s.path.clone(),
+                template: t.to_string(),
+                host: false,
+                cfg: None,
+            },
+        );
+    }
     // The operations: sites of the contract layer only.
     let mut op_deltas: BTreeMap<i64, Delta> = BTreeMap::new();
     let extractor = contracts::extractor();
@@ -1197,7 +1331,16 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
                 }
             }
         }
-        inputs.push(ifaces::version().into_bytes());
+        // The adapters that made the facts, subprocess ones included (XS-24).
+        inputs.push(
+            conn.query_row(
+                "SELECT value FROM meta WHERE key = 'adapters_version'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap_or_default()
+            .into_bytes(),
+        );
         // A re-weight re-scores the links and nothing else.
         inputs.push(
             format!(
@@ -1268,7 +1411,8 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
          DELETE FROM evidence WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM interval WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM link WHERE kind = 'http';
-         DELETE FROM unresolved WHERE fact_kind = 'http.call'; DELETE FROM binding;
+         DELETE FROM unresolved WHERE fact_kind = 'http.call';
+         DELETE FROM binding WHERE kind NOT IN ('publishes', 'subscribes');
          UPDATE node SET generated = NULL WHERE generated IS NOT NULL;",
     )?;
     codegen::write_aliases(conn, &client_aliases)?;

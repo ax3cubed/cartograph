@@ -26,6 +26,7 @@ fn method(m: &str) -> Method {
         "options" => Method::Options,
         "head" => Method::Head,
         "trace" => Method::Trace,
+        "rpc" => Method::Rpc,
         _ => Method::Get,
     }
 }
@@ -39,14 +40,14 @@ impl Snapshot<'_> {
         // `?1` is the step.
         let live =
             |a: &str| format!("{a}.from_seq <= ?1 AND ({a}.to_seq IS NULL OR {a}.to_seq > ?1)");
-        type Raw = (i64, String, String, i64, Option<i64>, Option<i64>);
+        type Raw = (i64, String, String, i64, Option<i64>, Option<i64>, String);
         let specs: Vec<Raw> = conn
             .prepare_cached(&format!(
                 "SELECT c.id, c.title,
                         coalesce((SELECT path FROM file_path p WHERE p.file = c.file AND {}
                                   ORDER BY p.from_seq DESC LIMIT 1), ''),
                         (SELECT id FROM node WHERE node.file = c.file AND node.kind = 'file'),
-                        c.service, c.file
+                        c.service, c.file, c.kind
                  FROM contract c
                  WHERE EXISTS (SELECT 1 FROM operation o WHERE o.contract = c.id AND {})
                  ORDER BY c.id",
@@ -62,6 +63,7 @@ impl Snapshot<'_> {
                         r.get(3)?,
                         r.get(4)?,
                         r.get(5)?,
+                        r.get(6)?,
                     ))
                 })?
                 .collect()
@@ -70,6 +72,9 @@ impl Snapshot<'_> {
         // What each operation is bound to now: the route's file, the callers' files.
         let mut handler: BTreeMap<i64, i64> = BTreeMap::new();
         let mut callers: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+        // The files that publish to and subscribe to the channel of an event operation (XS-16).
+        let mut publishers: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+        let mut subscribers: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
         let mut st = conn.prepare_cached(&format!(
             "SELECT b.operation, b.kind, n.id FROM binding b
              JOIN node n ON n.file = b.file AND n.kind = 'file'
@@ -87,6 +92,15 @@ impl Snapshot<'_> {
             let (op, kind, node) = r?;
             if kind == "handled_by" {
                 handler.entry(op).or_insert(node);
+            } else if kind == "publishes" || kind == "subscribes" {
+                let side = if kind == "publishes" {
+                    &mut publishers
+                } else {
+                    &mut subscribers
+                };
+                if !side.entry(op).or_default().contains(&node) {
+                    side.get_mut(&op).expect("just made").push(node);
+                }
             } else if !callers.entry(op).or_default().contains(&node) {
                 callers.get_mut(&op).expect("just made").push(node);
             }
@@ -97,6 +111,36 @@ impl Snapshot<'_> {
              WHERE l.kind = 'http' AND l.src = ?1 AND l.dst = ?2
                AND i.from_seq <= ?3 AND (i.to_seq IS NULL OR i.to_seq > ?3) LIMIT 1",
         )?;
+
+        // How sure the best event link of a file is, as a subscriber or as a publisher.
+        let mut best = conn.prepare_cached(
+            "SELECT max(l.score) FROM link l JOIN interval i ON i.link = l.id
+             WHERE l.kind = 'event' AND (CASE ?2 WHEN 0 THEN l.src ELSE l.dst END) = ?1
+               AND i.from_seq <= ?3 AND (i.to_seq IS NULL OR i.to_seq > ?3)",
+        )?;
+        let mut side_of = |nodes: Option<&Vec<i64>>, dst: i64| -> Vec<Caller> {
+            nodes
+                .into_iter()
+                .flatten()
+                .map(|n| {
+                    let score = best
+                        .query_row(rusqlite::params![n, dst, seq], |r| {
+                            r.get::<_, Option<f64>>(0)
+                        })
+                        .ok()
+                        .flatten()
+                        .unwrap_or(0.6) as f32;
+                    Caller {
+                        node: NodeId(node_id(*n)),
+                        confidence: Confidence {
+                            level: level(score),
+                            score,
+                            evidence: Vec::new(),
+                        },
+                    }
+                })
+                .collect()
+        };
 
         // Routes in a service that has a spec and in none, by service.
         let mut undocumented: BTreeMap<i64, Vec<UndocumentedRoute>> = BTreeMap::new();
@@ -127,7 +171,8 @@ impl Snapshot<'_> {
         }
 
         let mut out = Vec::new();
-        for (id, title, path, file_node, service, _file) in specs {
+        for (id, title, path, file_node, service, _file, spec_kind) in specs {
+            let events = spec_kind == "events";
             let service_node = service.or(Some(file_node)).unwrap_or(file_node);
             let mut ops = Vec::new();
             let mut st = conn.prepare_cached(&format!(
@@ -147,6 +192,21 @@ impl Snapshot<'_> {
             for r in rows {
                 let (op, m, p, operation_id, summary) = r?;
                 let h = handler.get(&op).copied();
+                // An event operation is in sync when someone does what the application's side of
+                // it says: publishes to the channel or subscribes to it.
+                let (pubs, subs) = if events {
+                    (
+                        side_of(publishers.get(&op), 1),
+                        side_of(subscribers.get(&op), 0),
+                    )
+                } else {
+                    (Vec::new(), Vec::new())
+                };
+                let wired = if m == "publish" {
+                    !pubs.is_empty()
+                } else {
+                    !subs.is_empty()
+                };
                 let callers = callers
                     .get(&op)
                     .into_iter()
@@ -171,11 +231,13 @@ impl Snapshot<'_> {
                     .collect();
                 ops.push(Operation {
                     id: NodeId(format!("o{op}")),
-                    method: method(&m),
+                    method: if events { Method::Event } else { method(&m) },
                     path: p,
                     operation_id,
                     summary,
-                    status: if h.is_some() {
+                    publishers: pubs,
+                    subscribers: subs,
+                    status: if h.is_some() || wired {
                         OperationStatus::Sync
                     } else {
                         OperationStatus::SpecOnly
@@ -198,6 +260,13 @@ impl Snapshot<'_> {
                 spec_only: ops.len() as u32 - sync,
                 undocumented: routes.len() as u32,
             };
+            let kind = if path.ends_with(".proto") {
+                SpecKind::Proto
+            } else if events {
+                SpecKind::Events
+            } else {
+                SpecKind::Openapi
+            };
             out.push(Contract {
                 id: format!("c{id}"),
                 name: if title.is_empty() {
@@ -206,7 +275,7 @@ impl Snapshot<'_> {
                     title
                 },
                 file: path,
-                kind: SpecKind::Openapi,
+                kind,
                 service: NodeId(node_id(service_node)),
                 operations: ops,
                 undocumented: routes,

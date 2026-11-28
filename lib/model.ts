@@ -85,12 +85,12 @@ export interface Correction {
 
 // ---------- contracts ----------
 export interface Operation {
-  id: string; method: "GET" | "POST" | "PUT" | "DELETE" | "EVENT"; path: string;
+  id: string; method: "GET" | "POST" | "PUT" | "DELETE" | "EVENT" | "RPC"; path: string;
   handler?: string; // node id, missing when the operation has no handler
   callers: { node: string; confidence: Confidence }[];
 }
 export interface Spec {
-  id: string; name: string; file: string; kind: "openapi" | "events"; service: string;
+  id: string; name: string; file: string; kind: "openapi" | "events" | "proto"; service: string;
   operations: Operation[];
 }
 

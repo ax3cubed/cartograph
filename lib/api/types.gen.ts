@@ -59,12 +59,12 @@ export type ConceptDecisionKind = "keep_separate" | "same_concept";
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "SpecKind".
  */
-export type SpecKind = "openapi" | "events";
+export type SpecKind = "openapi" | "events" | "proto";
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Method".
  */
-export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | "EVENT";
+export type Method = ("GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | "EVENT") | "RPC";
 /**
  * Whether the code agrees with the spec about an operation (XS-08 drift).
  *
@@ -753,7 +753,13 @@ export interface Operation {
    * With the spec's base path, as the spec writes it: `/v1/orders/{id}`.
    */
   path: string;
+  /**
+   * For an event operation (an AsyncAPI channel, XS-16): the files that publish to the channel
+   * and the files that subscribe to it, with how sure the best event link of each is.
+   */
+  publishers?: Caller[];
   status: OperationStatus;
+  subscribers?: Caller[];
   /**
    * From the spec: untrusted text (F8), at most 200 characters.
    */

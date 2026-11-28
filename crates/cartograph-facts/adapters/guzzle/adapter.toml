@@ -1,0 +1,5 @@
+name = "guzzle"
+version = "1.0.0"
+language = "php"
+files = ["**/*.php"]
+requires = ["GuzzleHttp"]

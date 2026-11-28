@@ -1,6 +1,7 @@
 name = "express"
-version = "1.0.0"
+version = "1.1.0"
 language = "ecmascript"
 files = ["**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx"]
 # A file that never mentions express isn't parsed for it.
 requires = ["express"]
+router_import = "['\"]express['\"]"

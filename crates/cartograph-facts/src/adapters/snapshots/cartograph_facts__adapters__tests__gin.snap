@@ -1,0 +1,9 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"route","span":[7,1,7,25],"attrs":{"method":"GET","path":"/health","router":{"parts":[{"expr":"r"}]}},"evidence":{"type":"literal","text":"r.GET(\"/health\", health)"}}
+{"kind":"route","span":[8,1,8,21],"attrs":{"method":"PREFIX","parent":{"parts":[{"expr":"r"}]},"path":"/v1","router":{"parts":[{"expr":"v1"}]}},"evidence":{"type":"literal","text":"v1 := r.Group(\"/v1\")"}}
+{"kind":"route","span":[9,1,9,27],"attrs":{"method":"GET","path":"/orders/:id","router":{"parts":[{"expr":"v1"}]}},"evidence":{"type":"literal","text":"v1.GET(\"/orders/:id\", one)"}}
+{"kind":"route","span":[10,1,10,28],"attrs":{"method":"PREFIX","parent":{"parts":[{"expr":"v1"}]},"path":"/admin","router":{"parts":[{"expr":"admin"}]}},"evidence":{"type":"literal","text":"admin := v1.Group(\"/admin\")"}}
+{"kind":"route","span":[11,1,11,30],"attrs":{"method":"POST","path":"/orders","router":{"parts":[{"expr":"admin"}]}},"evidence":{"type":"literal","text":"admin.POST(\"/orders\", create)"}}

@@ -19,6 +19,7 @@ pub struct Flags {
     pub wait: bool,
     pub background: bool,
     pub all_workspaces: bool,
+    pub unsandboxed_adapters: bool,
     pub hook_args: Option<String>,
 }
 
@@ -63,7 +64,9 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
         );
         return Ok(());
     }
-    let (id, ws) = workspace(&data, dir)?;
+    let (id, mut ws) = workspace(&data, dir)?;
+    ws.subs.unsandboxed = f.unsandboxed_adapters;
+    let skipped = ws.subs.skipped.clone();
     let explain = |e: &dyn cartograph_core::Explain| Report::from_error(e);
     if f.background {
         // An explicit request (a hook): auto_sync = "never" governs only the syncs reads start.
@@ -125,6 +128,9 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
             human += &format!("\n{what}: {}", names.join(", "));
         }
     }
+    for note in skipped.iter().chain(&s.adapter_notes) {
+        human += &format!("\n{}", crate::output::sanitize(note));
+    }
     if s.dirty_left {
         human += "\nmore commits arrived than one run takes; the next sync continues";
     }
@@ -153,6 +159,7 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
             "rewritten": s.rewritten,
             "duplicate_packages": s.duplicate_packages,
             "fetch_failed": s.fetch_failed,
+            "adapter_notes": skipped.iter().chain(&s.adapter_notes).collect::<Vec<_>>(),
             "dirty_left": s.dirty_left,
             "coverage": { "files_total": files_total, "files_parsed": files_parsed,
                           "imports_total": imports_total, "imports_resolved": imports_resolved },

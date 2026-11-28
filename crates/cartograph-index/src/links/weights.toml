@@ -13,3 +13,12 @@ unique_across_workspace = 0.40
 name_similarity = 0.15
 # A spec operation named by a generated client: as sure as a template URL, less than a matched contract.
 generated_client_spec = 0.80
+# Event channels (XS-16): both ends of a pub/sub pair, one fact about the pair.
+channel_literal = 0.95
+channel_via_config = 0.80
+channel_wildcard = 0.70
+channel_name_match = 0.40
+# XS-17: a query's table is defined by a migration or a model that spells its name; an ORM derived the name; only the names look alike.
+table_defined = 0.92
+table_convention = 0.75
+table_name_only = 0.45

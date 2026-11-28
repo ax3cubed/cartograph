@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use cartograph_git::{GitError, ObjectId, Repo, read_blob};
 use cartograph_parse::openapi::{self, Contract, Env, Files, MAX_SPEC_BYTES};
 use cartograph_parse::openapi_diff::{canonical, diff};
-use cartograph_parse::{BlobFacts, Extractor, ManifestOpenapi};
+use cartograph_parse::{BlobFacts, Extractor, ManifestOpenapi, ManifestProto, proto};
 use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{self, Connection, params};
 use sha2::{Digest, Sha256};
@@ -37,7 +37,7 @@ use crate::timeline::glob_matches;
 const MAX_BREAKING: usize = 200;
 
 /// Bump when what the rows hold changes, so every index rebuilds them.
-const CONTRACTS_VERSION: &str = "contracts 2";
+const CONTRACTS_VERSION: &str = "contracts 3";
 
 /// The extractor name in the `fact` table.
 pub const EXTRACTOR: &str = openapi::KIND;
@@ -99,14 +99,14 @@ fn versions(
     let mut st = conn.prepare_cached(
         "SELECT f.repo, fp.file, n.service, fp.path, fp.from_seq, fp.to_seq, fv.blob,
                 fv.from_seq, fv.to_seq, fa.payload
-         FROM fact fa JOIN extractor e ON e.id = fa.extractor AND e.name = ?1
+         FROM fact fa JOIN extractor e ON e.id = fa.extractor AND e.name IN (?1, ?2)
            JOIN file_version fv ON fv.blob = fa.blob
            JOIN file_path fp ON fp.file = fv.file
            JOIN file f ON f.id = fp.file
            JOIN node n ON n.file = fp.file AND n.kind = 'file'
          ORDER BY fp.path, fp.from_seq, fv.from_seq, fv.blob",
     )?;
-    let mut rows = st.query([EXTRACTOR])?;
+    let mut rows = st.query([EXTRACTOR, proto::KIND])?;
     let mut out = Vec::new();
     while let Some(r) = rows.next()? {
         let from = r.get::<_, i64>(4)?.max(r.get(7)?);
@@ -174,7 +174,8 @@ struct State {
 /// The states of a spec file version: one, unless it reads other files, in which case one more at
 /// each commit where a file it read changed. `commits` are the repository's, in order.
 fn states(repo: &Repo, v: &Version, commits: &[(i64, ObjectId)]) -> Result<Vec<State>, GitError> {
-    if v.contract.files.is_empty() {
+    // A proto file's imports are resolved once, against the tip, in `refresh`.
+    if v.contract.files.is_empty() || proto::named(&v.rel) {
         return Ok(vec![State {
             from: v.from,
             to: v.to,
@@ -224,6 +225,58 @@ fn states(repo: &Repo, v: &Version, commits: &[(i64, ObjectId)]) -> Result<Vec<S
     Ok(out)
 }
 
+/// The imports of a live `.proto` file that don't resolve inside the repository (XS-18): each is
+/// tried against the roots a `buf.yaml` or `buf.work.yaml` above the file names, then every folder
+/// above it, and only to files the index has at its tip. `buf` keeps each folder's buf roots.
+fn import_refs(
+    conn: &Connection,
+    r: &crate::derive::RepoInput<'_>,
+    v: &Version,
+    prefixes: &BTreeMap<i64, Option<&str>>,
+    buf: &mut BTreeMap<(i64, String), Vec<String>>,
+    imports: &[String],
+) -> Vec<(String, &'static str)> {
+    let mut files = GitFiles {
+        repo: r.repo,
+        commit: r.tip,
+    };
+    let mut roots: Vec<String> = Vec::new();
+    let above = proto::ancestors(dir(&v.rel));
+    for a in &above {
+        let found = buf.entry((v.repo, a.clone())).or_insert_with(|| {
+            ["buf.yaml", "buf.work.yaml"]
+                .iter()
+                .filter_map(|n| {
+                    files.read(&if a.is_empty() {
+                        (*n).into()
+                    } else {
+                        format!("{a}/{n}")
+                    })
+                })
+                .flat_map(|y| proto::buf_roots(a, &y))
+                .collect()
+        });
+        roots.extend(found.iter().cloned());
+    }
+    roots.extend(above);
+    let mut seen = std::collections::BTreeSet::new();
+    roots.retain(|x| seen.insert(x.clone()));
+    let prefix = prefixes.get(&v.repo).copied().flatten();
+    let mut exists = |p: &str| {
+        let p = prefix.map_or_else(|| p.to_owned(), |x| format!("{x}/{p}"));
+        conn.prepare_cached("SELECT 1 FROM file_path WHERE path = ?1 AND to_seq IS NULL")
+            .and_then(|mut s| s.exists([p]))
+            .unwrap_or(false)
+    };
+    imports
+        .iter()
+        .filter_map(|i| match proto::resolve(i, &roots, &mut exists) {
+            Err("bundled") | Ok(_) => None,
+            Err(why) => Some((i.clone(), why)),
+        })
+        .collect()
+}
+
 type Span = (i64, Option<i64>);
 
 /// An operation over the versions of its spec; the last version's text wins.
@@ -241,6 +294,8 @@ struct OpAcc {
 struct Parts {
     title: String,
     version: String,
+    /// An AsyncAPI document (XS-16): the contract's kind is `events`.
+    events: bool,
     service: Option<i64>,
     /// (method, path with its base) -> the operation.
     ops: BTreeMap<(String, String), OpAcc>,
@@ -318,7 +373,7 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     for r in &inputs.repos {
         if all
             .iter()
-            .any(|v| v.repo == r.id && !v.contract.files.is_empty())
+            .any(|v| v.repo == r.id && !v.contract.files.is_empty() && !proto::named(&v.rel))
         {
             let mut b = format!("tip\0{}\0", r.name).into_bytes();
             b.extend_from_slice(r.tip.as_bytes());
@@ -332,6 +387,7 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
             .map(|c| format!("glob\0{}\0{:?}", c.path, c.service).into_bytes()),
     );
     ins.push(ManifestOpenapi.version().as_bytes().to_vec());
+    ins.push(ManifestProto.version().as_bytes().to_vec());
     let k = key("contracts", CONTRACTS_VERSION, ins, inputs.config_hash);
     if !changed(conn, "contracts", "workspace", &k)? {
         return Ok(0);
@@ -342,11 +398,13 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     // Every state of each spec file (a file keeps its id across renames): where it began, the
     // root blob, the spec.
     let mut history: BTreeMap<i64, Vec<(i64, Vec<u8>, Contract)>> = BTreeMap::new();
+    // The import roots a folder's buf files name, read once per folder.
+    let mut buf: BTreeMap<(i64, String), Vec<String>> = BTreeMap::new();
     for v in &all {
         let Some(r) = inputs.repos.iter().find(|r| r.id == v.repo) else {
             continue;
         };
-        if !v.contract.files.is_empty() && !commits.contains_key(&v.repo) {
+        if !v.contract.files.is_empty() && !proto::named(&v.rel) && !commits.contains_key(&v.repo) {
             let rows = conn
                 .prepare_cached("SELECT seq, sha FROM commits WHERE repo = ?1 ORDER BY seq")?
                 .query_map([v.repo], |r| {
@@ -369,6 +427,7 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
             let p = parts.entry(v.file).or_default();
             p.title = cut(&s.contract.title);
             p.version.clone_from(&s.contract.version);
+            p.events = s.contract.events;
             p.service = owner(v);
             for o in &s.contract.operations {
                 for base in &s.contract.bases {
@@ -377,7 +436,12 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
                         .ops
                         .entry((o.method.clone(), full.clone()))
                         .or_insert_with(|| OpAcc {
-                            template: normalise_route(&o.method, &full).path(),
+                            // A channel address isn't a path: it is kept as the spec spells it.
+                            template: if s.contract.events {
+                                full.clone()
+                            } else {
+                                normalise_route(&o.method, &full).path()
+                            },
                             ..Default::default()
                         });
                     e.operation_id.clone_from(&o.operation_id);
@@ -401,6 +465,15 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
                     .or_default()
                     .push((s.from, s.to));
             }
+            if proto::named(&v.rel) && s.to.is_none() {
+                for (target, why) in import_refs(conn, r, v, &prefixes, &mut buf, &s.contract.files)
+                {
+                    p.unresolved
+                        .entry((target, why.to_owned()))
+                        .or_default()
+                        .push((s.from, s.to));
+                }
+            }
         }
     }
 
@@ -411,9 +484,18 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     let mut written = 0;
     for (file, p) in parts {
         conn.prepare_cached(
-            "INSERT INTO contract (file, service, title, version) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO contract (file, service, title, version, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
         )
-        .and_then(|mut s| s.execute(params![file, p.service, p.title, p.version]))?;
+        .and_then(|mut s| {
+            s.execute(params![
+                file,
+                p.service,
+                p.title,
+                p.version,
+                if p.events { "events" } else { "openapi" }
+            ])
+        })?;
         let id = conn.last_insert_rowid();
         versions_of(conn, id, history.remove(&file).unwrap_or_default())?;
         for ((method, path), op) in &p.ops {

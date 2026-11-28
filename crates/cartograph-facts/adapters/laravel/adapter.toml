@@ -1,0 +1,12 @@
+name = "laravel"
+version = "1.0.0"
+language = "php"
+files = ["**/routes/**/*.php"]
+requires = ["Route::"]
+router_import = "Illuminate.Support.Facades.Route"
+
+# routes/api.php is served under /api.
+[[path_rule]]
+kind = "prefix"
+match = "^(?:.*?/)?routes/api\\.php$"
+path = "api"

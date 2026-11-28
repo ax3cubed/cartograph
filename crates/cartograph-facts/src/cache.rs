@@ -63,6 +63,27 @@ impl FactCache {
         schema::decode(&self.get_raw(blob, extractor, version)?)
     }
 
+    /// The interface facts of one blob for each of the adapters that apply to it, in one row.
+    pub fn get_adapters(
+        &self,
+        blob: &[u8],
+        key: &str,
+        version: &str,
+    ) -> Option<Vec<Vec<BlobFact>>> {
+        serde_json::from_slice(&self.get_raw(blob, key, version)?).ok()
+    }
+
+    pub fn put_adapters(
+        &mut self,
+        blob: &[u8],
+        key: &str,
+        version: &str,
+        facts: &[Vec<BlobFact>],
+    ) -> rusqlite::Result<()> {
+        let payload = serde_json::to_vec(facts).expect("facts always encode");
+        self.put_raw_many([(blob, key, version, payload)])
+    }
+
     /// Writes a batch in one transaction.
     pub fn put_many<'a>(
         &mut self,

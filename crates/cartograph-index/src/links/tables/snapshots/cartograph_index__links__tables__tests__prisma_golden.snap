@@ -1,0 +1,6 @@
+---
+source: crates/cartograph-index/src/links/tables/tests.rs
+expression: "show(\"prisma/schema.prisma\", src)"
+---
+db.table.def User prisma convention - line 1
+db.table.def orders prisma literal - line 5

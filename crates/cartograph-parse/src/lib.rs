@@ -8,6 +8,7 @@
 use cartograph_core as _;
 use serde::{Deserialize, Serialize};
 
+pub mod asyncapi;
 pub mod config;
 pub mod deploy;
 mod lang;
@@ -15,6 +16,8 @@ pub mod manifest;
 mod manifest_lang;
 pub mod openapi;
 pub mod openapi_diff;
+pub mod proto;
+pub mod schema_files;
 pub mod syntax;
 mod ts;
 
@@ -23,6 +26,8 @@ pub use lang::{GoImports, PhpImports, PyImports};
 pub use manifest::ManifestJs;
 pub use manifest_lang::{ManifestGo, ManifestPhp, ManifestPy};
 pub use openapi::ManifestOpenapi;
+pub use proto::ManifestProto;
+pub use schema_files::ManifestSchema;
 pub use ts::TsImports;
 
 /// Blobs over this size are skipped without being read.
@@ -103,6 +108,9 @@ pub enum Fact {
         key: String,
         value: ConfigVal,
     },
+    /// The spec facts of this blob are an AsyncAPI document's (XS-16): its operations are channels
+    /// the application publishes to (`publish`) or subscribes to (`subscribe`).
+    AsyncApi,
 }
 
 /// What a config key names.
@@ -177,7 +185,7 @@ pub trait Extractor: Sync {
 }
 
 /// The built-in extractors.
-pub static EXTRACTORS: [&dyn Extractor; 10] = [
+pub static EXTRACTORS: [&dyn Extractor; 12] = [
     &TsImports,
     &ManifestJs,
     &GoImports,
@@ -187,6 +195,8 @@ pub static EXTRACTORS: [&dyn Extractor; 10] = [
     &ManifestPy,
     &ManifestPhp,
     &ManifestDeploy,
+    &ManifestProto,
+    &ManifestSchema,
     // Last: it handles every YAML and JSON path the ones before it did not.
     &ManifestOpenapi,
 ];
