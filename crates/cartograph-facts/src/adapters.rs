@@ -666,9 +666,12 @@ static BUILTIN: &[Embedded] = &[
     ),
     (
         include_str!("../adapters/fetch/adapter.toml"),
-        &[(
-            "calls.scm",
-            include_str!("../adapters/fetch/queries/calls.scm"),
-        )],
+        &[
+            (
+                "calls.scm",
+                include_str!("../adapters/fetch/queries/calls.scm"),
+            ),
+            ("env.scm", include_str!("../adapters/fetch/queries/env.scm")),
+        ],
     ),
 ];

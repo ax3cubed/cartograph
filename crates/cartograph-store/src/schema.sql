@@ -134,6 +134,10 @@ CREATE TABLE link (
   level TEXT,
   score REAL,
   -- XS-05 confidence (end)
+  -- XS-09 config (begin): the environments the link holds in, bit i for environment id i; NULL
+  -- when it doesn't depend on one.
+  envs INTEGER,
+  -- XS-09 config (end)
   UNIQUE (kind, src, dst)
 ) STRICT;
 
@@ -197,6 +201,43 @@ CREATE TABLE host_alias (
 CREATE INDEX host_alias_host ON host_alias (host, valid_from);
 CREATE INDEX host_alias_service ON host_alias (service_id);
 -- XS-02 host aliases (end)
+
+-- XS-09 config (begin)
+-- Environments: the manifest's `environments:` and the ones file names imply (values-prod.yaml,
+-- overlays/staging/, compose and .env.example are `local`). id is the bit the `link.envs` mask
+-- uses, so at most 32; is_default marks the one the map shows when none is asked for.
+CREATE TABLE environment (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  is_default INTEGER NOT NULL
+) STRICT;
+-- What a key is set to in an environment while (env_id NULL: every one), with the file and blob
+-- that say so. value is stored only when it classifies as a locator (XS-10): a URL without
+-- userinfo, query or fragment, host[:port] or a short identifier; value_kind is `locator`, or
+-- `opaque` with a NULL value (a key whose value isn't kept, a Secret's keys).
+CREATE TABLE config_value (
+  key TEXT NOT NULL,
+  env_id INTEGER REFERENCES environment (id),
+  value TEXT,
+  value_kind TEXT NOT NULL,
+  source TEXT NOT NULL,
+  blob_id BLOB NOT NULL,
+  valid_from INTEGER NOT NULL,
+  valid_to INTEGER
+) STRICT;
+CREATE INDEX config_value_key ON config_value (key, valid_from);
+-- The key and value an HTTP link was resolved through, per environment, while that held.
+CREATE TABLE link_config (
+  link INTEGER NOT NULL REFERENCES link (id),
+  env_id INTEGER NOT NULL REFERENCES environment (id),
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  source TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX link_config_link ON link_config (link);
+-- XS-09 config (end)
 
 -- One row per derived artefact (B6, IDX-21): what it was built from. A run rebuilds an artefact only
 -- when its key changes; AI output is marked stale instead.

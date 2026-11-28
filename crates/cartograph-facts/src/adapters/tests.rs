@@ -149,6 +149,24 @@ fn fetch_golden() {
     insta::assert_snapshot!(pretty(&run(&mut c, 4, "web/src/api.ts", WEB_API)));
 }
 
+const ENV_SRC: &str = r#"const CATALOG = process.env.CATALOG_URL ?? "http://localhost:3000";
+const PRICING = process.env["PRICING_URL"];
+const viteBase = import.meta.env.VITE_API;
+export const api = axios.create({ baseURL: process.env.API_URL });
+export const list = () => api.get("/items");
+export const find = (id: string) => fetch(`${CATALOG}/items/${id}`);
+const seen = new Map();
+seen.get("k");
+"#;
+
+/// XS-09: env.read facts (with the name a variable binds them to) and named clients.
+#[test]
+fn env_golden() {
+    let (_d, mut c) = cache();
+    let e = run(&mut c, 40, "web/src/config.ts", ENV_SRC);
+    insta::assert_snapshot!(pretty(&e));
+}
+
 #[test]
 fn a_template_is_parts_and_a_concatenation_too() {
     let (_d, mut c) = cache();
@@ -380,7 +398,7 @@ axios.get("https://api.test/", { headers: { Authorization: "Bearer ghp_wWPw5k4aX
     assert_eq!(all(&e).len(), 4, "{}", pretty(&e));
     let facts = pretty(&e);
     let cached =
-        serde_json::to_string(&c.get_interface(&[11; 20], "adapter-fetch/js", "1.0.0")).unwrap();
+        serde_json::to_string(&c.get_interface(&[11; 20], "adapter-fetch/js", "1.1.0")).unwrap();
     for planted in [
         "user:pw",
         "AKIAIOSFODNN7EXAMPLE",

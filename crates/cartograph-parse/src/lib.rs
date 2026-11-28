@@ -8,6 +8,7 @@
 use cartograph_core as _;
 use serde::{Deserialize, Serialize};
 
+pub mod config;
 pub mod deploy;
 mod lang;
 pub mod manifest;
@@ -95,6 +96,33 @@ pub enum Fact {
     },
     /// A `$ref` of a spec that was not followed: `remote`, `missing`, `outside`, `cycle` or `deep`.
     SpecRef { target: String, reason: String },
+    /// A config key and what a value source says of it (XS-09). New variants go at the end: the
+    /// encoding of cached facts stays the same.
+    Config {
+        scope: ConfigScope,
+        key: String,
+        value: ConfigVal,
+    },
+}
+
+/// What a config key names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ConfigScope {
+    /// An environment variable: a `.env.example`, compose or k8s entry, or a Helm template's.
+    Env,
+    /// A dotted path in a Helm values file.
+    Values,
+}
+
+/// What is kept of a config value (XS-10).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ConfigVal {
+    /// A URL without userinfo, query or fragment, `host[:port]` or a short identifier.
+    Locator(String),
+    /// Anything else, a Secret's keys and a `secretKeyRef`: the key only.
+    Opaque,
+    /// A Helm template's direct `{{ .Values.a.b }}` lookup: the dotted path.
+    Ref(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

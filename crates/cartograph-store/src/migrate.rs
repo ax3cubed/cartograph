@@ -54,6 +54,10 @@ pub const UNDO_V4: &str = concat!(
     // ---- XS-08 contracts: begin ----
     "DROP TABLE binding; DROP TABLE contract_schema; DROP TABLE operation; DROP TABLE contract;\n",
     // ---- XS-08 contracts: end ----
+    // ---- XS-09 config: begin ----
+    "DROP TABLE link_config; DROP TABLE config_value; DROP TABLE environment;
+     ALTER TABLE link DROP COLUMN envs;\n",
+    // ---- XS-09 config: end ----
     // ---- XS-06 link detail: begin ----
     "ALTER TABLE evidence DROP COLUMN operation;\n",
     // ---- XS-06 link detail: end ----
@@ -150,6 +154,19 @@ const V4: &str = concat!(
      CREATE INDEX host_alias_host ON host_alias (host, valid_from);
      CREATE INDEX host_alias_service ON host_alias (service_id);\n",
     // ---- XS-02 host aliases: end ----
+    // ---- XS-09 config: begin ----
+    "CREATE TABLE environment (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+       is_default INTEGER NOT NULL) STRICT;
+     CREATE TABLE config_value (key TEXT NOT NULL, env_id INTEGER REFERENCES environment (id),
+       value TEXT, value_kind TEXT NOT NULL, source TEXT NOT NULL, blob_id BLOB NOT NULL,
+       valid_from INTEGER NOT NULL, valid_to INTEGER) STRICT;
+     CREATE INDEX config_value_key ON config_value (key, valid_from);
+     ALTER TABLE link ADD COLUMN envs INTEGER;
+     CREATE TABLE link_config (link INTEGER NOT NULL REFERENCES link (id),
+       env_id INTEGER NOT NULL REFERENCES environment (id), key TEXT NOT NULL, value TEXT NOT NULL,
+       source TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX link_config_link ON link_config (link);\n",
+    // ---- XS-09 config: end ----
 );
 
 /// Takes a format 3 file back to format 2 (test support: tests build an older file from a new one

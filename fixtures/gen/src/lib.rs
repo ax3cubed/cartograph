@@ -146,7 +146,8 @@ pub fn fact_list(index: &Path) -> Vec<String> {
     let mut st = c
         .prepare(
             "SELECT substr(lower(hex(f.blob)), 1, 12), e.name, f.payload
-             FROM fact f JOIN extractor e ON e.id = f.extractor",
+             FROM fact f JOIN extractor e ON e.id = f.extractor
+             WHERE e.name != 'adapters'",
         )
         .expect("valid sql");
     let mut facts: Vec<String> = st
@@ -202,6 +203,7 @@ fn fact(f: &Fact) -> String {
             port,
             context,
         } => format!("host {host} {port:?} {context:?}"),
+        Fact::Config { scope, key, value } => format!("config {scope:?} {key} {value:?}"),
         // XS-08: a spec's operations, schemas and unresolved refs.
         other => format!("{other:?}"),
     }
