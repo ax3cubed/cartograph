@@ -810,7 +810,16 @@ fn every_framework_adapter_has_a_golden_fixture() {
     let named: Vec<_> = GOLDEN.iter().map(|g| g.1).collect();
     for a in set.adapters() {
         assert!(
-            ["express", "fetch", "codegen", "codegen-go"].contains(&a.name.as_str())
+            // Those have goldens of their own (XS-03, XS-11, XS-16's event_clients_golden).
+            [
+                "express",
+                "fetch",
+                "codegen",
+                "codegen-go",
+                "events",
+                "events-go"
+            ]
+            .contains(&a.name.as_str())
                 || named.contains(&a.name.as_str()),
             "{} has no golden fixture",
             a.name
