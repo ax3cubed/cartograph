@@ -312,6 +312,10 @@ fn launch(sb: &Sandbox, d: &Declared, tmp: &Path) -> Command {
             }
             c.args(["--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache"]);
             c.arg("--ro-bind").arg(&d.dir).arg(&d.dir);
+            // No file writes at all, as under sandbox-exec: the private /tmp and /dev are made
+            // read-only once the adapter's folder is mounted in them (a device node such as
+            // /dev/null still takes writes on a read-only mount).
+            c.args(["--remount-ro", "/tmp", "--remount-ro", "/dev"]);
             c.args(["--chdir", "/tmp", "--"]);
             c.args(inner);
         }
