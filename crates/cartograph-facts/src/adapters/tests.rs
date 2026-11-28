@@ -64,7 +64,17 @@ fn the_builtin_adapters_load() {
         .iter()
         .map(|a| a.name.as_str())
         .collect();
-    assert_eq!(names, ["express", "fetch", "codegen", "codegen-go"]);
+    assert_eq!(
+        names,
+        [
+            "express",
+            "fetch",
+            "codegen",
+            "codegen-go",
+            "events",
+            "events-go"
+        ]
+    );
     // They are not compiled until a blob needs them, so this is where a bad query is found.
     for (manifest, queries) in BUILTIN.iter().chain(REFS) {
         Adapter::load(manifest, queries).unwrap();
@@ -595,4 +605,79 @@ fn the_refs_adapters_hold_a_called_name_once() {
         })
         .collect();
     assert_eq!(names.len(), 2, "{names:?}");
+}
+
+/// XS-16: one golden per client library. Each source publishes to a channel and consumes one.
+#[test]
+fn event_clients_golden() {
+    const KAFKAJS: &str = r#"import { Kafka } from "kafkajs";
+const producer = kafka.producer();
+await producer.send({ topic: "order.paid", messages: [{ value: "x" }] });
+await consumer.subscribe({ topic: `orders.${region}` });
+await consumer.subscribe({ topics: ["a.b", Topics.C] });
+res.send({ topic: "not-a-producer" });
+"#;
+    const AMQP: &str = r#"const amqp = require("amqplib");
+channel.publish("orders", "order.paid", Buffer.from("x"));
+channel.sendToQueue("emails", Buffer.from("x"));
+channel.consume("emails", handle);
+channel.bindQueue("audit", "orders", "order.#");
+"#;
+    const BULL: &str = r#"import { Queue, Worker } from "bullmq";
+const q = new Queue("reports", { connection });
+new Worker(process.env.REPORT_QUEUE, handler);
+const stack = new Queue();
+"#;
+    const AWS: &str = r#"import { SQSClient, SendMessageCommand, ReceiveMessageCommand } from "@aws-sdk/client-sqs";
+import { PublishCommand } from "@aws-sdk/client-sns";
+await c.send(new SendMessageCommand({ QueueUrl: "https://sqs.eu-west-1.amazonaws.com/123456789012/orders?x=1", MessageBody: "x" }));
+await c.send(new ReceiveMessageCommand({ QueueUrl: URL }));
+await c.send(new PublishCommand({ TopicArn: "arn:aws:sns:eu-west-1:123456789012:order-paid", Message: "x" }));
+sqs.receiveMessage({ QueueUrl: URL2 });
+"#;
+    const NATS: &str = r#"import { connect } from "nats";
+nc.publish("order.paid", sc.encode("x"));
+nc.subscribe("order.>");
+rxjs.subscribe("not-nats");
+"#;
+    const REDIS: &str = r#"import Redis from "ioredis";
+redis.publish("order:paid", "x");
+sub.subscribe("order:paid", "order:shipped", cb);
+sub.psubscribe("order:*");
+subject.subscribe("nope");
+"#;
+    const SARAMA: &str = r#"package main
+import "github.com/IBM/sarama"
+func f() {
+	msg := &sarama.ProducerMessage{Topic: "order.paid", Value: v}
+	p, _ := consumer.ConsumePartition("order.paid", 0, sarama.OffsetNewest)
+	group.Consume(ctx, []string{"order.shipped", "order.refunded"}, h)
+}
+"#;
+    const SEGMENT: &str = r#"package main
+import kafka "github.com/segmentio/kafka-go"
+func f() {
+	w := &kafka.Writer{Addr: kafka.TCP("k:9092"), Topic: "order.paid"}
+	r := kafka.NewReader(kafka.ReaderConfig{Brokers: b, Topic: "order.shipped"})
+}
+"#;
+    let (_d, mut c) = cache();
+    let mut out = Vec::new();
+    for (i, (name, path, src)) in [
+        ("kafkajs", "kafka.ts", KAFKAJS),
+        ("amqplib", "amqp.js", AMQP),
+        ("bullmq", "bull.ts", BULL),
+        ("aws", "aws.ts", AWS),
+        ("nats", "nats.ts", NATS),
+        ("redis", "redis.ts", REDIS),
+        ("sarama", "sarama.go", SARAMA),
+        ("segmentio", "segment.go", SEGMENT),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let e = run(&mut c, 60 + i as u8, path, src);
+        out.push(format!("== {name}\n{}", pretty(&e)));
+    }
+    insta::assert_snapshot!(out.join("\n"));
 }

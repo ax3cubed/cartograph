@@ -395,14 +395,42 @@ fn snippet(n: Node, src: &[u8]) -> String {
     cartograph_core::secrets::mask(&head).into_owned()
 }
 
+/// `s` without the query string and fragment of any URL it spells out: a queue URL carries an
+/// account id and often a signature (XS-16).
+fn strip_url_queries(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail
+            .find(|c: char| c.is_whitespace() || "\"'`)}],".contains(c))
+            .unwrap_or(tail.len());
+        let url = &tail[..end];
+        out.push_str(url.split(['?', '#']).next().unwrap_or(url));
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 impl Draft {
     fn finish(self, kind: FactKind) -> BlobFact {
+        let events = matches!(kind, FactKind::EventPublish | FactKind::EventSubscribe);
         let literal = self.attrs.values().all(|(v, _)| value::is_literal(v));
         let attrs = self
             .attrs
             .into_iter()
             .take(MAX_ATTRS)
-            .map(|(k, (v, _))| (Capped::truncated(&k), normalise(&k, v)))
+            .map(|(k, (v, _))| {
+                let v = match v {
+                    AttrValue::Str(s) if events && s.as_str().contains("://") => {
+                        AttrValue::Str(Capped::truncated(&strip_url_queries(s.as_str())))
+                    }
+                    v => v,
+                };
+                (Capped::truncated(&k), normalise(&k, v))
+            })
             .collect();
         BlobFact {
             kind,
@@ -414,7 +442,11 @@ impl Draft {
                 } else {
                     EvidenceType::Template
                 },
-                text: Capped::truncated(&self.evidence),
+                text: Capped::truncated(&if events {
+                    strip_url_queries(&self.evidence)
+                } else {
+                    self.evidence
+                }),
             },
         }
     }
@@ -764,6 +796,20 @@ static BUILTIN: &[Embedded] = &[
                 include_str!("../adapters/codegen-go/queries/grpc.scm"),
             ),
         ],
+    ),
+    (
+        include_str!("../adapters/events/adapter.toml"),
+        &[(
+            "brokers.scm",
+            include_str!("../adapters/events/queries/brokers.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/events-go/adapter.toml"),
+        &[(
+            "kafka.scm",
+            include_str!("../adapters/events-go/queries/kafka.scm"),
+        )],
     ),
 ];
 

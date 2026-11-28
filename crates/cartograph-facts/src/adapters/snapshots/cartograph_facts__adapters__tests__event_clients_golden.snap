@@ -1,0 +1,39 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+== kafkajs
+events {"kind":"event.publish","span":[3,6,3,72],"attrs":{"broker":"kafka","topic":"order.paid"},"evidence":{"type":"literal","text":"producer.send({ topic: \"order.paid\", messages: [{ value: \"x\" }] })"}}
+events {"kind":"event.subscribe","span":[4,6,4,55],"attrs":{"broker":"kafka","topic":{"parts":[{"lit":"orders."},{"expr":"region"}]}},"evidence":{"type":"template","text":"consumer.subscribe({ topic: `orders.${region}` })"}}
+events {"kind":"event.subscribe","span":[5,36,5,41],"attrs":{"broker":"kafka","topic":"a.b"},"evidence":{"type":"literal","text":"\"a.b\""}}
+events {"kind":"event.subscribe","span":[5,43,5,51],"attrs":{"broker":"kafka","topic":{"parts":[{"expr":"Topics.C"}]}},"evidence":{"type":"template","text":"Topics.C"}}
+== amqplib
+events {"kind":"event.publish","span":[2,0,2,57],"attrs":{"broker":"amqp","topic":"order.paid"},"evidence":{"type":"literal","text":"channel.publish(\"orders\", \"order.paid\", Buffer.from(\"x\"))"}}
+events {"kind":"event.publish","span":[3,0,3,47],"attrs":{"broker":"amqp","topic":"emails"},"evidence":{"type":"literal","text":"channel.sendToQueue(\"emails\", Buffer.from(\"x\"))"}}
+events {"kind":"event.subscribe","span":[4,0,4,33],"attrs":{"broker":"amqp","topic":"emails"},"evidence":{"type":"literal","text":"channel.consume(\"emails\", handle)"}}
+events {"kind":"event.subscribe","span":[5,0,5,47],"attrs":{"broker":"amqp","topic":"order.#"},"evidence":{"type":"literal","text":"channel.bindQueue(\"audit\", \"orders\", \"order.#\")"}}
+== bullmq
+fetch {"kind":"env.read","span":[3,11,3,35],"attrs":{"key":"REPORT_QUEUE"},"evidence":{"type":"literal","text":"process.env.REPORT_QUEUE"}}
+events {"kind":"event.publish","span":[2,10,2,46],"attrs":{"broker":"bullmq","topic":"reports"},"evidence":{"type":"literal","text":"new Queue(\"reports\", { connection })"}}
+events {"kind":"event.subscribe","span":[3,0,3,45],"attrs":{"broker":"bullmq","topic":{"parts":[{"expr":"process.env.REPORT_QUEUE"}]}},"evidence":{"type":"template","text":"new Worker(process.env.REPORT_QUEUE, handler)"}}
+== aws
+events {"kind":"event.publish","span":[3,13,3,130],"attrs":{"broker":"sqs","topic":"https://sqs.eu-west-1.amazonaws.com/123456789012/orders"},"evidence":{"type":"literal","text":"new SendMessageCommand({ QueueUrl: \"https://sqs.eu-west-1.amazonaws.com/123456789012/orders\", MessageBody: \"x\" })"}}
+events {"kind":"event.publish","span":[5,13,5,108],"attrs":{"broker":"sns","topic":"arn:aws:sns:eu-west-1:123456789012:order-paid"},"evidence":{"type":"literal","text":"new PublishCommand({ TopicArn: \"arn:aws:sns:eu-west-1:123456789012:order-paid\", Message: \"x\" })"}}
+events {"kind":"event.subscribe","span":[4,13,4,57],"attrs":{"broker":"sqs","topic":{"parts":[{"expr":"URL"}]}},"evidence":{"type":"template","text":"new ReceiveMessageCommand({ QueueUrl: URL })"}}
+events {"kind":"event.subscribe","span":[6,0,6,38],"attrs":{"broker":"sqs","topic":{"parts":[{"expr":"URL2"}]}},"evidence":{"type":"template","text":"sqs.receiveMessage({ QueueUrl: URL2 })"}}
+== nats
+events {"kind":"event.publish","span":[2,0,2,40],"attrs":{"broker":"nats","topic":"order.paid"},"evidence":{"type":"literal","text":"nc.publish(\"order.paid\", sc.encode(\"x\"))"}}
+events {"kind":"event.subscribe","span":[3,0,3,23],"attrs":{"broker":"nats","topic":"order.>"},"evidence":{"type":"literal","text":"nc.subscribe(\"order.>\")"}}
+== redis
+events {"kind":"event.publish","span":[2,0,2,32],"attrs":{"broker":"redis","topic":"order:paid"},"evidence":{"type":"literal","text":"redis.publish(\"order:paid\", \"x\")"}}
+events {"kind":"event.subscribe","span":[3,14,3,26],"attrs":{"broker":"redis","topic":"order:paid"},"evidence":{"type":"literal","text":"\"order:paid\""}}
+events {"kind":"event.subscribe","span":[3,28,3,43],"attrs":{"broker":"redis","topic":"order:shipped"},"evidence":{"type":"literal","text":"\"order:shipped\""}}
+events {"kind":"event.subscribe","span":[4,15,4,24],"attrs":{"broker":"redis","topic":"order:*"},"evidence":{"type":"literal","text":"\"order:*\""}}
+== sarama
+events-go {"kind":"event.publish","span":[4,9,4,62],"attrs":{"broker":"kafka","topic":"order.paid"},"evidence":{"type":"literal","text":"sarama.ProducerMessage{Topic: \"order.paid\", Value: v}"}}
+events-go {"kind":"event.subscribe","span":[5,9,5,72],"attrs":{"broker":"kafka","topic":"order.paid"},"evidence":{"type":"literal","text":"consumer.ConsumePartition(\"order.paid\", 0, sarama.OffsetNewest)"}}
+events-go {"kind":"event.subscribe","span":[6,29,6,44],"attrs":{"broker":"kafka","topic":"order.shipped"},"evidence":{"type":"literal","text":"\"order.shipped\""}}
+events-go {"kind":"event.subscribe","span":[6,46,6,62],"attrs":{"broker":"kafka","topic":"order.refunded"},"evidence":{"type":"literal","text":"\"order.refunded\""}}
+== segmentio
+events-go {"kind":"event.publish","span":[4,7,4,67],"attrs":{"broker":"kafka","topic":"order.paid"},"evidence":{"type":"literal","text":"kafka.Writer{Addr: kafka.TCP(\"k:9092\"), Topic: \"order.paid\"}"}}
+events-go {"kind":"event.subscribe","span":[5,22,5,76],"attrs":{"broker":"kafka","topic":"order.shipped"},"evidence":{"type":"literal","text":"kafka.ReaderConfig{Brokers: b, Topic: \"order.shipped\"}"}}
