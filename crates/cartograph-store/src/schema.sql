@@ -526,3 +526,33 @@ CREATE TABLE channel_edge (
 CREATE INDEX channel_edge_name ON channel_edge (name, broker);
 CREATE INDEX channel_edge_file ON channel_edge (file);
 -- XS-16 events (end)
+
+-- XS-20 entrypoints (begin)
+-- What starts work in a service: kind is http, event, job, cli, export or ui. uid names it across
+-- rebuilds (a hash of kind, node and key); a row is one stretch it existed in, so an entrypoint
+-- that went away and came back has two. node is the file it starts in (the handler, the
+-- subscriber, the cron file, the bin's target, the page); name is what the view shows; key is what
+-- tells links to it from other things in that file (`get /orders/{}` for a route, `broker\0channel`
+-- for an event). reach is the number of nodes it reaches at HEAD (the only reach stored; any other
+-- date is walked at query time) and is NULL for a stretch that has ended.
+CREATE TABLE entrypoint (
+  id INTEGER PRIMARY KEY,
+  uid TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  node INTEGER NOT NULL REFERENCES node (id),
+  service INTEGER REFERENCES node (id),
+  name TEXT NOT NULL,
+  key TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER,
+  reach INTEGER
+) STRICT;
+CREATE INDEX entrypoint_uid ON entrypoint (uid);
+CREATE INDEX entrypoint_at ON entrypoint (from_seq, to_seq);
+-- The manifest's `clients:` that call an entrypoint's operation: callers outside the workspace.
+CREATE TABLE entrypoint_client (
+  uid TEXT NOT NULL,
+  name TEXT NOT NULL
+) STRICT;
+CREATE INDEX entrypoint_client_uid ON entrypoint_client (uid);
+-- XS-20 entrypoints (end)
