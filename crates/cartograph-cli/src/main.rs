@@ -11,6 +11,7 @@ mod check;
 mod doctor;
 mod hooks;
 mod init;
+mod link;
 mod mcp;
 mod output;
 mod schedule;
@@ -215,7 +216,14 @@ enum Command {
     /// Serve the app on 127.0.0.1 and open it in the browser.
     Open {
         /// A cartograph:// link to open at.
+        #[arg(conflicts_with_all = ["register_scheme", "unregister_scheme"])]
         link: Option<String>,
+        /// Make cartograph:// links open here (a .desktop file on Linux, HKCU on Windows).
+        #[arg(long, conflicts_with = "unregister_scheme")]
+        register_scheme: bool,
+        /// Undo --register-scheme.
+        #[arg(long)]
+        unregister_scheme: bool,
         #[command(flatten)]
         dir: Dir,
     },
@@ -263,6 +271,9 @@ enum Command {
     Check {
         #[command(flatten)]
         dir: Dir,
+        /// Write cartograph.baseline.json: accept the rule violations there are now.
+        #[arg(long)]
+        update_baseline: bool,
     },
     /// Ask the map a question.
     Ask {
@@ -405,7 +416,15 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
             manifest: false,
             dir,
         } => verify::run(out, &named(&g, dir.or_cwd()), other.as_deref())?,
-        Command::Open { .. } => app::open(out, &g)?,
+        Command::Open {
+            register_scheme: true,
+            ..
+        } => app::scheme(out, true)?,
+        Command::Open {
+            unregister_scheme: true,
+            ..
+        } => app::scheme(out, false)?,
+        Command::Open { link, .. } => app::open(out, &g, link.as_deref())?,
         #[cfg(debug_assertions)]
         Command::Serve {
             host,
@@ -483,7 +502,10 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
             },
             g.yes,
         )?,
-        Command::Check { dir } => check::run(out, &named(&g, dir.or_cwd()))?,
+        Command::Check {
+            dir,
+            update_baseline,
+        } => check::run(out, &named(&g, dir.or_cwd()), update_baseline)?,
         Command::Doctor { dir, fix } => doctor::run(out, &named(&g, dir.or_cwd()), fix)?,
         _ => return Err(not_built(name)),
     }

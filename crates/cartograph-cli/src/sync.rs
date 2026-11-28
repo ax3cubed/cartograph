@@ -146,6 +146,13 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
              (`cartograph status --unresolved` lists the rest)"
         );
     }
+    // The six rows (XS-14), read back from the derived row this sync left.
+    let summary = cartograph_store::Index::open_read(&ws.index_path())
+        .ok()
+        .and_then(|ix| cartograph_index::coverage::summary(&ix.conn).ok().flatten());
+    if let (Some(line), true) = (&summary, s.steps > 0) {
+        human += &format!("\n{line}");
+    }
     out.print(
         &human,
         json!({
@@ -163,6 +170,7 @@ pub fn run(out: &Out, dir: &Path, f: Flags, g: &Global) -> Result<(), Report> {
             "dirty_left": s.dirty_left,
             "coverage": { "files_total": files_total, "files_parsed": files_parsed,
                           "imports_total": imports_total, "imports_resolved": imports_resolved },
+            "coverage_summary": summary,
             "derived_rebuilt": s.derived.rebuilt(),
             "ms": { "total": s.total_ms, "rehydrate": s.rehydrate_ms, "walk": s.walk_ms,
                     "replay": s.replay_ms },

@@ -125,6 +125,19 @@ CREATE TABLE correction_interval (
   from_seq INTEGER NOT NULL,
   to_seq INTEGER
 ) STRICT;
+CREATE TABLE coverage_row (
+  row TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL,
+  done INTEGER NOT NULL,
+  total INTEGER NOT NULL,
+  unresolved INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE TABLE coverage_total (
+  row TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  total INTEGER NOT NULL,
+  PRIMARY KEY (row, seq)
+) STRICT, WITHOUT ROWID;
 CREATE TABLE derived (
   kind TEXT NOT NULL,
   scope TEXT NOT NULL,
@@ -132,6 +145,22 @@ CREATE TABLE derived (
   stale INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (kind, scope)
 ) STRICT, WITHOUT ROWID;
+CREATE TABLE entrypoint (
+  id INTEGER PRIMARY KEY,
+  uid TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  node INTEGER NOT NULL REFERENCES node (id),
+  service INTEGER REFERENCES node (id),
+  name TEXT NOT NULL,
+  key TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER,
+  reach INTEGER
+) STRICT;
+CREATE TABLE entrypoint_client (
+  uid TEXT NOT NULL,
+  name TEXT NOT NULL
+) STRICT;
 CREATE TABLE environment (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -364,6 +393,9 @@ CREATE INDEX config_value_key ON config_value (key, valid_from);
 CREATE UNIQUE INDEX contract_file ON contract (file);
 CREATE INDEX contract_schema_contract ON contract_schema (contract);
 CREATE INDEX correction_interval_link ON correction_interval (link);
+CREATE INDEX entrypoint_at ON entrypoint (from_seq, to_seq);
+CREATE INDEX entrypoint_client_uid ON entrypoint_client (uid);
+CREATE INDEX entrypoint_uid ON entrypoint (uid);
 CREATE INDEX evidence_file ON evidence (file);
 CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX fact_extractor ON fact (extractor);
@@ -388,4 +420,6 @@ CREATE INDEX operation_contract ON operation (contract);
 CREATE INDEX ownership_file ON ownership (file, from_seq);
 CREATE INDEX ownership_owner ON ownership (owner);
 CREATE INDEX unresolved_at ON unresolved (from_seq, to_seq);
-CREATE INDEX unresolved_file ON unresolved (file, spec)
+CREATE INDEX unresolved_file ON unresolved (file, spec);
+CREATE INDEX unresolved_open ON unresolved (fact_kind) WHERE to_seq IS NULL;
+CREATE INDEX unresolved_stage_reason ON unresolved (stage, reason)

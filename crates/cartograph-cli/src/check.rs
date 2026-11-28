@@ -1,5 +1,6 @@
-//! `cartograph check` (XS-12): fails on a correction that matches nothing. Rule violations join it
-//! when rules land; until then `rules` is empty.
+//! `cartograph check` (XS-12, XS-22): fails on a correction that matches nothing and on an
+//! architecture rule violation that isn't in the baseline. `--update-baseline` rewrites the
+//! baseline to the violations there are now.
 //!
 //! The statuses are the index's, written by the last sync. The file is read here too, so one that
 //! doesn't parse fails with its line, and so does an index that is behind the file.
@@ -10,6 +11,7 @@ use cartograph_core::{ExitCode, Report};
 use cartograph_discovery::overrides::{self, Stale};
 use cartograph_discovery::setup;
 use cartograph_index::corrections::{self, Row};
+use cartograph_index::rules;
 use serde_json::json;
 
 use crate::data_dir;
@@ -24,7 +26,7 @@ fn fail(what: String, why: String, action: &str) -> Report {
     }
 }
 
-pub fn run(out: &Out, dir: &Path) -> Result<(), Report> {
+pub fn run(out: &Out, dir: &Path, update_baseline: bool) -> Result<(), Report> {
     let data = data_dir()?;
     let applied = setup::locate(&data, dir)
         .map_err(|e| Report::from_error(&e))?
@@ -125,9 +127,79 @@ pub fn run(out: &Out, dir: &Path) -> Result<(), Report> {
             })
         })
         .collect();
+    let manifest =
+        cartograph_server::manifest_path(&data, &applied.workspace_id).ok_or_else(|| {
+            fail(
+                "the workspace has no manifest".into(),
+                String::new(),
+                "run `cartograph init`",
+            )
+        })?;
+    let rep = rules::report(&manifest, &ws.index_path()).map_err(|(w, y, a)| fail(w, y, &a))?;
+    if update_baseline {
+        let b = rules::current_baseline(&rep);
+        write_baseline(&rep.baseline_path, &b.to_json())?;
+        out.print(
+            &format!(
+                "wrote {}: {} violations, {} fixed ones dropped",
+                rep.baseline_path.display(),
+                b.violations.len(),
+                rep.fixed.len()
+            ),
+            json!({ "corrections": corrections_json, "rules": rules_json(&rep), "fixed": [], "baseline_written": b.violations.len() }),
+        );
+        return Ok(());
+    }
+    let line_of = |f: &rules::Found| {
+        let v = &f.violation;
+        format!(
+            "{} {}: {} {} -> {}{}",
+            v.rule,
+            f.severity.as_str(),
+            v.kind,
+            sanitize(&v.from),
+            sanitize(&v.to),
+            if v.op.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", sanitize(&v.op))
+            }
+        )
+    };
+    let new: Vec<&rules::Found> = rep.new_ones().collect();
+    let (errors, soft): (Vec<_>, Vec<_>) = new
+        .iter()
+        .copied()
+        .partition(|f| f.severity == cartograph_discovery::rules::Severity::Error);
+    let mut human = human;
+    if !rep.rules.is_empty() {
+        human.push_str(&format!(
+            "\n{} rules: {} violations, {} baselined, {} new",
+            rep.rules.len(),
+            rep.rules.iter().map(|r| r.violations).sum::<usize>(),
+            rep.rules.iter().map(|r| r.baselined).sum::<usize>(),
+            new.len()
+        ));
+        for f in &soft {
+            human.push_str(&format!("\n{}", line_of(f)));
+        }
+        for e in &rep.fixed {
+            human.push_str(&format!(
+                "\nfixed: {} {} {} -> {}",
+                e.rule,
+                e.kind,
+                sanitize(&e.from),
+                sanitize(&e.to)
+            ));
+        }
+    }
     out.print(
         &human,
-        json!({ "corrections": corrections_json, "rules": [] }),
+        json!({
+            "corrections": corrections_json,
+            "rules": rules_json(&rep),
+            "fixed": rep.fixed.iter().map(|e| json!({ "rule": e.rule, "kind": e.kind, "from": e.from, "to": e.to, "op": e.op })).collect::<Vec<_>>(),
+        }),
     );
 
     // An entry that can't be applied is said once, on stderr; `stale: off` keeps quiet about
@@ -135,22 +207,79 @@ pub fn run(out: &Out, dir: &Path) -> Result<(), Report> {
     for l in &ambiguous {
         eprintln!("warning: {}", sanitize(l));
     }
-    if mode == Stale::Off || stale.is_empty() {
-        return Ok(());
-    }
+    let stale_fails = mode == Stale::Error && !stale.is_empty();
     if mode == Stale::Warn {
         for l in &stale {
             eprintln!("warning: {}", sanitize(l));
         }
-        return Ok(());
     }
-    Err(fail(
-        format!(
-            "{} of {} corrections match nothing",
-            stale.len(),
-            rows.len()
-        ),
-        stale.join("; "),
-        "delete the entry, or fix its ends; `stale: warn` in the file lets this pass",
-    ))
+    // Only an error-severity violation that the baseline doesn't cover fails.
+    if !errors.is_empty() {
+        return Err(fail(
+            format!("{} architecture rule violations", errors.len()),
+            errors
+                .iter()
+                .map(|f| line_of(f))
+                .collect::<Vec<_>>()
+                .join("; "),
+            "remove the dependency, or accept it with `cartograph check --update-baseline`",
+        ));
+    }
+    if stale_fails {
+        return Err(fail(
+            format!(
+                "{} of {} corrections match nothing",
+                stale.len(),
+                rows.len()
+            ),
+            stale.join("; "),
+            "delete the entry, or fix its ends; `stale: warn` in the file lets this pass",
+        ));
+    }
+    Ok(())
+}
+
+/// What `rules` holds in `--json`: each rule with its live violations.
+fn rules_json(rep: &rules::Report) -> Vec<serde_json::Value> {
+    rep.rules
+        .iter()
+        .map(|r| {
+            let items: Vec<_> = rep
+                .found
+                .iter()
+                .filter(|f| f.violation.live && f.violation.rule == r.rule.name)
+                .map(|f| {
+                    let v = &f.violation;
+                    json!({
+                        "kind": v.kind, "from": v.from, "to": v.to, "op": v.op,
+                        "level": v.level, "baselined": f.baselined,
+                    })
+                })
+                .collect();
+            json!({
+                "name": r.rule.name, "type": r.rule.kind.as_str(),
+                "severity": r.rule.severity.as_str(),
+                "violations": r.violations, "baselined": r.baselined, "items": items,
+                // The reason is repo text: untrusted (F8).
+                "untrusted_text": r.rule.reason,
+            })
+        })
+        .collect()
+}
+
+/// Writes the baseline through a temp file renamed over the name, never following a link.
+fn write_baseline(path: &Path, text: &str) -> Result<(), Report> {
+    let io = |e: std::io::Error| {
+        fail(
+            format!("can't write {}", path.display()),
+            e.to_string(),
+            "check the folder's permissions",
+        )
+    };
+    if std::fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_file()) {
+        return Err(io(std::io::Error::other("it isn't a regular file")));
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text).map_err(io)?;
+    std::fs::rename(&tmp, path).map_err(io)
 }

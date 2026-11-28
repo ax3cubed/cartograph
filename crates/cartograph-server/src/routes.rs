@@ -227,6 +227,11 @@ pub fn router(app: Arc<App>) -> Router {
             "/api/v1/w/{ws}/corrections",
             get(crate::corrections::get).post(crate::corrections::post),
         )
+        .route("/api/v1/w/{ws}/rules", get(crate::rules::get))
+        .route(
+            "/api/v1/w/{ws}/rules/violations",
+            get(crate::rules::violations),
+        )
         .route(
             "/api/v1/w/{ws}/corrections/{id}",
             axum::routing::delete(crate::corrections::delete),

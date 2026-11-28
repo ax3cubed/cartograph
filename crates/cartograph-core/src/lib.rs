@@ -5,6 +5,7 @@ pub mod error;
 pub mod ids;
 pub mod logging;
 pub mod paths;
+pub mod reach;
 pub mod secrets;
 
 pub use error::{ExitCode, Explain, Report};

@@ -92,3 +92,17 @@ fn a_lan_host_is_refused_with_exit_1() {
     );
     assert!(!d.path().join("server.json").exists());
 }
+
+#[test]
+fn a_link_to_an_unregistered_workspace_or_with_a_path_is_refused_before_any_server_starts() {
+    let d = tempfile::tempdir().unwrap();
+    for link in [
+        "cartograph://nope#focus=x",
+        "file:///etc/passwd",
+        "cartograph://",
+    ] {
+        let o = cartograph(d.path(), &["open", link]).output().unwrap();
+        assert_eq!(o.status.code(), Some(2), "{link}");
+        assert!(o.stdout.is_empty(), "{link}");
+    }
+}

@@ -95,7 +95,7 @@ export type FolderResult = "repo" | "scope" | "skipped";
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "EntrypointKind".
  */
-export type EntrypointKind = "http" | "event" | "job" | "cli";
+export type EntrypointKind = ("http" | "event") | "job" | "cli" | "export" | "ui";
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "ErrorCode".
@@ -448,6 +448,7 @@ export interface CartographApi {
   ConceptDecision: ConceptDecision;
   ConfigFile: ConfigFile;
   ConfigWrite: ConfigWrite;
+  Consumer: Consumer;
   Contract: Contract;
   Correction: Correction;
   CorrectionRequest: CorrectionRequest;
@@ -457,6 +458,7 @@ export interface CartographApi {
   DiscoverRequest: DiscoverRequest;
   Discovery: Discovery;
   Entrypoint: Entrypoint;
+  EntrypointDetail: EntrypointDetail;
   Environment: Environment;
   ErrorBody: ErrorBody;
   ExtractorInfo: ExtractorInfo;
@@ -489,6 +491,7 @@ export interface CartographApi {
   ProviderWrite: ProviderWrite;
   RankedNode: RankedNode;
   Reach: Reach;
+  ReachSummary: ReachSummary;
   ReadParams: ReadParams;
   Repo: Repo;
   Rule: Rule;
@@ -500,6 +503,7 @@ export interface CartographApi {
   Selection: Selection;
   ServerEvent: ServerEvent;
   Service: Service;
+  ServiceReach: ServiceReach;
   SymbolCalls: SymbolCalls;
   Thread: Thread;
   TimelineDensity: TimelineDensity;
@@ -707,6 +711,26 @@ export interface ConfigWrite {
   yaml: string;
 }
 /**
+ * Who calls an entrypoint: a link into its operation or channel, or a client the manifest
+ * declares. Corrections and declared clients carry `overridden`, the view's "override" chip.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "Consumer".
+ */
+export interface Consumer {
+  level: ConfidenceLevel;
+  link?: LinkId | null;
+  /**
+   * A declared client's name: untrusted text (F8).
+   */
+  name?: string | null;
+  /**
+   * The calling file; none for a declared client.
+   */
+  node?: NodeId | null;
+  overridden: boolean;
+}
+/**
  * `lib/model.ts` Spec. Served from `…/contracts`.
  *
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -842,9 +866,19 @@ export interface CorrectionRequest {
  */
 export interface CoverageRow {
   done: number;
+  /**
+   * The reason that affects the most rows.
+   */
   gap?: Problem | null;
+  /**
+   * Every reason, most rows first (XS-14).
+   */
+  gaps: GapGroup[];
   id: string;
   label: string;
+  /**
+   * In percent: the manifest's `coverage.targets`, else the default; none for `handlers`.
+   */
   target?: number | null;
   total: number;
 }
@@ -858,6 +892,16 @@ export interface Problem {
   try: string;
   what: string;
   why: string;
+}
+/**
+ * The unresolved rows of one reason (XS-14). `reason` can carry repo text: untrusted text (F8).
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "GapGroup".
+ */
+export interface GapGroup {
+  reason: string;
+  rows: number;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -957,15 +1001,60 @@ export interface Service {
   tags: string[];
 }
 /**
+ * What starts work in a service (XS-20). `id` is not a node.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Entrypoint".
  */
 export interface Entrypoint {
+  /**
+   * Links into it, and declared clients.
+   */
   consumers: number;
   id: string;
   kind: EntrypointKind;
   label: string;
+  /**
+   * The file it starts in.
+   */
   node: NodeId;
+  /**
+   * Nodes it reaches ("Symbols reached"), counted on the links at the date.
+   */
+  reach: number;
+  service?: NodeId | null;
+}
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "EntrypointDetail".
+ */
+export interface EntrypointDetail {
+  consumers: Consumer[];
+  entrypoint: Entrypoint;
+  reach: ReachSummary;
+}
+/**
+ * What an entrypoint reaches over the links valid at the date, by service, biggest first.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ReachSummary".
+ */
+export interface ReachSummary {
+  nodes: number;
+  services: ServiceReach[];
+  /**
+   * A bound (64 hops, 50,000 nodes) stopped the walk.
+   */
+  truncated: boolean;
+}
+/**
+ * The nodes an entrypoint reaches in one service.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ServiceReach".
+ */
+export interface ServiceReach {
+  nodes: number;
   service: NodeId;
 }
 /**
@@ -1698,28 +1787,64 @@ export interface Repo {
   path: string;
 }
 /**
+ * An architecture rule of cartograph.yaml with what it finds now (XS-22).
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Rule".
  */
 export interface Rule {
+  baselined: number;
+  /**
+   * The rule's `reason`: untrusted text from the repo (F8).
+   */
   description: string;
+  /**
+   * The rule's name, which the baseline and violations use.
+   */
   id: string;
+  /**
+   * `forbid` or `no_cycles`.
+   */
   kind: string;
+  /**
+   * `error` fails `cartograph check`; `warn` and `info` only print.
+   */
+  severity: string;
+  /**
+   * Violations that hold now, baselined ones included.
+   */
   violations: number;
 }
 /**
- * Natural keys, as in cartograph.baseline.json.
+ * A link a rule forbids, in the natural keys of cartograph.baseline.json. It carries the link's
+ * intervals, so whether a commit passes is a lookup.
  *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "RuleViolation".
  */
 export interface RuleViolation {
   baselined: boolean;
-  from: NodeId;
-  kind: LinkKind;
+  /**
+   * `service:path`; untrusted text.
+   */
+  from: string;
+  /**
+   * The steps it held over: from, and to (none while it still holds).
+   */
+  intervals: [number, number | null][];
+  /**
+   * The link kind: `import`, `package`, `http`, `event` or `db`.
+   */
+  kind: string;
+  level?: ConfidenceLevel | null;
+  /**
+   * It holds at the newest commit.
+   */
+  live: boolean;
   op?: string | null;
   rule: string;
-  to: NodeId;
+  severity: string;
+  to: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema

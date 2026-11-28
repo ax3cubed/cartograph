@@ -20,6 +20,7 @@ mod config;
 mod contracts;
 mod coverage;
 mod detail;
+mod entrypoints;
 mod error;
 mod find;
 mod graph;
@@ -36,7 +37,6 @@ mod versions;
 
 pub use at::{At, parse_instant, rfc3339};
 pub use cartograph_store::FORMAT_VERSION;
-pub use coverage::IMPORTS_ROW;
 pub use detail::{WORKSPACE, level};
 pub use error::QueryError;
 pub use find::{MAX_QUERY, SearchQuery};

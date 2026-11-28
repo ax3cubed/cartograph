@@ -37,16 +37,21 @@ pub struct Manifest {
     /// Services and their paths (shape only here; detection is IDX-20).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub services: Vec<Service>,
-    /// Architecture rules, passed through to the rules owner (H6).
+    /// Architecture rules (H6, XS-22).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rules: Vec<serde_json::Value>,
-    /// The baseline file of known rule violations, relative to the manifest.
+    pub rules: Vec<crate::rules::Rule>,
+    /// The baseline file of known rule violations, relative to the manifest; else
+    /// `cartograph.baseline.json` beside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<String>,
     /// OpenAPI and Swagger files by glob (XS-08), besides the ones named `openapi.*` or
     /// `swagger.*`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contracts: Vec<Contract>,
+    /// Callers outside the workspace (XS-20): each is shown as a consumer, with an override chip,
+    /// of the entrypoints whose operations it lists.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clients: Vec<Client>,
     /// What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).
     #[serde(default, skip_serializing_if = "Retrieval::is_empty")]
     pub retrieval: Retrieval,
@@ -60,6 +65,53 @@ pub struct Manifest {
     /// runs nothing: each needs `cartograph adapters allow <name>` on every machine.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub adapters: Vec<String>,
+    /// What the Coverage view aims for (XS-14).
+    #[serde(default, skip_serializing_if = "Coverage::is_empty")]
+    pub coverage: Coverage,
+}
+
+/// `coverage:` (XS-14).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Coverage {
+    /// A target in percent for each of `files`, `imports`, `calls`, `handlers`, `routes` and
+    /// `consumers`; the defaults are 98, 99, 85, none, 80 and 75.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub targets: BTreeMap<CoverageRow, f32>,
+}
+
+impl Coverage {
+    fn is_empty(&self) -> bool {
+        self.targets.is_empty()
+    }
+}
+
+/// A row of the Coverage view.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum CoverageRow {
+    Files,
+    Imports,
+    Calls,
+    Handlers,
+    Routes,
+    Consumers,
+}
+
+impl CoverageRow {
+    /// The row's id in the API.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Files => "files",
+            Self::Imports => "imports",
+            Self::Calls => "calls",
+            Self::Handlers => "handlers",
+            Self::Routes => "routes",
+            Self::Consumers => "consumers",
+        }
+    }
 }
 
 /// One environment of `environments:` (XS-09).
@@ -160,6 +212,17 @@ pub struct Contract {
     /// The service that owns the specs it matches; absent, the service whose root holds each file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
+}
+
+/// A caller the index can't see (XS-20): a mobile app, a partner's integration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Client {
+    pub name: String,
+    /// The service that serves the calls; absent, any service that has the operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    /// The operations it calls, as `GET /orders/{id}`.
+    pub calls: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -406,7 +469,13 @@ fn validate(m: &Manifest) -> Result<(), Invalid> {
             ));
         }
     }
-    Ok(())
+    if let Some(b) = m.baseline.as_deref().filter(|p| !plain_relative(p, false)) {
+        return Err(invalid(
+            format!("baseline `{b}` leaves the manifest's folder"),
+            "write the path relative to cartograph.yaml, without ..",
+        ));
+    }
+    crate::rules::validate(&m.rules).map_err(|(what, fix)| invalid(what, fix))
 }
 
 /// The manifest as YAML: one comment, then the keys in a fixed order. No `yaml-language-server`
@@ -634,6 +703,24 @@ services:
     }
 
     #[test]
+    fn coverage_targets_are_set_by_row() {
+        let p = parse(&format!(
+            "{GOOD}coverage:\n  targets:\n    calls: 90\n    files: 99.5\n"
+        ))
+        .unwrap();
+        assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+        let t: Vec<_> = p
+            .manifest
+            .coverage
+            .targets
+            .iter()
+            .map(|(r, v)| (r.id(), *v))
+            .collect();
+        assert_eq!(t, [("files", 99.5), ("calls", 90.0)]);
+        assert!(parse(&format!("{GOOD}coverage:\n  targets:\n    nope: 90\n")).is_err());
+    }
+
+    #[test]
     fn retrieval_is_a_known_section_with_closed_kinds() {
         let p = parse(&format!(
             "{GOOD}retrieval:\n  include: [cards, changes, commit_messages]\n  secret_scan: false\n"
@@ -808,8 +895,9 @@ services:
                     scopes: vec![],
                 }).collect(),
                 options: Options::default(),
-                services: vec![], rules: vec![], baseline: None, contracts: vec![], retrieval: Default::default(),
+                services: vec![], rules: vec![], baseline: None, contracts: vec![], clients: vec![], retrieval: Default::default(),
                 default_environment: None, environments: Default::default(), adapters: vec![],
+                coverage: Default::default(),
             };
             let again = parse(&to_yaml(&m)).unwrap().manifest;
             proptest::prop_assert_eq!(again, m);

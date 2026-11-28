@@ -606,6 +606,50 @@
       ],
       "type": "object"
     },
+    "Consumer": {
+      "description": "Who calls an entrypoint: a link into its operation or channel, or a client the manifest\ndeclares. Corrections and declared clients carry `overridden`, the view's \"override\" chip.",
+      "properties": {
+        "level": {
+          "$ref": "#/definitions/ConfidenceLevel"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LinkId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "description": "A declared client's name: untrusted text (F8).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The calling file; none for a declared client."
+        },
+        "overridden": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "level",
+        "overridden"
+      ],
+      "type": "object"
+    },
     "ContextBlock": {
       "properties": {
         "cited": {
@@ -835,7 +879,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "The reason that affects the most rows."
+        },
+        "gaps": {
+          "description": "Every reason, most rows first (XS-14).",
+          "items": {
+            "$ref": "#/definitions/GapGroup"
+          },
+          "type": "array"
         },
         "id": {
           "type": "string"
@@ -844,6 +896,7 @@
           "type": "string"
         },
         "target": {
+          "description": "In percent: the manifest's `coverage.targets`, else the default; none for `handlers`.",
           "format": "float",
           "type": [
             "number",
@@ -860,7 +913,8 @@
         "id",
         "label",
         "done",
-        "total"
+        "total",
+        "gaps"
       ],
       "type": "object"
     },
@@ -1035,8 +1089,10 @@
       "type": "object"
     },
     "Entrypoint": {
+      "description": "What starts work in a service (XS-20). `id` is not a node.",
       "properties": {
         "consumers": {
+          "description": "Links into it, and declared clients.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -1051,10 +1107,28 @@
           "type": "string"
         },
         "node": {
-          "$ref": "#/definitions/NodeId"
+          "allOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            }
+          ],
+          "description": "The file it starts in."
+        },
+        "reach": {
+          "description": "Nodes it reaches (\"Symbols reached\"), counted on the links at the date.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "service": {
-          "$ref": "#/definitions/NodeId"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1062,19 +1136,63 @@
         "kind",
         "label",
         "node",
-        "service",
-        "consumers"
+        "consumers",
+        "reach"
+      ],
+      "type": "object"
+    },
+    "EntrypointDetail": {
+      "properties": {
+        "consumers": {
+          "items": {
+            "$ref": "#/definitions/Consumer"
+          },
+          "type": "array"
+        },
+        "entrypoint": {
+          "$ref": "#/definitions/Entrypoint"
+        },
+        "reach": {
+          "$ref": "#/definitions/ReachSummary"
+        }
+      },
+      "required": [
+        "entrypoint",
+        "consumers",
+        "reach"
       ],
       "type": "object"
     },
     "EntrypointKind": {
-      "enum": [
-        "http",
-        "event",
-        "job",
-        "cli"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "http",
+            "event"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "job",
+          "description": "A cron config, a k8s CronJob or a scheduler registration.",
+          "type": "string"
+        },
+        {
+          "const": "cli",
+          "description": "A package's `bin`, a Go `main` package.",
+          "type": "string"
+        },
+        {
+          "const": "export",
+          "description": "A package's entry files.",
+          "type": "string"
+        },
+        {
+          "const": "ui",
+          "description": "A file-system route.",
+          "type": "string"
+        }
+      ]
     },
     "Environment": {
       "properties": {
@@ -1491,6 +1609,24 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "GapGroup": {
+      "description": "The unresolved rows of one reason (XS-14). `reason` can carry repo text: untrusted text (F8).",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "rows": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reason",
+        "rows"
       ],
       "type": "object"
     },
@@ -3174,6 +3310,32 @@
       ],
       "type": "object"
     },
+    "ReachSummary": {
+      "description": "What an entrypoint reaches over the links valid at the date, by service, biggest first.",
+      "properties": {
+        "nodes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/definitions/ServiceReach"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "description": "A bound (64 hops, 50,000 nodes) stopped the walk.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "nodes",
+        "services",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "ReadParams": {
       "description": "Common read parameters. Every read takes them; each route documents which it honours.",
       "properties": {
@@ -3303,17 +3465,31 @@
       "type": "string"
     },
     "Rule": {
+      "description": "An architecture rule of cartograph.yaml with what it finds now (XS-22).",
       "properties": {
+        "baselined": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "description": {
+          "description": "The rule's `reason`: untrusted text from the repo (F8).",
           "type": "string"
         },
         "id": {
+          "description": "The rule's name, which the baseline and violations use.",
           "type": "string"
         },
         "kind": {
+          "description": "`forbid` or `no_cycles`.",
+          "type": "string"
+        },
+        "severity": {
+          "description": "`error` fails `cartograph check`; `warn` and `info` only print.",
           "type": "string"
         },
         "violations": {
+          "description": "Violations that hold now, baselined ones included.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -3322,22 +3498,64 @@
       "required": [
         "id",
         "kind",
+        "severity",
         "description",
-        "violations"
+        "violations",
+        "baselined"
       ],
       "type": "object"
     },
     "RuleViolation": {
-      "description": "Natural keys, as in cartograph.baseline.json.",
+      "description": "A link a rule forbids, in the natural keys of cartograph.baseline.json. It carries the link's\nintervals, so whether a commit passes is a lookup.",
       "properties": {
         "baselined": {
           "type": "boolean"
         },
         "from": {
-          "$ref": "#/definitions/NodeId"
+          "description": "`service:path`; untrusted text.",
+          "type": "string"
+        },
+        "intervals": {
+          "description": "The steps it held over: from, and to (none while it still holds).",
+          "items": {
+            "items": [
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         },
         "kind": {
-          "$ref": "#/definitions/LinkKind"
+          "description": "The link kind: `import`, `package`, `http`, `event` or `db`.",
+          "type": "string"
+        },
+        "level": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfidenceLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "live": {
+          "description": "It holds at the newest commit.",
+          "type": "boolean"
         },
         "op": {
           "type": [
@@ -3348,16 +3566,22 @@
         "rule": {
           "type": "string"
         },
+        "severity": {
+          "type": "string"
+        },
         "to": {
-          "$ref": "#/definitions/NodeId"
+          "type": "string"
         }
       },
       "required": [
         "rule",
+        "severity",
         "kind",
         "from",
         "to",
-        "baselined"
+        "baselined",
+        "live",
+        "intervals"
       ],
       "type": "object"
     },
@@ -4272,6 +4496,24 @@
       ],
       "type": "object"
     },
+    "ServiceReach": {
+      "description": "The nodes an entrypoint reaches in one service.",
+      "properties": {
+        "nodes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "service": {
+          "$ref": "#/definitions/NodeId"
+        }
+      },
+      "required": [
+        "service",
+        "nodes"
+      ],
+      "type": "object"
+    },
     "SpecKind": {
       "enum": [
         "openapi",
@@ -4650,6 +4892,9 @@
     "ConfigWrite": {
       "$ref": "#/definitions/ConfigWrite"
     },
+    "Consumer": {
+      "$ref": "#/definitions/Consumer"
+    },
     "Contract": {
       "$ref": "#/definitions/Contract"
     },
@@ -4676,6 +4921,9 @@
     },
     "Entrypoint": {
       "$ref": "#/definitions/Entrypoint"
+    },
+    "EntrypointDetail": {
+      "$ref": "#/definitions/EntrypointDetail"
     },
     "Environment": {
       "$ref": "#/definitions/Environment"
@@ -4773,6 +5021,9 @@
     "Reach": {
       "$ref": "#/definitions/Reach"
     },
+    "ReachSummary": {
+      "$ref": "#/definitions/ReachSummary"
+    },
     "ReadParams": {
       "$ref": "#/definitions/ReadParams"
     },
@@ -4805,6 +5056,9 @@
     },
     "Service": {
       "$ref": "#/definitions/Service"
+    },
+    "ServiceReach": {
+      "$ref": "#/definitions/ServiceReach"
     },
     "SymbolCalls": {
       "$ref": "#/definitions/SymbolCalls"
@@ -4844,6 +5098,7 @@
     "ConceptDecision",
     "ConfigFile",
     "ConfigWrite",
+    "Consumer",
     "Contract",
     "Correction",
     "CorrectionRequest",
@@ -4853,6 +5108,7 @@
     "DiscoverRequest",
     "Discovery",
     "Entrypoint",
+    "EntrypointDetail",
     "Environment",
     "ErrorBody",
     "ExtractorInfo",
@@ -4885,6 +5141,7 @@
     "ProviderWrite",
     "RankedNode",
     "Reach",
+    "ReachSummary",
     "ReadParams",
     "Repo",
     "Rule",
@@ -4896,6 +5153,7 @@
     "Selection",
     "ServerEvent",
     "Service",
+    "ServiceReach",
     "SymbolCalls",
     "Thread",
     "TimelineDensity",

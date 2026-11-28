@@ -926,23 +926,70 @@ pub struct ContractDiff {
     pub changes: Vec<SpecChange>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EntrypointKind {
     Http,
     Event,
+    /// A cron config, a k8s CronJob or a scheduler registration.
     Job,
+    /// A package's `bin`, a Go `main` package.
     Cli,
+    /// A package's entry files.
+    Export,
+    /// A file-system route.
+    Ui,
 }
 
+/// What starts work in a service (XS-20). `id` is not a node.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Entrypoint {
     pub id: String,
     pub kind: EntrypointKind,
     pub label: String,
+    /// The file it starts in.
     pub node: NodeId,
-    pub service: NodeId,
+    pub service: Option<NodeId>,
+    /// Links into it, and declared clients.
     pub consumers: u32,
+    /// Nodes it reaches ("Symbols reached"), counted on the links at the date.
+    pub reach: u32,
+}
+
+/// Who calls an entrypoint: a link into its operation or channel, or a client the manifest
+/// declares. Corrections and declared clients carry `overridden`, the view's "override" chip.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Consumer {
+    /// The calling file; none for a declared client.
+    pub node: Option<NodeId>,
+    pub link: Option<LinkId>,
+    /// A declared client's name: untrusted text (F8).
+    pub name: Option<String>,
+    pub level: ConfidenceLevel,
+    pub overridden: bool,
+}
+
+/// The nodes an entrypoint reaches in one service.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceReach {
+    pub service: NodeId,
+    pub nodes: u32,
+}
+
+/// What an entrypoint reaches over the links valid at the date, by service, biggest first.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReachSummary {
+    pub nodes: u32,
+    pub services: Vec<ServiceReach>,
+    /// A bound (64 hops, 50,000 nodes) stopped the walk.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct EntrypointDetail {
+    pub entrypoint: Entrypoint,
+    pub consumers: Vec<Consumer>,
+    pub reach: ReachSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -960,8 +1007,19 @@ pub struct CoverageRow {
     pub label: String,
     pub done: u32,
     pub total: u32,
+    /// In percent: the manifest's `coverage.targets`, else the default; none for `handlers`.
     pub target: Option<f32>,
+    /// The reason that affects the most rows.
     pub gap: Option<Problem>,
+    /// Every reason, most rows first (XS-14).
+    pub gaps: Vec<GapGroup>,
+}
+
+/// The unresolved rows of one reason (XS-14). `reason` can carry repo text: untrusted text (F8).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GapGroup {
+    pub reason: String,
+    pub rows: u32,
 }
 
 /// A reference that didn't resolve (IDX-22). `text` is the raw specifier: untrusted text (F8),
@@ -1015,23 +1073,40 @@ pub struct Owner {
     pub nodes: u32,
 }
 
+/// An architecture rule of cartograph.yaml with what it finds now (XS-22).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Rule {
+    /// The rule's name, which the baseline and violations use.
     pub id: String,
+    /// `forbid` or `no_cycles`.
     pub kind: String,
+    /// `error` fails `cartograph check`; `warn` and `info` only print.
+    pub severity: String,
+    /// The rule's `reason`: untrusted text from the repo (F8).
     pub description: String,
+    /// Violations that hold now, baselined ones included.
     pub violations: u32,
+    pub baselined: u32,
 }
 
-/// Natural keys, as in cartograph.baseline.json.
+/// A link a rule forbids, in the natural keys of cartograph.baseline.json. It carries the link's
+/// intervals, so whether a commit passes is a lookup.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RuleViolation {
     pub rule: String,
-    pub kind: LinkKind,
-    pub from: NodeId,
-    pub to: NodeId,
+    pub severity: String,
+    /// The link kind: `import`, `package`, `http`, `event` or `db`.
+    pub kind: String,
+    /// `service:path`; untrusted text.
+    pub from: String,
+    pub to: String,
     pub op: Option<String>,
+    pub level: Option<ConfidenceLevel>,
     pub baselined: bool,
+    /// It holds at the newest commit.
+    pub live: bool,
+    /// The steps it held over: from, and to (none while it still holds).
+    pub intervals: Vec<(u32, Option<u32>)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

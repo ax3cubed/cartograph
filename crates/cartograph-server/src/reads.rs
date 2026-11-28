@@ -55,6 +55,12 @@ pub(crate) fn router() -> Router<Arc<App>> {
         .route("/api/v1/w/{ws}/environments", get(environments))
         .route("/api/v1/w/{ws}/owners", get(owners))
         .route("/api/v1/w/{ws}/contracts", get(contracts))
+        .route("/api/v1/w/{ws}/entrypoints", get(entrypoints))
+        .route("/api/v1/w/{ws}/entrypoints/{id}", get(entrypoint))
+        .route(
+            "/api/v1/w/{ws}/entrypoints/{id}/trace",
+            get(entrypoint_trace),
+        )
         .route(
             "/api/v1/w/{ws}/contracts/{id}/versions",
             get(contract_versions),
@@ -632,9 +638,18 @@ async fn source(
 }
 
 /// The Coverage view, Indexing and Services settings (IDX-20 to IDX-22): what the index can see,
-/// how it was built and what it found. Each answers as of the last run.
-async fn coverage(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
-    read(app, ws, |s| s.coverage()).await
+/// how it was built and what it found. Coverage answers as of `at` (XS-14), the rest as of the
+/// last run.
+async fn coverage(
+    State(app): State<Arc<App>>,
+    Path(ws): Path<String>,
+    q: Result<Query<ReadParams>, QueryRejection>,
+) -> Response {
+    let at = match params(q).and_then(|p| at(p.at.as_deref())) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| s.coverage(&at)).await
 }
 
 async fn runs(
@@ -669,6 +684,53 @@ async fn contracts(
         Err(e) => return e,
     };
     read(app, ws, move |s| s.contracts(&at)).await
+}
+
+/// The Entrypoints view (XS-20): what starts work in a service, who calls it, what it reaches.
+async fn entrypoints(
+    State(app): State<Arc<App>>,
+    Path(ws): Path<String>,
+    q: Result<Query<ReadParams>, QueryRejection>,
+) -> Response {
+    let at = match params(q).and_then(|p| at(p.at.as_deref())) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| s.entrypoints(&at)).await
+}
+
+#[derive(Deserialize)]
+struct EntrypointParams {
+    at: Option<String>,
+    env: Option<String>,
+}
+
+async fn entrypoint(
+    State(app): State<Arc<App>>,
+    Path((ws, id)): Path<(String, String)>,
+    q: Result<Query<EntrypointParams>, QueryRejection>,
+) -> Response {
+    let (a, env) = match params(q).and_then(|p| Ok((at(p.at.as_deref())?, p.env))) {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| s.entrypoint(&id, &a, env.as_deref())).await
+}
+
+/// Trace on the map: the entrypoint's reach set, as node ids.
+async fn entrypoint_trace(
+    State(app): State<Arc<App>>,
+    Path((ws, id)): Path<(String, String)>,
+    q: Result<Query<EntrypointParams>, QueryRejection>,
+) -> Response {
+    let (a, env) = match params(q).and_then(|p| Ok((at(p.at.as_deref())?, p.env))) {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| {
+        s.entrypoint_trace(&id, &a, env.as_deref())
+    })
+    .await
 }
 
 /// Spec versions with their breaking changes and callers (XS-19).

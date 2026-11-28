@@ -149,6 +149,12 @@ pub fn run(out: &Out, dir: &Path, no_index: bool, g: &Global) -> Result<(), Repo
                 .iter()
                 .map(cartograph_index::contracts::ContractSpec::from)
                 .collect(),
+            clients: plan
+                .manifest
+                .clients
+                .iter()
+                .map(cartograph_index::entrypoints::ClientSpec::from)
+                .collect(),
             environments: plan
                 .manifest
                 .environments
@@ -160,6 +166,13 @@ pub fn run(out: &Out, dir: &Path, no_index: bool, g: &Global) -> Result<(), Repo
                 })
                 .collect(),
             default_environment: plan.manifest.default_environment.clone(),
+            coverage_targets: plan
+                .manifest
+                .coverage
+                .targets
+                .iter()
+                .map(|(r, v)| (r.id().to_owned(), *v))
+                .collect(),
             overrides: plan
                 .manifest_path
                 .parent()

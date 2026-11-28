@@ -18,6 +18,7 @@ use cartograph_core::Explain;
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
+pub mod coverage;
 pub mod derived;
 pub mod hash;
 pub mod migrate;

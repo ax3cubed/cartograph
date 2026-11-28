@@ -526,3 +526,56 @@ CREATE TABLE channel_edge (
 CREATE INDEX channel_edge_name ON channel_edge (name, broker);
 CREATE INDEX channel_edge_file ON channel_edge (file);
 -- XS-16 events (end)
+
+-- XS-20 entrypoints (begin)
+-- What starts work in a service: kind is http, event, job, cli, export or ui. uid names it across
+-- rebuilds (a hash of kind, node and key); a row is one stretch it existed in, so an entrypoint
+-- that went away and came back has two. node is the file it starts in (the handler, the
+-- subscriber, the cron file, the bin's target, the page); name is what the view shows; key is what
+-- tells links to it from other things in that file (`get /orders/{}` for a route, `broker\0channel`
+-- for an event). reach is the number of nodes it reaches at HEAD (the only reach stored; any other
+-- date is walked at query time) and is NULL for a stretch that has ended.
+CREATE TABLE entrypoint (
+  id INTEGER PRIMARY KEY,
+  uid TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  node INTEGER NOT NULL REFERENCES node (id),
+  service INTEGER REFERENCES node (id),
+  name TEXT NOT NULL,
+  key TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER,
+  reach INTEGER
+) STRICT;
+CREATE INDEX entrypoint_uid ON entrypoint (uid);
+CREATE INDEX entrypoint_at ON entrypoint (from_seq, to_seq);
+-- The manifest's `clients:` that call an entrypoint's operation: callers outside the workspace.
+CREATE TABLE entrypoint_client (
+  uid TEXT NOT NULL,
+  name TEXT NOT NULL
+) STRICT;
+CREATE INDEX entrypoint_client_uid ON entrypoint_client (uid);
+-- XS-20 entrypoints (end)
+-- XS-14 coverage (begin)
+-- The six rows of the Coverage view: files, imports, calls, handlers, routes, consumers. A row's
+-- gaps are the open `unresolved` rows of its fact_kind (files: file, imports: NULL, calls:
+-- http.call, handlers: operation.handler, routes: http.route, consumers: operation.consumer),
+-- counted once per (file, line, spec). coverage_total steps the total of the four cross-service
+-- rows at each commit that changes it, so any date's figure comes from intervals; coverage_row is
+-- the figure at the last run (a derived row, kind coverage), rebuilt when its inputs key changes.
+CREATE INDEX unresolved_stage_reason ON unresolved (stage, reason);
+CREATE INDEX unresolved_open ON unresolved (fact_kind) WHERE to_seq IS NULL;
+CREATE TABLE coverage_total (
+  row TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  total INTEGER NOT NULL,
+  PRIMARY KEY (row, seq)
+) STRICT, WITHOUT ROWID;
+CREATE TABLE coverage_row (
+  row TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL,
+  done INTEGER NOT NULL,
+  total INTEGER NOT NULL,
+  unresolved INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+-- XS-14 coverage (end)

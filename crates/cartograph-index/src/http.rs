@@ -58,7 +58,7 @@ struct Cfg {
 
 /// What a site says about itself, for evidence rows.
 #[derive(Clone)]
-struct Info {
+pub(crate) struct Info {
     file: i64,
     kind: &'static str,
     text: String,
@@ -67,7 +67,7 @@ struct Info {
     /// The URL as the source spells it (`${expr}` for what it doesn't), for unresolved rows.
     raw: String,
     /// `get /orders/{}`.
-    template: String,
+    pub(crate) template: String,
     /// The call spells a host out.
     host: bool,
     /// The environment value the call's base came from.
@@ -242,7 +242,7 @@ pub(crate) fn attr<'a>(a: &'a Attrs, k: &str) -> Option<&'a AttrValue> {
 }
 
 /// A call whose base is an environment variable: the sites it has depend on the environment.
-struct EnvCall {
+pub(crate) struct EnvCall {
     key: SiteKey,
     /// The URL's pieces; the first is the expression that reads the variable.
     pieces: Vec<(bool, String)>,
@@ -255,7 +255,7 @@ struct EnvCall {
     info: Info,
 }
 
-enum Prep {
+pub(crate) enum Prep {
     Site(Site, Box<Info>),
     Env(Box<EnvCall>),
 }
@@ -332,7 +332,7 @@ impl Prefixes {
 }
 
 /// The sites of one version of a file.
-fn sites(row: &Row, out: &mut Vec<Prep>) {
+pub(crate) fn sites(row: &Row, out: &mut Vec<Prep>) {
     let Some(per) = ifaces::decode(&row.payload) else {
         return;
     };
@@ -567,6 +567,8 @@ struct Out {
     envs: BTreeMap<Link, u32>,
     /// What each link was resolved through, with the stretch it held: (what, from, to).
     cfg: Vec<(CfgKey, i64, Option<i64>)>,
+    /// The coverage totals (XS-14): (row, step, total) wherever a row's total changes.
+    totals: Vec<(&'static str, i64, i64)>,
 }
 
 /// A binding of the contract layer: what joins an operation (none for an undocumented route) to
@@ -605,11 +607,36 @@ struct Sweep {
     unres_open: HashMap<SiteKey, (Reason, i64, usize)>,
     cfg_counts: HashMap<CfgKey, i64>,
     cfg_open: HashMap<CfgKey, usize>,
+    /// The call sites alive, by file and span (an environment's copy of a site is the same one).
+    calls: HashMap<(i64, [u32; 4]), u32>,
+    /// The last total written for each coverage row.
+    totals: HashMap<&'static str, i64>,
     out: Out,
 }
 
 impl Sweep {
+    /// Records a coverage row's total when it changed (XS-14).
+    fn note(&mut self, row: &'static str, seq: i64, n: i64) {
+        if self.totals.insert(row, n).unwrap_or(0) != n {
+            self.out.totals.push((row, seq, n));
+        }
+    }
+
     fn step(&mut self, seq: i64, d: &Delta, ops: &Delta) {
+        for k in d.remove.iter().filter(|k| k.kind == Kind::Call) {
+            if let Some(n) = self.calls.get_mut(&(k.file, k.span)) {
+                *n -= 1;
+                if *n == 0 {
+                    self.calls.remove(&(k.file, k.span));
+                }
+            }
+        }
+        for x in &d.add {
+            if let Site::Call(c) = x {
+                *self.calls.entry((c.key.file, c.key.span)).or_default() += 1;
+            }
+        }
+        self.note("calls", seq, self.calls.len() as i64);
         let mut s = Step::default();
         self.resolver.apply(seq as u64, d, &mut s);
         let mut dirty = false;
@@ -837,6 +864,34 @@ impl Sweep {
             .filter(|s| *s != 0)
             .collect();
         let mut now: BTreeSet<Bind> = BTreeSet::new();
+        // The gaps (XS-14): an operation nothing handles, a handled one nothing calls.
+        let handled_ops: HashSet<&SiteKey> = handled.iter().map(|(o, _)| *o).collect();
+        let consumed: HashSet<&SiteKey> = l.consumes.values().flatten().collect();
+        for ok in l.ops.keys() {
+            let kind = if !handled_ops.contains(ok) {
+                "no_handler"
+            } else if !consumed.contains(ok) {
+                "no_consumer"
+            } else {
+                continue;
+            };
+            now.insert(Bind {
+                kind,
+                op: Some(ok.clone()),
+                site: ok.clone(),
+            });
+        }
+        let totals = [
+            ("handlers", l.ops.len()),
+            (
+                "routes",
+                l.routes
+                    .values()
+                    .filter(|(s, _)| owners.contains(s))
+                    .count(),
+            ),
+            ("consumers", handled_ops.len()),
+        ];
         for (o, r) in &handled {
             now.insert(Bind {
                 kind: "handled_by",
@@ -914,6 +969,9 @@ impl Sweep {
                 l.rows.push((b.clone(), seq, None));
                 l.open.insert(b, l.rows.len() - 1);
             }
+        }
+        for (row, n) in totals {
+            self.note(row, seq, n as i64);
         }
     }
 }
@@ -1375,6 +1433,8 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         unres_open: HashMap::new(),
         cfg_counts: HashMap::new(),
         cfg_open: HashMap::new(),
+        calls: HashMap::new(),
+        totals: HashMap::new(),
         out: Out::default(),
     };
     let none = Delta::default();
@@ -1411,7 +1471,9 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
          DELETE FROM evidence WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM interval WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM link WHERE kind = 'http';
-         DELETE FROM unresolved WHERE fact_kind = 'http.call';
+         DELETE FROM unresolved WHERE fact_kind IN
+           ('http.call', 'http.route', 'operation.handler', 'operation.consumer');
+         DELETE FROM coverage_total WHERE row IN ('calls', 'handlers', 'routes', 'consumers');
          DELETE FROM binding WHERE kind NOT IN ('publishes', 'subscribes');
          UPDATE node SET generated = NULL WHERE generated IS NOT NULL;",
     )?;
@@ -1420,10 +1482,35 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         conn.prepare_cached("UPDATE node SET generated = ?2 WHERE id = ?1")?
             .execute(params![node, cut(generator)])?;
     }
+    let op_rows: HashMap<SiteKey, &OpRow> = ops.iter().map(|o| (op_key(o), o)).collect();
+    for (row, seq, total) in &out.totals {
+        conn.prepare_cached("INSERT INTO coverage_total (row, seq, total) VALUES (?1, ?2, ?3)")?
+            .execute(params![row, seq, total])?;
+    }
     for (b, from, to) in &binds {
+        if let Some(o) = op_rows.get(&b.site).filter(|_| b.kind.starts_with("no_")) {
+            let (fact, reason) = match b.kind {
+                "no_handler" => ("operation.handler", "no-handler"),
+                _ => ("operation.consumer", "no-consumer"),
+            };
+            let spec = cut(&format!("{} {}", o.method, o.path));
+            conn.prepare_cached(
+                "INSERT INTO unresolved (file, spec, line, stage, reason, from_seq, to_seq, fact_kind, raw)
+                 VALUES (?1, ?2, ?3, 'resolve', ?4, ?5, ?6, ?7, ?2)",
+            )?
+            .execute(params![o.file, spec, o.line, reason, from, to, fact])?;
+            continue;
+        }
         let Some(i) = sweep.info.get(&b.site) else {
             continue;
         };
+        if b.kind == "undocumented" {
+            conn.prepare_cached(
+                "INSERT INTO unresolved (file, spec, line, stage, reason, from_seq, to_seq, fact_kind, raw)
+                 VALUES (?1, ?2, ?3, 'resolve', 'undocumented', ?4, ?5, 'http.route', ?6)",
+            )?
+            .execute(params![i.file, cut(&i.template), i.span[0], from, to, cut(&i.raw)])?;
+        }
         conn.prepare_cached(
             "INSERT INTO binding (kind, operation, file, line, template, from_seq, to_seq)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",

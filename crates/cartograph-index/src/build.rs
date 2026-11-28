@@ -225,6 +225,7 @@ pub(crate) fn build_single_with(
     s.outcomes = replay.outcomes();
     let (files_total, files_parsed, imports_total, imports_resolved) =
         crate::derive::coverage(&replay);
+    crate::coverage::write_skipped(&ix.conn, &crate::coverage::skipped(&replay), last)?;
     let moved = std::mem::take(&mut rows.moved);
     s.replay_ms = t.elapsed().as_millis();
     s.total_ms = t0.elapsed().as_millis();

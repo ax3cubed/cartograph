@@ -1,103 +1,154 @@
-//! What the index can and can't see (IDX-22), how it was built (IDX-21), and the services it found
-//! (IDX-20): the reads behind the Coverage view and the Indexing and Services settings.
+//! What the index can and can't see (IDX-22, XS-14), how it was built (IDX-21), and the services it
+//! found (IDX-20): the reads behind the Coverage view and the Indexing and Services settings.
 //!
-//! The import and file rows come from the last finished run's totals; the cross-service rows
-//! (calls, handlers, consumers) belong to XS-14 and aren't answered here.
+//! Coverage is XS-14's six rows; the other reads are the runs, extractors and services.
 
-use cartograph_api::types::{CoverageRow, ExtractorInfo, IndexRun, Problem, Service, Unresolved};
+use cartograph_api::types::{
+    CoverageRow, ExtractorInfo, GapGroup, IndexRun, Problem, Service, Unresolved,
+};
 use cartograph_core::{NodeId, RepoId};
-use cartograph_store::rusqlite::{self, OptionalExtension};
+use cartograph_store::coverage::{self, ROWS};
+use cartograph_store::rusqlite;
 
 use crate::page::{Page, Paged};
 use crate::resolve::node_id;
 use crate::{At, QueryError, Snapshot, rfc3339};
 
-/// The coverage row whose gaps are listed by [`Snapshot::unresolved`].
-pub const IMPORTS_ROW: &str = "imports";
-
 fn no_row() -> QueryError {
     QueryError::NotFound {
         what: "no such coverage row".into(),
-        action: "pass a row id from …/coverage that has a gap".into(),
+        action: "pass a row id from …/coverage".into(),
     }
 }
 
+/// What a row is called, and what a gap there is is called and fixed by.
+fn words(row: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+    match row {
+        "files" => ("Files parsed", "file", "files", "Show files"),
+        "imports" => ("Imports resolved", "import", "imports", "Show imports"),
+        "calls" => (
+            "Call sites to an operation",
+            "call site",
+            "call sites",
+            "Show calls",
+        ),
+        "handlers" => (
+            "Operations with a handler",
+            "operation",
+            "operations",
+            "Open contract",
+        ),
+        "routes" => ("Routes in a contract", "route", "routes", "Open contract"),
+        _ => (
+            "Entrypoints with a consumer",
+            "entrypoint",
+            "entrypoints",
+            "Declare clients",
+        ),
+    }
+}
+
+/// Repo text as shown: masked again and cut to 200 characters (XS-14).
+fn shown(s: &str) -> String {
+    cartograph_core::secrets::mask(s)
+        .chars()
+        .take(200)
+        .collect()
+}
+
+fn n(v: i64) -> u32 {
+    v.clamp(0, u32::MAX as i64) as u32
+}
+
 impl Snapshot<'_> {
-    /// `GET …/coverage`: files parsed and imports resolved at the last run that recorded totals.
-    /// An index with no such run answers no rows.
-    pub fn coverage(&self) -> Result<Vec<CoverageRow>, QueryError> {
-        let totals: Option<(i64, i64, i64, i64)> = self
-            .conn()
-            .prepare_cached(
-                "SELECT files_total, files_parsed, imports_total, imports_resolved FROM run
-                 WHERE files_total IS NOT NULL AND imports_total IS NOT NULL
-                 ORDER BY id DESC LIMIT 1",
-            )?
-            .query_row([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-            .optional()?;
-        let Some((ft, fp, it, ir)) = totals else {
+    /// `GET …/coverage`: the six rows at `at`, each with its target and its gaps by reason (XS-14).
+    /// The last run's figures are read as they were derived; any other date is counted from the
+    /// intervals. An index with no run answers no rows.
+    pub fn coverage(&self, at: &At) -> Result<Vec<CoverageRow>, QueryError> {
+        let seq = self.resolve_at(at)?.seq as i64;
+        let c = self.conn();
+        let stored: Option<i64> =
+            c.query_row("SELECT min(seq) FROM coverage_row", [], |r| r.get(0))?;
+        let figures = if stored == Some(seq) {
+            let mut st = c.prepare_cached(
+                "SELECT done, total, unresolved FROM coverage_row WHERE row = ?1",
+            )?;
+            let mut out = [coverage::Figure::default(); 6];
+            for (i, (row, _)) in ROWS.iter().enumerate() {
+                out[i] = st.query_row([row], |r| {
+                    Ok(coverage::Figure {
+                        done: r.get(0)?,
+                        total: r.get(1)?,
+                        unresolved: r.get(2)?,
+                    })
+                })?;
+            }
+            out
+        } else if stored.is_none() {
             return Ok(Vec::new());
+        } else {
+            coverage::figures(c, seq, None)?
         };
-        let n = |v: i64| v.max(0) as u32;
-        let open = n(it) - n(ir).min(n(it));
-        let gap = (open > 0).then(|| Problem {
-            what: format!(
-                "{open} unresolved {}",
-                if open == 1 { "import" } else { "imports" }
-            ),
-            why: "no file, package, dependency or built-in matches the specifier".into(),
-            action: "check path aliases and workspace packages, then index again".into(),
-        });
-        Ok(vec![
-            CoverageRow {
-                id: "files".into(),
-                label: "Files parsed".into(),
-                done: n(fp),
-                total: n(ft),
-                target: None,
-                gap: None,
-            },
-            CoverageRow {
-                id: IMPORTS_ROW.into(),
-                label: "Imports resolved".into(),
-                done: n(ir),
-                total: n(it),
-                target: None,
+        let targets = coverage::targets(c)?;
+        let mut out = Vec::new();
+        for (((row, kind), f), (_, target)) in ROWS.iter().zip(figures).zip(targets) {
+            let (label, one, many, action) = words(row);
+            let groups = coverage::gap_reasons(c, *kind, seq, 20)?;
+            let gap = groups.first().map(|(reason, rows)| Problem {
+                what: format!("{rows} {}", if *rows == 1 { one } else { many }),
+                why: shown(reason),
+                action: action.into(),
+            });
+            out.push(CoverageRow {
+                id: (*row).into(),
+                label: label.into(),
+                done: n(f.done),
+                total: n(f.total),
+                target,
                 gap,
-            },
-        ])
+                gaps: groups
+                    .into_iter()
+                    .map(|(reason, rows)| GapGroup {
+                        reason: shown(&reason),
+                        rows: n(rows),
+                    })
+                    .collect(),
+            });
+        }
+        Ok(out)
     }
 
-    /// `GET …/coverage/{row}/unresolved`: the imports that don't resolve at `at`, by path and
-    /// line (the unresolved rows are intervals, so a past date lists what was open then).
+    /// `GET …/coverage/{row}/unresolved`: the references behind a row's gap at `at`, by path and
+    /// line (the unresolved rows are intervals, so a past date lists what was open then). One per
+    /// (file, line, text), so the list is as long as the row's gap count.
     pub fn unresolved(
         &self,
         row: &str,
         at: &At,
         page: Page,
     ) -> Result<Paged<Unresolved>, QueryError> {
-        if row != IMPORTS_ROW {
-            return Err(no_row());
-        }
+        let kind = ROWS.iter().find(|(r, _)| *r == row).ok_or_else(no_row)?.1;
         let seq = self.resolve_at(at)?.seq as i64;
         let mut st = self.conn().prepare_cached(
             "SELECT (SELECT id FROM node WHERE node.file = u.file AND node.kind = 'file'),
                     coalesce((SELECT path FROM file_path p WHERE p.file = u.file
                               ORDER BY p.to_seq IS NULL DESC, p.from_seq DESC LIMIT 1), ''),
-                    u.line, u.spec, u.reason
-             FROM unresolved u WHERE u.from_seq <= ?3 AND (u.to_seq IS NULL OR u.to_seq > ?3)
+                    u.line, coalesce(u.raw, u.spec), min(u.reason)
+             FROM unresolved u
+             WHERE u.fact_kind IS ?4 AND u.from_seq <= ?3 AND (u.to_seq IS NULL OR u.to_seq > ?3)
+             GROUP BY u.file, u.line, u.spec
              ORDER BY 2, u.line, u.spec LIMIT ?1 OFFSET ?2",
         )?;
         let rows = st
             .query_map(
-                rusqlite::params![page.limit as i64 + 1, page.offset as i64, seq],
+                rusqlite::params![page.limit as i64 + 1, page.offset as i64, seq, kind],
                 |r| {
                     Ok(Unresolved {
                         file: NodeId(r.get::<_, Option<i64>>(0)?.map(node_id).unwrap_or_default()),
                         path: r.get(1)?,
                         line: r.get::<_, i64>(2)?.max(0) as u32,
-                        text: r.get(3)?,
-                        reason: r.get(4)?,
+                        text: shown(&r.get::<_, String>(3)?),
+                        reason: shown(&r.get::<_, String>(4)?),
                     })
                 },
             )?

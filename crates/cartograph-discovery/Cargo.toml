@@ -12,6 +12,7 @@ publish.workspace = true
 cartograph-core.workspace = true
 gix.workspace = true
 json-strip-comments.workspace = true
+regex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
