@@ -8,6 +8,7 @@
 use cartograph_core as _;
 use serde::{Deserialize, Serialize};
 
+pub mod asyncapi;
 pub mod config;
 pub mod deploy;
 mod lang;
@@ -105,6 +106,9 @@ pub enum Fact {
         key: String,
         value: ConfigVal,
     },
+    /// The spec facts of this blob are an AsyncAPI document's (XS-16): its operations are channels
+    /// the application publishes to (`publish`) or subscribes to (`subscribe`).
+    AsyncApi,
 }
 
 /// What a config key names.
