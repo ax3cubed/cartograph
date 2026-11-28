@@ -13,6 +13,7 @@ mod lang;
 pub mod manifest;
 mod manifest_lang;
 pub mod openapi;
+pub mod openapi_diff;
 pub mod syntax;
 mod ts;
 

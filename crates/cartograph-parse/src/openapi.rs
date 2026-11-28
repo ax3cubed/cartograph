@@ -22,6 +22,7 @@ pub const MAX_SCHEMAS: usize = 50_000;
 pub const MAX_DEPTH: usize = 64;
 pub const MAX_SUMMARY: usize = 200;
 const MAX_FIELDS: usize = 500;
+const MAX_ENUM: usize = 100;
 const MAX_BASES: usize = 8;
 const MAX_FILES: usize = 256;
 const MAX_UNRESOLVED: usize = 1_000;
@@ -355,6 +356,22 @@ impl Parser<'_> {
             _ if s.get("properties").is_some() => "object".into(),
             _ => "any".into(),
         };
+        let mut base = base;
+        if let Some(vals) = s.get("enum").and_then(Value::as_array) {
+            let mut v: Vec<String> = vals
+                .iter()
+                .take(MAX_ENUM)
+                .filter_map(|v| match v {
+                    Value::String(x) => Some(x.clone()),
+                    Value::Number(_) | Value::Bool(_) => Some(v.to_string()),
+                    _ => None,
+                })
+                .map(|x| cut(&x, 40).replace([',', '{', '}'], "_"))
+                .collect();
+            v.sort();
+            v.dedup();
+            base = format!("{base}{{{}}}", v.join(","));
+        }
         let out = match (base.as_str(), s.get("items")) {
             ("array", Some(i)) if i.is_object() => {
                 let inner = match i.get("$ref").and_then(Value::as_str) {
@@ -580,7 +597,7 @@ impl Extractor for ManifestOpenapi {
         KIND
     }
     fn version(&self) -> &'static str {
-        "1.0.0"
+        "1.1.0"
     }
     fn kinds(&self) -> &'static [&'static str] {
         &[KIND]
@@ -910,6 +927,13 @@ components:
         let t = Instant::now();
         let _ = parse(bomb.as_bytes(), None);
         assert!(t.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn enum_values_are_part_of_the_type() {
+        let y = "openapi: 3.0.3\npaths: {}\ncomponents:\n  schemas:\n    O:\n      properties:\n        s: {type: string, enum: [b, a, b]}\n";
+        let c = parse(y.as_bytes(), None).unwrap().unwrap();
+        assert_eq!(c.schemas[0].fields[0].ty, "string{a,b}");
     }
 
     #[test]
