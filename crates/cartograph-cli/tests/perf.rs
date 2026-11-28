@@ -260,6 +260,23 @@ fn perf_reads_on_60k_files_and_200k_links() {
              COMMIT; PRAGMA wal_checkpoint(TRUNCATE);",
         )
         .unwrap();
+    // 431 entrypoints (XS-20), spread over the files, for the reach gate below.
+    ix.conn
+        .execute_batch(
+            "INSERT INTO entrypoint (uid, kind, node, name, key, from_seq)
+               SELECT 'e' || id, 'http', id, 'GET /' || id, 'get /' || id, 0
+               FROM node WHERE kind = 'file' AND id % 139 = 0 LIMIT 431;",
+        )
+        .unwrap();
+    let uids: Vec<String> = ix
+        .conn
+        .prepare("SELECT uid FROM entrypoint")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(uids.len(), 431);
     drop(ix);
     let fast = optimised();
     let ms = |t: Instant| t.elapsed().as_secs_f64() * 1e3;
@@ -413,6 +430,27 @@ fn perf_reads_on_60k_files_and_200k_links() {
     assert!(reached >= 10_000, "{reached} dependents");
     record("impact_10k_dependents_ms", impact, 20.0, "ms");
 
+    // Reach (XS-20): a bounded walk from each of 431 entrypoints over the 200k links, on the graph
+    // already built. The slowest entrypoint gates, each at its best of three.
+    let mut slowest = 0f64;
+    let mut widest = 0;
+    for id in &uids {
+        let mut best = f64::MAX;
+        for _ in 0..3 {
+            let t = Instant::now();
+            let r = store
+                .snapshot(Limits::default())
+                .unwrap()
+                .entrypoint_trace(id, &At::Now, None)
+                .unwrap();
+            best = best.min(ms(t));
+            widest = widest.max(r.nodes.len());
+        }
+        slowest = slowest.max(best);
+    }
+    assert!(widest > 1, "some entrypoint reaches something");
+    record("entrypoint_reach_200k_ms", slowest, 30.0, "ms");
+
     if !fast {
         eprintln!("wall-clock gates skipped in a debug build; CI's perf job runs them");
         return;
@@ -423,6 +461,10 @@ fn perf_reads_on_60k_files_and_200k_links() {
         "a cached file-level slice took {cached:.1} ms"
     );
     assert!(build < 300.0, "the graph took {build:.1} ms to build");
+    assert!(
+        slowest < 30.0,
+        "a reach over 200k links took {slowest:.1} ms"
+    );
     assert!(
         service_cold < 20.0,
         "a cold service-level slice took {service_cold:.1} ms"

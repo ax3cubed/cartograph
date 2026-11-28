@@ -20,6 +20,7 @@ mod config;
 mod contracts;
 mod coverage;
 mod detail;
+mod entrypoints;
 mod error;
 mod find;
 mod graph;
