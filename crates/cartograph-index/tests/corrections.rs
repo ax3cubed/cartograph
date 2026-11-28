@@ -467,3 +467,377 @@ fn the_path_never_names_a_place_outside_the_index() {
     let rows = corrections::rows(&ix.conn).unwrap();
     assert_eq!((rows[0].status.as_str(), rows[0].links), ("stale", 0));
 }
+
+// ---- XS-13: the writer --------------------------------------------------------------------
+
+use cartograph_discovery::overrides::{Action, Entry, Key, Kind, Level};
+use cartograph_index::corrections::Why;
+
+fn key(op: Option<&str>) -> Key {
+    Key {
+        kind: Kind::Http,
+        from: "web:web/src/api.ts".into(),
+        to: "orders:orders/src/server.ts".into(),
+        op: op.map(Into::into),
+        topic: None,
+        table: None,
+    }
+}
+
+fn hide(reason: &str) -> Entry {
+    Entry {
+        action: Action::Remove,
+        key: key(Some("GET /orders/{id}")),
+        to: None,
+        confidence: None,
+        reason: reason.into(),
+    }
+}
+
+fn fix(level: Level) -> Entry {
+    Entry {
+        action: Action::Set,
+        confidence: Some(level),
+        ..hide("the contract says so")
+    }
+}
+
+fn written(e: &Env) -> String {
+    std::fs::read_to_string(e.f.dir.join(FILE_NAME)).unwrap_or_default()
+}
+
+#[test]
+fn append_and_undo_through_the_index_with_golden_diffs() {
+    let mut e = env();
+    e.sync();
+    let base = e.links();
+    let path = e.f.dir.join(FILE_NAME);
+    let conn = e.index().conn;
+
+    // A dry run says what would happen and writes nothing.
+    let dry = corrections::append(&path, &conn, &fix(Level::Exact), true).unwrap();
+    assert!(!dry.applied && !path.exists());
+    let d = corrections::append(&path, &conn, &fix(Level::Exact), false).unwrap();
+    assert_eq!(d.diff, dry.diff);
+    insta::assert_snapshot!("append_creates_the_file", d.diff);
+    insta::assert_snapshot!("append_created_file", written(&e));
+    e.sync();
+    assert_eq!(
+        e.links()[0],
+        "web/src/api.ts -> orders/src/server.ts exact 0.95 correction [0-open] was likely 0.89"
+    );
+
+    // A second entry goes after the first, and the file's comments stay where they are.
+    let text = format!("# kept\n{}# also kept\n", written(&e));
+    std::fs::write(&path, &text).unwrap();
+    let conn = e.index().conn;
+    let d = corrections::append(&path, &conn, &hide("not a call"), false).unwrap();
+    insta::assert_snapshot!("append_after_comments", d.diff);
+    assert!(written(&e).starts_with(&text));
+    e.sync();
+    assert_eq!(
+        statuses(&e),
+        [
+            "4:set web:web/src/api.ts -> orders:orders/src/server.ts GET /orders/{id} bound links=1",
+            "9:remove web:web/src/api.ts -> orders:orders/src/server.ts GET /orders/{id} bound links=1",
+        ]
+    );
+
+    // Undo the second, then the first: the file and the links are as they were.
+    let d = corrections::remove(&path, 1, false).unwrap();
+    insta::assert_snapshot!("undo_the_second", d.diff);
+    assert_eq!(written(&e), text);
+    corrections::remove(&path, 0, false).unwrap();
+    assert_eq!(
+        written(&e),
+        "# kept\nversion: 1\ncorrections:\n# also kept\n"
+    );
+    e.sync();
+    assert_eq!(e.links(), base);
+    assert_eq!(
+        corrections::remove(&path, 0, false).unwrap_err().why,
+        Why::Missing
+    );
+}
+
+#[test]
+fn the_file_is_appended_to_never_rewritten() {
+    let mut e = env();
+    e.sync();
+    let path = e.f.dir.join(FILE_NAME);
+    // Odd spacing, a quoted key, a trailing comment and no final newline all survive.
+    let old = "version: 1   # the format\nstale:   warn\ncorrections:\n\n  # why\n- action: remove\n  key: {kind: http, from: 'web:web/src/other.ts', to: 'orders:orders/src/legacy.ts', op: \"GET /legacy\"}\n  reason:    'old'\n\n# end";
+    std::fs::write(&path, old).unwrap();
+    let conn = e.index().conn;
+    let d = corrections::append(&path, &conn, &fix(Level::Likely), false).unwrap();
+    insta::assert_snapshot!("append_to_an_untidy_file", d.diff);
+    assert!(written(&e).starts_with(old));
+    corrections::remove(&path, 1, false).unwrap();
+    assert_eq!(written(&e), old);
+}
+
+#[test]
+fn append_then_delete_leaves_the_file_byte_identical() {
+    use proptest::test_runner::TestRunner;
+    let mut e = env();
+    e.sync();
+    let path = e.f.dir.join(FILE_NAME);
+    let conn = e.index().conn;
+    let existing = "  - action: remove\n    key: {kind: http, from: 'web:web/src/other.ts', to: 'orders:orders/src/legacy.ts', op: 'GET /legacy'}\n    reason: old\n";
+    let strat = (
+        proptest::sample::select(vec![
+            "",
+            "version: 1\n",
+            "version: 1\ncorrections:\n",
+            "# top\nversion: 1\nstale: warn\ncorrections:\n  # note\n",
+        ]),
+        proptest::bool::ANY,
+        proptest::sample::select(vec![
+            "",
+            "\n",
+            "# tail\n",
+            "\n\n# tail\n  # indented tail\n",
+        ]),
+        proptest::bool::ANY,
+        proptest::sample::select(vec![
+            "a reason",
+            "with: colons # and \"quotes\" and \\ slashes",
+            "ünïcode — ok",
+        ]),
+        0usize..3,
+    );
+    let mut runner = TestRunner::default();
+    runner
+        .run(&strat, |(head, with_entry, tail, trim, reason, which)| {
+            let head = if head.contains("corrections:") && with_entry {
+                format!("{head}{existing}")
+            } else {
+                head.to_owned()
+            };
+            let mut old = format!("{head}{tail}");
+            if trim {
+                old = old.trim_end_matches('\n').to_owned();
+            }
+            // A file the reader refuses (no version) isn't written to.
+            if !old.is_empty() && overrides::parse(&old).is_err() {
+                return Ok(());
+            }
+            if old.is_empty() {
+                let _ = std::fs::remove_file(&path);
+            } else {
+                std::fs::write(&path, &old).unwrap();
+            }
+            let entry = [hide(reason), fix(Level::Guessed), fix(Level::Exact)][which].clone();
+            let n = corrections::append(&path, &conn, &entry, false).unwrap();
+            prop_assert!(n.applied);
+            let parsed = overrides::read(&path).unwrap().unwrap().1.unwrap();
+            let last = parsed.overrides.corrections.len() - 1;
+            prop_assert_eq!(&parsed.overrides.corrections[last], &entry);
+            corrections::remove(&path, last, false).unwrap();
+            let after = std::fs::read_to_string(&path).unwrap_or_default();
+            // `corrections:` is the one thing an append adds to a file that had none (and a file made by
+            // the first append is left as `version: 1` and `corrections:`).
+            if old.lines().any(|l| l.starts_with("corrections:")) {
+                prop_assert_eq!(after, old);
+            } else if old.is_empty() {
+                prop_assert_eq!(after, "version: 1\ncorrections:\n");
+            } else {
+                prop_assert_eq!(
+                    after.replace("\n\n", "\n").trim_end().to_owned(),
+                    format!("{}\ncorrections:", old.trim_end_matches('\n')).replace("\n\n", "\n")
+                );
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn text_in_a_reason_stays_data() {
+    let mut e = env();
+    e.sync();
+    let path = e.f.dir.join(FILE_NAME);
+    let conn = e.index().conn;
+    let ok = [
+        "x\" \n  - action: remove",
+        "plain # not a comment",
+        "x'; DROP TABLE link; --",
+        "a: b, c: {d}, [e]",
+        "*alias &anchor !!python/object/apply:os.system [id]",
+        "- action: remove",
+        "key: {kind: http}",
+        "\\n and \\u0000 spelled out",
+        "'single' and \"double\"",
+        "emoji \u{1F600} and \u{202e}rtl",
+        "---",
+    ];
+    // The first has a newline in it, which is refused: the others are kept as written.
+    assert!(corrections::append(&path, &conn, &hide(ok[0]), false).is_err());
+    for (i, r) in ok[1..].iter().enumerate() {
+        corrections::append(&path, &conn, &hide(r), false).unwrap();
+        let p = overrides::read(&path).unwrap().unwrap().1.unwrap();
+        assert_eq!(p.overrides.corrections.len(), i + 1, "{r:?}");
+        assert_eq!(p.overrides.corrections[i].reason, *r);
+        assert_eq!(p.overrides.corrections[i].action, Action::Remove);
+    }
+    let before = written(&e);
+    for bad in [
+        "line\nbreak",
+        "carriage\rreturn",
+        "nul\0byte",
+        "tab\tseparated",
+        "escape\u{1b}[31m",
+        "next\u{85}line",
+        "line\u{2028}separator",
+        "para\u{2029}separator",
+        "\u{feff}bom",
+        "del\u{7f}",
+    ] {
+        let err = corrections::append(&path, &conn, &hide(bad), false).unwrap_err();
+        assert_eq!(err.why, Why::Invalid, "{bad:?}");
+    }
+    assert_eq!(written(&e), before, "a refused write changes nothing");
+}
+
+#[test]
+fn the_index_decides_what_can_be_written() {
+    let mut e = env();
+    e.sync();
+    let path = e.f.dir.join(FILE_NAME);
+    let conn = e.index().conn;
+    let mut nothing = hide("r");
+    nothing.key.op = Some("GET /nothing".into());
+    let mut elsewhere = hide("r");
+    elsewhere.key.from = "web:../../etc/passwd".into();
+    let mut unknown = hide("r");
+    unknown.key.to = "ghost".into();
+    let mut event = hide("r");
+    event.key = Key {
+        kind: Kind::Event,
+        op: None,
+        topic: Some("t".into()),
+        ..key(None)
+    };
+    for bad in [nothing, elsewhere, unknown, event] {
+        assert_eq!(
+            corrections::append(&path, &conn, &bad, false)
+                .unwrap_err()
+                .why,
+            Why::Invalid,
+            "{bad:?}"
+        );
+    }
+    let mut add = hide("r");
+    add.action = Action::Add;
+    add.key.op = None;
+    add.key.from = "web:web/src/other.ts".into();
+    add.key.to = "orders:orders/src/legacy.ts".into();
+    assert!(corrections::append(&path, &conn, &add, true).is_ok());
+    assert!(!path.exists());
+}
+
+#[test]
+fn a_file_with_merge_markers_or_a_link_or_a_stray_layout_is_left_alone() {
+    let mut e = env();
+    e.sync();
+    let path = e.f.dir.join(FILE_NAME);
+    let conn = e.index().conn;
+    let cases = [
+        "version: 1\ncorrections:\n<<<<<<< HEAD\n  - action: remove\n=======\n>>>>>>> theirs\n",
+        "version: 1\ncorrections: []\n",
+        "version: 1\ncorrections:\nstale: warn\n",
+        "version: 1\ncorrections:\n  - {action: remove, key: {kind: http, from: a, to: b, op: GET /}, reason: r}\nextra: 1\n",
+    ];
+    for c in cases {
+        std::fs::write(&path, c).unwrap();
+        let err = corrections::append(&path, &conn, &fix(Level::Exact), false).unwrap_err();
+        assert_eq!(err.why, Why::Invalid, "{c}");
+        assert_eq!(written(&e), c);
+        assert!(corrections::remove(&path, 0, false).is_err());
+        assert_eq!(written(&e), c);
+    }
+    // A link where the file should be is never followed or replaced.
+    #[cfg(unix)]
+    {
+        std::fs::remove_file(&path).unwrap();
+        let target = e.f.dir.join("elsewhere.yaml");
+        std::fs::write(&target, "version: 1\n").unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(corrections::append(&path, &conn, &fix(Level::Exact), false).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "version: 1\n");
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+}
+
+#[test]
+fn ten_thousand_entries_append_and_undo_with_one_parse_each() {
+    let (d, ix) = new_index();
+    let (services, files, fanout) = (20, 500, 20);
+    synthetic(&ix.conn, services, files, fanout);
+    ix.conn
+        .execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('watermark_seq', 0)",
+            [],
+        )
+        .unwrap();
+    let n = services * files;
+    let mut text = String::from("version: 1\ncorrections:\n");
+    for i in 0..(overrides::MAX_ENTRIES as i64 - 1) {
+        let (src, k) = (i % n, 1 + i % fanout);
+        text += &entry(
+            "remove",
+            src,
+            (src + k * 7) % n,
+            src * fanout + k,
+            files,
+            "",
+        );
+    }
+    let path = d.path().join(FILE_NAME);
+    std::fs::write(&path, &text).unwrap();
+    let new = Entry {
+        action: Action::Remove,
+        key: Key {
+            kind: Kind::Http,
+            from: "s0:s0/f0.ts".into(),
+            to: "s0:s0/f7.ts".into(),
+            op: Some("GET /o1/{id}".into()),
+            topic: None,
+            table: None,
+        },
+        to: None,
+        confidence: None,
+        reason: "last".into(),
+    };
+    let t = Instant::now();
+    corrections::append(&path, &ix.conn, &new, false).unwrap();
+    let appended = t.elapsed();
+    let t = Instant::now();
+    corrections::remove(&path, overrides::MAX_ENTRIES - 1, false).unwrap();
+    let removed = t.elapsed();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    println!(
+        "perf,corrections_append_10k,{},250,ms",
+        appended.as_millis()
+    );
+    println!("perf,corrections_undo_10k,{},250,ms", removed.as_millis());
+    if !cfg!(debug_assertions) {
+        assert!(
+            appended.as_millis() < 250 && removed.as_millis() < 250,
+            "{appended:?} {removed:?}"
+        );
+    }
+    // The file is full at the limit.
+    corrections::append(&path, &ix.conn, &new, false).unwrap();
+    assert_eq!(
+        corrections::append(&path, &ix.conn, &new, false)
+            .unwrap_err()
+            .why,
+        Why::Invalid
+    );
+}

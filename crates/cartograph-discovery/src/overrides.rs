@@ -36,9 +36,14 @@ pub struct Overrides {
     /// warn or say nothing.
     #[serde(default, skip_serializing_if = "Stale::is_default")]
     pub stale: Stale,
-    #[serde(default)]
+    // `corrections:` with nothing under it is an empty list.
+    #[serde(default, deserialize_with = "null_is_empty")]
     #[schemars(length(max = 10000))]
     pub corrections: Vec<Entry>,
+}
+
+fn null_is_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Entry>, D::Error> {
+    Ok(Option::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

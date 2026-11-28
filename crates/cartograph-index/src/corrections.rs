@@ -34,6 +34,9 @@ use sha2::{Digest, Sha256};
 use crate::derive::key;
 use crate::rows::cut;
 
+mod write;
+pub use write::{Diff, Refused, Why, append, remove, unified};
+
 /// Bump when what the rows hold changes, so every index rebuilds them.
 const VERSION: &str = "corrections 1";
 /// `meta`: 1 while some entry isn't committed, so its anchor (the tip) moves with the tip.
