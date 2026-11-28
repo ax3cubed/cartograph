@@ -318,6 +318,35 @@
       ],
       "type": "string"
     },
+    "BreakingChange": {
+      "properties": {
+        "callers": {
+          "description": "Who called the operation in the commit before the change; empty for a schema change.",
+          "items": {
+            "$ref": "#/definitions/Caller"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "description": "`operation_removed`, `field_removed`, `type_narrowed`, ...",
+          "type": "string"
+        },
+        "subject": {
+          "description": "`get /orders/{id}` or `Order.status`.",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "subject",
+        "summary",
+        "callers"
+      ],
+      "type": "object"
+    },
     "Caller": {
       "properties": {
         "confidence": {
@@ -754,6 +783,93 @@
       ],
       "type": "object"
     },
+    "ContractDiff": {
+      "description": "`…/contracts/{id}/diff`: every change between two versions, recomputed on request.",
+      "properties": {
+        "approximate": {
+          "description": "The spec reads other files; the diff is of the root file alone.",
+          "type": "boolean"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/definitions/SpecChange"
+          },
+          "type": "array"
+        },
+        "from": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "to": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "approximate",
+        "changes"
+      ],
+      "type": "object"
+    },
+    "ContractVersion": {
+      "description": "A spec's history (XS-19): one row per distinct spec along first-parent history, oldest first.",
+      "properties": {
+        "breaking": {
+          "items": {
+            "$ref": "#/definitions/BreakingChange"
+          },
+          "type": "array"
+        },
+        "breaking_count": {
+          "description": "How many of them are breaking; `breaking` lists the first 200.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "changes": {
+          "description": "Changes from the version before; 0 for v1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "commit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Commit"
+            }
+          ],
+          "description": "The commit where this spec came to be."
+        },
+        "n": {
+          "description": "1 for the first spec the file had.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spec_hash": {
+          "description": "Hex SHA-256 of the canonical operations and schemas.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "Built from the diff, never by a model. Untrusted text (names from the spec).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "n",
+        "commit",
+        "spec_hash",
+        "changes",
+        "breaking_count",
+        "summary",
+        "breaking"
+      ],
+      "type": "object"
+    },
     "Contrast": {
       "enum": [
         "standard",
@@ -1138,6 +1254,34 @@
         "node",
         "consumers",
         "reach"
+      ],
+      "type": "object"
+    },
+    "EntrypointCounts": {
+      "description": "`GET …/entrypoints/counts`: the numbers the Entrypoints view's heading and filters show, so the\nlist can be paged without counting it on the client.",
+      "properties": {
+        "kinds": {
+          "items": {
+            "$ref": "#/definitions/KindCount"
+          },
+          "type": "array"
+        },
+        "services": {
+          "description": "Services that have at least one entrypoint.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "services",
+        "kinds"
       ],
       "type": "object"
     },
@@ -2071,6 +2215,23 @@
       },
       "required": [
         "key"
+      ],
+      "type": "object"
+    },
+    "KindCount": {
+      "properties": {
+        "count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/definitions/EntrypointKind"
+        }
+      },
+      "required": [
+        "kind",
+        "count"
       ],
       "type": "object"
     },
@@ -3505,6 +3666,32 @@
       ],
       "type": "object"
     },
+    "RuleCommit": {
+      "description": "One commit of the merged timeline and what the rules say of it (`GET …/rules/commits`).",
+      "properties": {
+        "commit": {
+          "$ref": "#/definitions/Commit"
+        },
+        "failing": {
+          "description": "Error-severity violations, not baselined, that held after the commit: what fails\n`cartograph check` there.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "violations": {
+          "description": "Every violation that held after the commit, baselined ones and warnings included.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "commit",
+        "failing",
+        "violations"
+      ],
+      "type": "object"
+    },
     "RuleViolation": {
       "description": "A link a rule forbids, in the natural keys of cartograph.baseline.json. It carries the link's\nintervals, so whether a commit passes is a lookup.",
       "properties": {
@@ -4514,6 +4701,30 @@
       ],
       "type": "object"
     },
+    "SpecChange": {
+      "description": "One change of a diff, breaking or not.",
+      "properties": {
+        "breaking": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "subject",
+        "breaking",
+        "summary"
+      ],
+      "type": "object"
+    },
     "SpecKind": {
       "enum": [
         "openapi",
@@ -4898,6 +5109,12 @@
     "Contract": {
       "$ref": "#/definitions/Contract"
     },
+    "ContractDiff": {
+      "$ref": "#/definitions/ContractDiff"
+    },
+    "ContractVersion": {
+      "$ref": "#/definitions/ContractVersion"
+    },
     "Correction": {
       "$ref": "#/definitions/Correction"
     },
@@ -4921,6 +5138,9 @@
     },
     "Entrypoint": {
       "$ref": "#/definitions/Entrypoint"
+    },
+    "EntrypointCounts": {
+      "$ref": "#/definitions/EntrypointCounts"
     },
     "EntrypointDetail": {
       "$ref": "#/definitions/EntrypointDetail"
@@ -5033,6 +5253,9 @@
     "Rule": {
       "$ref": "#/definitions/Rule"
     },
+    "RuleCommit": {
+      "$ref": "#/definitions/RuleCommit"
+    },
     "RuleViolation": {
       "$ref": "#/definitions/RuleViolation"
     },
@@ -5100,6 +5323,8 @@
     "ConfigWrite",
     "Consumer",
     "Contract",
+    "ContractDiff",
+    "ContractVersion",
     "Correction",
     "CorrectionRequest",
     "CoverageRow",
@@ -5108,6 +5333,7 @@
     "DiscoverRequest",
     "Discovery",
     "Entrypoint",
+    "EntrypointCounts",
     "EntrypointDetail",
     "Environment",
     "ErrorBody",
@@ -5145,6 +5371,7 @@
     "ReadParams",
     "Repo",
     "Rule",
+    "RuleCommit",
     "RuleViolation",
     "RunEvent",
     "RunRequest",

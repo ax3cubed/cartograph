@@ -3,14 +3,20 @@
 import { useState } from "react";
 import { ADAPTERS, CALL_SITES, UNRECOGNISED_ROUTES, envKeys } from "@/lib/demo/settings";
 import type { EnvName } from "@/lib/model";
-import { getContracts } from "@/lib/source";
+import type { Adapter } from "@/lib/api";
+import { useLive, useWorkspaces, useWsRead } from "@/lib/api/live";
+import { useContracts } from "@/components/views/useContracts";
 import { Chip, Seg, SettingsPage, useFileDraft } from "./ui";
 import "./contractsEnvs.css";
 
 const KINDS = { openapi: "OpenAPI 3.1", events: "AsyncAPI", proto: "Protobuf" } as const;
 
 export default function ContractsEnvs() {
-  const specs = getContracts();
+  const live = useLive();
+  const { current } = useWorkspaces();
+  const ws = live ? current?.id : undefined;
+  const { specs } = useContracts(ws);
+  const adapters = useWsRead<Adapter[]>(ws, "adapters").data;
   const [env, setEnv] = useState<EnvName>("prod");
   const [snippet, setSnippet] = useState(false);
   const f = useFileDraft<Record<string, string>>("cartograph:env-values", {});
@@ -37,7 +43,7 @@ export default function ContractsEnvs() {
             <ul className="set-ce-specs">
               <li aria-hidden><span className="set-k">Spec file</span><span className="set-k">Matched</span><span className="set-k">Status</span></li>
               {specs.map((s) => {
-                const bound = s.operations.filter((o) => o.handler).length;
+                const bound = s.counts.sync;
                 const gap = s.operations.length - bound;
                 return (
                   <li key={s.id}>
@@ -51,7 +57,9 @@ export default function ContractsEnvs() {
           </section>
           <section className="set-sec" aria-labelledby="set-ce-a">
             <h2 id="set-ce-a">Frameworks it recognises</h2>
-            <div className="set-actions">{ADAPTERS.map((a) => <Chip key={a} tone="ok">{a}</Chip>)}</div>
+            <div className="set-actions">
+              {adapters ? adapters.map((a) => <Chip key={`${a.kind}:${a.name}`} tone={a.allowed ? "ok" : "warn"}>{a.allowed ? a.name : `${a.name} · not approved`}</Chip>) : ADAPTERS.map((a) => <Chip key={a} tone="ok">{a}</Chip>)}
+            </div>
             <p className="set-note"><b className="set-ce-warn">{UNRECOGNISED_ROUTES.count} route files weren&apos;t recognised</b> in <span className="set-mono">{UNRECOGNISED_ROUTES.where}</span>. They use a custom router. Map them in the override file, or ask for support.</p>
             <div className="set-actions">
               <button type="button" className="set-btn is-sm" aria-expanded={snippet} onClick={() => setSnippet(!snippet)}>Map in override file</button>

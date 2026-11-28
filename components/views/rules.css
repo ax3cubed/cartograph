@@ -1,0 +1,7 @@
+/* rl-: rules board (no board in the spec; it follows the Coverage tables). Shared parts are in views.css. */
+.rl-cols { grid-template-columns: minmax(0, 1.4fr) 100px 80px 100px 100px 90px; }
+.rl-commit { grid-template-columns: 70px minmax(0, 1fr) 110px 100px; }
+.rl-viol { grid-template-columns: minmax(0, 1fr) auto; }
+.rl-link.view-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 0.78rem; }
+@media (max-width: 900px) { .rl-cols { grid-template-columns: minmax(0, 1fr) 90px 80px; } .rl-cols > :nth-child(n+4):not(:last-child) { display: none; } .rl-commit { grid-template-columns: 70px minmax(0, 1fr) 90px; } .rl-commit > :nth-child(3) { display: none; } }
+.rl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

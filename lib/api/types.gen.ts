@@ -450,6 +450,8 @@ export interface CartographApi {
   ConfigWrite: ConfigWrite;
   Consumer: Consumer;
   Contract: Contract;
+  ContractDiff: ContractDiff;
+  ContractVersion: ContractVersion;
   Correction: Correction;
   CorrectionRequest: CorrectionRequest;
   CoverageRow: CoverageRow;
@@ -458,6 +460,7 @@ export interface CartographApi {
   DiscoverRequest: DiscoverRequest;
   Discovery: Discovery;
   Entrypoint: Entrypoint;
+  EntrypointCounts: EntrypointCounts;
   EntrypointDetail: EntrypointDetail;
   Environment: Environment;
   ErrorBody: ErrorBody;
@@ -495,6 +498,7 @@ export interface CartographApi {
   ReadParams: ReadParams;
   Repo: Repo;
   Rule: Rule;
+  RuleCommit: RuleCommit;
   RuleViolation: RuleViolation;
   RunEvent: RunEvent;
   RunRequest: RunRequest;
@@ -815,6 +819,85 @@ export interface UndocumentedRoute {
   path: string;
 }
 /**
+ * `…/contracts/{id}/diff`: every change between two versions, recomputed on request.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ContractDiff".
+ */
+export interface ContractDiff {
+  /**
+   * The spec reads other files; the diff is of the root file alone.
+   */
+  approximate: boolean;
+  changes: SpecChange[];
+  from: number;
+  to: number;
+}
+/**
+ * One change of a diff, breaking or not.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "SpecChange".
+ */
+export interface SpecChange {
+  breaking: boolean;
+  kind: string;
+  subject: string;
+  summary: string;
+}
+/**
+ * A spec's history (XS-19): one row per distinct spec along first-parent history, oldest first.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ContractVersion".
+ */
+export interface ContractVersion {
+  breaking: BreakingChange[];
+  /**
+   * How many of them are breaking; `breaking` lists the first 200.
+   */
+  breaking_count: number;
+  /**
+   * Changes from the version before; 0 for v1.
+   */
+  changes: number;
+  /**
+   * The commit where this spec came to be.
+   */
+  commit: Commit;
+  /**
+   * 1 for the first spec the file had.
+   */
+  n: number;
+  /**
+   * Hex SHA-256 of the canonical operations and schemas.
+   */
+  spec_hash: string;
+  /**
+   * Built from the diff, never by a model. Untrusted text (names from the spec).
+   */
+  summary: string;
+}
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "BreakingChange".
+ */
+export interface BreakingChange {
+  /**
+   * Who called the operation in the commit before the change; empty for a schema change.
+   */
+  callers: Caller[];
+  /**
+   * `operation_removed`, `field_removed`, `type_narrowed`, ...
+   */
+  kind: string;
+  /**
+   * `get /orders/{id}` or `Order.status`.
+   */
+  subject: string;
+  summary: string;
+}
+/**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Correction".
  */
@@ -1023,6 +1106,29 @@ export interface Entrypoint {
    */
   reach: number;
   service?: NodeId | null;
+}
+/**
+ * `GET …/entrypoints/counts`: the numbers the Entrypoints view's heading and filters show, so the
+ * list can be paged without counting it on the client.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "EntrypointCounts".
+ */
+export interface EntrypointCounts {
+  kinds: KindCount[];
+  /**
+   * Services that have at least one entrypoint.
+   */
+  services: number;
+  total: number;
+}
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "KindCount".
+ */
+export interface KindCount {
+  count: number;
+  kind: EntrypointKind;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -1812,6 +1918,24 @@ export interface Rule {
   severity: string;
   /**
    * Violations that hold now, baselined ones included.
+   */
+  violations: number;
+}
+/**
+ * One commit of the merged timeline and what the rules say of it (`GET …/rules/commits`).
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "RuleCommit".
+ */
+export interface RuleCommit {
+  commit: Commit;
+  /**
+   * Error-severity violations, not baselined, that held after the commit: what fails
+   * `cartograph check` there.
+   */
+  failing: number;
+  /**
+   * Every violation that held after the commit, baselined ones and warnings included.
    */
   violations: number;
 }

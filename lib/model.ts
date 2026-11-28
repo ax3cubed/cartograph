@@ -8,11 +8,11 @@
 //   Node → Node (lang a string; kind NodeKind)      Link → Link (type → kind, added/removed CommitRef, id)
 //   Commit → Commit (+ seq)                         Kind → NodeKind / Lod      LinkType → LinkKind
 //   Evidence, Confidence, ConfidenceLevel           Repo, Freshness (format_version, fact_hash)
-//   Correction (target → key: LinkKey)              Spec, Operation → Contract, Operation, Caller
-//   Entrypoint, Concept, CoverageRow, Owner         ActivityItem, WorkspaceSummary, SearchResult
+//   Correction (target → key: LinkKey)              Owner
+//   ActivityItem, WorkspaceSummary, SearchResult
 //   CommitImpact (added_links, removed_links)       McpToolName, McpTool, Provider, AppearanceSettings
 //   Bin (a histogram bin; the generated Bin is the bin size), FileEvent, Rewrite, Sym, SymLink,
-//   EnvKey, EnvName, SpecVersion, Metrics:
+//   EnvKey, EnvName, Metrics:
 //   no generated type yet; each needs a Rust type with schemars in crates/cartograph-api.
 
 // ---------- the map: nodes, links, commits (moved from lib/workspace.ts) ----------
@@ -83,27 +83,7 @@ export interface Correction {
   to?: string; value?: string; reason: string; by: string; at: string;
 }
 
-// ---------- contracts ----------
-export interface Operation {
-  id: string; method: "GET" | "POST" | "PUT" | "DELETE" | "EVENT" | "RPC"; path: string;
-  handler?: string; // node id, missing when the operation has no handler
-  callers: { node: string; confidence: Confidence }[];
-}
-export interface Spec {
-  id: string; name: string; file: string; kind: "openapi" | "events" | "proto"; service: string;
-  operations: Operation[];
-}
-
-// ---------- entrypoints, concepts, coverage, owners ----------
-export interface Entrypoint {
-  id: string; kind: "http" | "event" | "job" | "cli"; label: string; node: string; service: string;
-  consumers: number; // callers or subscribers found
-}
-export interface Concept { id: string; name: string; summary: string; nodes: string[]; domain: string }
-export interface CoverageRow {
-  id: string; label: string; done: number; total: number; target?: number; // percentages are done/total
-  gap?: { what: string; why: string; action: string };
-}
+// ---------- owners ----------
 export interface Owner { id: string; name: string; kind: "team" | "person"; patterns: string[]; nodes: number }
 
 // ---------- activity, workspace, search ----------
@@ -179,6 +159,3 @@ export interface SymLink { from: string; to: string; kind: "call" | "type" }
 // ---------- settings (moved from lib/demo/settings.ts) ----------
 export type EnvName = "prod" | "staging" | "local";
 export interface EnvKey { key: string; value: string; from: string; to: string; tone: "ok" | "off" }
-
-// ---------- views (moved from lib/demo/views-extra.ts) ----------
-export interface SpecVersion { v: number; sha: string; summary: string; breaking?: { what: string; callers: string[] } }

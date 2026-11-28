@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 
 use cartograph_api::types::Reach;
 use cartograph_api::types::{
-    Consumer, Entrypoint, EntrypointDetail, EntrypointKind, ReachSummary, ServiceReach,
+    Consumer, Entrypoint, EntrypointCounts, EntrypointDetail, EntrypointKind, KindCount,
+    ReachSummary, ServiceReach,
 };
 use cartograph_core::reach::{Reached, bfs};
 use cartograph_core::{LinkId, NodeId};
@@ -20,10 +21,77 @@ use cartograph_store::rusqlite::{OptionalExtension, params};
 use crate::adjacency::{Adjacency, NONE};
 use crate::detail::level;
 use crate::resolve::{link_id, node_id};
-use crate::{At, QueryError, Snapshot};
+use crate::{At, Page, Paged, QueryError, Snapshot};
 
 /// Entrypoints a view lists at most.
 const MAX_ENTRYPOINTS: usize = 20_000;
+
+/// What the list is cut to: a kind, a case-insensitive substring of the label, and an order.
+#[derive(Debug, Clone, Default)]
+pub struct EntryFilter {
+    pub kind: Option<EntrypointKind>,
+    pub q: String,
+    pub sort: EntrySort,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EntrySort {
+    /// Kind, then label.
+    #[default]
+    Name,
+    Consumers {
+        desc: bool,
+    },
+    Reach {
+        desc: bool,
+    },
+}
+
+impl EntryFilter {
+    /// `kind` is one of http, event, job, cli, export, ui. `sort` is name, consumers or reach, and
+    /// a leading `-` reverses the last two.
+    pub fn parse(
+        kind: Option<&str>,
+        q: Option<&str>,
+        sort: Option<&str>,
+    ) -> Result<Self, QueryError> {
+        let kind = match kind.filter(|k| !k.is_empty()) {
+            None => None,
+            Some("http") => Some(EntrypointKind::Http),
+            Some("event") => Some(EntrypointKind::Event),
+            Some("job") => Some(EntrypointKind::Job),
+            Some("cli") => Some(EntrypointKind::Cli),
+            Some("export") => Some(EntrypointKind::Export),
+            Some("ui") => Some(EntrypointKind::Ui),
+            Some(_) => {
+                return Err(QueryError::bad(
+                    "no such entrypoint kind",
+                    "kinds are http, event, job, cli, export and ui",
+                    "pass one of them, or none",
+                ));
+            }
+        };
+        let sort = match sort.unwrap_or("name") {
+            "name" | "" => EntrySort::Name,
+            "consumers" => EntrySort::Consumers { desc: false },
+            "-consumers" => EntrySort::Consumers { desc: true },
+            "reach" => EntrySort::Reach { desc: false },
+            "-reach" => EntrySort::Reach { desc: true },
+            _ => {
+                return Err(QueryError::bad(
+                    "no such sort",
+                    "sorts are name, consumers, -consumers, reach and -reach",
+                    "pass one of them, or none",
+                ));
+            }
+        };
+        Ok(Self {
+            kind,
+            q: q.unwrap_or_default().chars().take(200).collect(),
+            sort,
+        })
+    }
+}
 
 /// One entrypoint live at a step.
 struct Row {
@@ -194,24 +262,111 @@ impl Snapshot<'_> {
         }
     }
 
+    /// One list row: the consumer count, and the reach (HEAD's stored count at `now`, else a walk).
+    fn listed(
+        &self,
+        g: &Adjacency,
+        e: &Row,
+        seq: u32,
+        now: bool,
+    ) -> Result<Entrypoint, QueryError> {
+        let n = self.consumers(e, i64::from(seq))?.len() as u32;
+        let reach = match (now, e.stored, g.index.get(&e.node)) {
+            (true, Some(r), _) => r as u32,
+            (_, _, Some(&i)) => reached(g, i, seq, 0).nodes.len() as u32,
+            _ => 0,
+        };
+        Ok(Self::wire(e, n, reach))
+    }
+
     /// `GET …/entrypoints`: every entrypoint at `at`, with its consumer count and its reach.
     pub fn entrypoints(&self, at: &At) -> Result<Vec<Entrypoint>, QueryError> {
         let (c, _) = self.step(at)?;
         let g = self.adjacency()?;
-        let seq = c.seq as u32;
         let now = matches!(at, At::Now);
         self.entry_rows(c.seq as i64, None)?
             .iter()
-            .map(|e| {
-                let n = self.consumers(e, c.seq as i64)?.len() as u32;
-                let reach = match (now, e.stored, g.index.get(&e.node)) {
-                    (true, Some(r), _) => r as u32,
-                    (_, _, Some(&i)) => reached(&g, i, seq, 0).nodes.len() as u32,
-                    _ => 0,
-                };
-                Ok(Self::wire(e, n, reach))
-            })
+            .map(|e| self.listed(&g, e, c.seq as u32, now))
             .collect()
+    }
+
+    /// `GET …/entrypoints?kind=&q=&sort=&limit=&cursor=`: one page. Filtering and the name order
+    /// read only the rows; consumers and reach are counted for the page, or for every match when
+    /// the sort is by one of them.
+    pub fn entrypoints_page(
+        &self,
+        at: &At,
+        f: &EntryFilter,
+        page: Page,
+    ) -> Result<Paged<Entrypoint>, QueryError> {
+        let (c, _) = self.step(at)?;
+        let g = self.adjacency()?;
+        let (seq, now) = (c.seq as u32, matches!(at, At::Now));
+        let needle = f.q.to_lowercase();
+        let mut rows = self.entry_rows(c.seq as i64, None)?;
+        rows.retain(|e| {
+            f.kind.is_none_or(|k| k == e.kind)
+                && (needle.is_empty() || e.name.to_lowercase().contains(&needle))
+        });
+        let desc = match f.sort {
+            EntrySort::Name => {
+                let p = page.take(rows);
+                return Ok(Paged {
+                    rows: p
+                        .rows
+                        .iter()
+                        .map(|e| self.listed(&g, e, seq, now))
+                        .collect::<Result<_, _>>()?,
+                    next_cursor: p.next_cursor,
+                });
+            }
+            EntrySort::Consumers { desc } | EntrySort::Reach { desc } => desc,
+        };
+        let mut all = rows
+            .iter()
+            .map(|e| self.listed(&g, e, seq, now))
+            .collect::<Result<Vec<_>, _>>()?;
+        let key = |e: &Entrypoint| match f.sort {
+            EntrySort::Reach { .. } => e.reach,
+            _ => e.consumers,
+        };
+        // A stable sort: ties stay in name order.
+        all.sort_by(|a, b| {
+            let o = key(a).cmp(&key(b));
+            if desc { o.reverse() } else { o }
+        });
+        Ok(page.take(all))
+    }
+
+    /// `GET …/entrypoints/counts`.
+    pub fn entrypoint_counts(&self, at: &At) -> Result<EntrypointCounts, QueryError> {
+        let (c, _) = self.step(at)?;
+        let rows = self.entry_rows(c.seq as i64, None)?;
+        let mut kinds: BTreeMap<&'static str, KindCount> = BTreeMap::new();
+        for e in &rows {
+            let name = match e.kind {
+                EntrypointKind::Http => "http",
+                EntrypointKind::Event => "event",
+                EntrypointKind::Job => "job",
+                EntrypointKind::Cli => "cli",
+                EntrypointKind::Export => "export",
+                EntrypointKind::Ui => "ui",
+            };
+            kinds
+                .entry(name)
+                .or_insert(KindCount {
+                    kind: e.kind,
+                    count: 0,
+                })
+                .count += 1;
+        }
+        let services: std::collections::BTreeSet<_> =
+            rows.iter().filter_map(|e| e.service).collect();
+        Ok(EntrypointCounts {
+            total: rows.len() as u32,
+            services: services.len() as u32,
+            kinds: kinds.into_values().collect(),
+        })
     }
 
     fn entry(

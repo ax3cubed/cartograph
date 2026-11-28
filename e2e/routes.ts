@@ -16,6 +16,7 @@ export const ROUTES: { path: string; name: string; ready: (p: Page) => Locator }
   { path: "/concepts", name: "concepts", ready: h1(/^Concepts/) },
   { path: "/coverage", name: "coverage", ready: h1(/^Coverage/) },
   { path: "/impact", name: "impact", ready: h1(/^Impact/) },
+  { path: "/rules", name: "rules", ready: h1(/^Rules/) },
   { path: "/ask", name: "ask", ready: h1("Ask") },
   { path: "/welcome", name: "welcome", ready: h1("Map your own workspace") },
   { path: "/welcome/add", name: "welcome-add", ready: h1("Pick a folder or workspace file") },

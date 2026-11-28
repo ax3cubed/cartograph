@@ -1293,6 +1293,28 @@ fn impact_page(
     ))
 }
 
+/// What the `impact` tool prints for `nodes`: the app's "Copy as Markdown" (D11) is this text,
+/// the same page and the same renderer, so it matches `cartograph impact`.
+pub(crate) fn impact_markdown(
+    data: &std::path::Path,
+    ws: &str,
+    s: &Snapshot<'_>,
+    nodes: Vec<String>,
+) -> Result<String, QueryError> {
+    let fresh = crate::sync::freshness(data, ws, s)?;
+    if nodes.is_empty() {
+        let empty = json!({"affected": [], "total": 0, "services": [], "walk_truncated": false});
+        return Ok(format!(
+            "{}\n{}",
+            render_impact(&empty),
+            freshness_line(&fresh)
+        ));
+    }
+    let page = Page::default();
+    let (d, next) = impact_page(s, &ImpactInput::Nodes(nodes), page)?;
+    Ok(finish(&fresh, d, Some("/affected"), page, next, render_impact).content)
+}
+
 // ---------------------------------------------------------------- the envelope and the budget
 
 /// The result envelope, with rows dropped from the end of the array at `rows` (a JSON pointer

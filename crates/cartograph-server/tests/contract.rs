@@ -21,6 +21,23 @@ const SERVED: &[(&str, &str)] = &[
     ("/api/v1/w/{ws}/graph?lod=module", "/api/v1/w/{ws}/graph"),
     ("/api/v1/w/{ws}/graph?lod=service", "/api/v1/w/{ws}/graph"),
     ("/api/v1/activity", "/api/v1/activity"),
+    // SRV-12
+    ("/api/v1/w/{ws}/entrypoints", "/api/v1/w/{ws}/entrypoints"),
+    (
+        "/api/v1/w/{ws}/entrypoints?kind=http&q=a&sort=-reach&limit=5",
+        "/api/v1/w/{ws}/entrypoints",
+    ),
+    (
+        "/api/v1/w/{ws}/entrypoints/counts",
+        "/api/v1/w/{ws}/entrypoints/counts",
+    ),
+    ("/api/v1/w/{ws}/concepts", "/api/v1/w/{ws}/concepts"),
+    ("/api/v1/w/{ws}/owners", "/api/v1/w/{ws}/owners"),
+    ("/api/v1/w/{ws}/coverage", "/api/v1/w/{ws}/coverage"),
+    (
+        "/api/v1/w/{ws}/coverage/imports/unresolved?limit=10",
+        "/api/v1/w/{ws}/coverage/{row}/unresolved",
+    ),
 ];
 
 #[test]
@@ -52,6 +69,45 @@ fn every_route_body_validates_against_the_generated_schema() {
     let slice = get(&r, &format!("/api/v1/w/{}/graph", r.ws)).json();
     assert_eq!(slice["data"]["nodes"]["name"].as_array().unwrap().len(), 4);
     assert_eq!(slice["data"]["links"]["from"].as_array().unwrap().len(), 3);
+}
+
+/// SRV-12: there is no concept to show yet, a bad filter is a 400, and a commit's impact is text
+/// ending in the freshness line, the way `cartograph impact` prints it.
+#[test]
+fn the_view_reads_refuse_bad_input_and_answer_in_text_where_they_say_so() {
+    let r = start();
+    let w = |tail: &str| get(&r, &format!("/api/v1/w/{}/{tail}", r.ws));
+    // The reads that come from the manifest, not a snapshot, carry no generation header.
+    let api = openapi();
+    for (tail, row) in [
+        ("adapters", "adapters"),
+        ("rules", "rules"),
+        ("rules/violations?limit=10", "rules/violations"),
+        ("rules/commits?limit=10", "rules/commits"),
+    ] {
+        let reply = w(tail);
+        assert_eq!(reply.status, 200, "{tail}: {}", reply.body);
+        let schema = &api["paths"][format!("/api/v1/w/{{ws}}/{row}")]["get"]["responses"]["200"]["content"]
+            ["application/json"]["schema"];
+        validate(&api, schema, &reply.json(), tail).unwrap_or_else(|e| panic!("{e}"));
+    }
+    let built_in = w("adapters").json()["data"].as_array().unwrap().len();
+    assert!(built_in > 0, "the built-in adapters are listed");
+    assert_eq!(w("concepts/invoice").status, 404);
+    assert_eq!(w("entrypoints?kind=nope").status, 400);
+    assert_eq!(w("entrypoints?sort=sideways").status, 400);
+    assert_eq!(w("entrypoints?cursor=x").status, 400);
+    assert_eq!(w("rules/violations?limit=0").status, 400);
+    let sha = w("commits").json()["data"][0]["sha"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let md = w(&format!("commits/{sha}/impact/markdown"));
+    assert_eq!(md.status, 200, "{}", md.body);
+    assert!(md.headers["content-type"].starts_with("text/plain"));
+    assert!(md.body.contains("affected in"), "{}", md.body);
+    assert!(md.body.trim_end().ends_with('_'), "{}", md.body);
+    assert_eq!(w("commits/ffffffffff/impact/markdown").status, 404);
 }
 
 /// XS-06: a link's id from the map answers `…/links/{id}` with both commits and evidence, and the

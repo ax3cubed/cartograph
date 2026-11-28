@@ -12,6 +12,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod activity;
+mod adapters;
 pub mod agents;
 mod corrections;
 mod guard;

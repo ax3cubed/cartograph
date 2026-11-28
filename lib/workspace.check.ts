@@ -35,21 +35,15 @@ assert.ok(buildMessages(ask("hello", now), now, true)[1].content.length > msgs[1
 console.log("ai ok");
 
 // demo data reconciles
-import { getContracts, getCoverage, getEntrypoints, getFreshness, getOwners, getRepos, getWorkspaces, search } from "./source.ts";
+import { getFreshness, getOwners, getRepos, getWorkspaces, search } from "./source.ts";
 import { NODES, COMMITS } from "./workspace.ts";
-import { chipText, levelOf } from "./model.ts";
+import { chipText } from "./model.ts";
 const ws = getWorkspaces()[0];
 assert.equal(ws.files, NODES.filter((n) => n.kind === "file").length, "workspace summary counts the files in the graph");
 assert.equal(ws.repos, getRepos().length);
 assert.equal(getRepos().reduce((n, r) => n + r.commits, 0), COMMITS.length, "every commit belongs to one repo");
 assert.equal(getOwners().reduce((n, o) => n + o.nodes, 0), ws.files, "every file has an owner");
 assert.equal(getFreshness().behind, getRepos().reduce((n, r) => n + r.behind, 0), "freshness sums the repos");
-const ops = getContracts().flatMap((s) => s.operations);
-assert.equal(getCoverage().find((r) => r.id === "handlers")!.total, ops.length, "coverage counts every operation");
-assert.equal(getCoverage().find((r) => r.id === "handlers")!.done, ops.filter((o) => o.handler).length);
-assert.equal(getCoverage().find((r) => r.id === "consumers")!.total, getEntrypoints().length);
-for (const o of ops) for (const c of o.callers) assert.equal(c.confidence.level, levelOf(c.confidence.score), "confidence level matches its score");
-for (const r of getCoverage()) assert.ok(r.done <= r.total, `${r.id} done <= total`);
 assert.equal(chipText({ level: "likely", score: 0.62, evidence: [] }), "Likely · 0.62");
 assert.ok(LINKS.some((l) => l.confidence), "some links carry a confidence");
 assert.ok(search("checkout").length > 0 && search("zzzz").length === 0);

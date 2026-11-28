@@ -53,3 +53,12 @@
 .view-list > * { border-top: 1px solid var(--line); padding: 8px 0; min-width: 0; overflow-wrap: anywhere; }
 kbd { font: inherit; font-family: var(--mono, ui-monospace, monospace); border: 1px solid var(--line2); border-radius: 4px; padding: 0 4px; }
 .view-link.view-cell { display: inline-block; max-width: 100%; vertical-align: bottom; }
+
+/* vgrid: a virtualised table. The rows are absolutely placed in a body as tall as the whole list. */
+.vgrid { overflow: auto; position: relative; }
+.vgrid-head { position: sticky; top: 0; z-index: 1; background: var(--panel); border-bottom: 1px solid var(--line); }
+.vgrid-body { position: relative; }
+.vgrid-body > .view-row { left: 0; box-sizing: border-box; border-top: 0; border-bottom: 1px solid var(--line); }
+.view-sort { font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; font-weight: inherit; text-align: left; padding: 0; display: inline-flex; gap: 4px; align-items: center; }
+.view-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.view-search { height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line2); background: var(--slab); color: var(--text); font-size: 0.8125rem; min-width: 220px; }

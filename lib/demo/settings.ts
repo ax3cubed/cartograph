@@ -3,7 +3,6 @@
 // without the binary.
 import type { EnvKey, EnvName } from "../model.ts";
 import { NODES, SERVICES } from "../workspace.ts";
-import { SPECS } from "./contracts.ts";
 
 const ENV_SRC: Record<EnvName, string> = { prod: "helm · infra-values/prod", staging: "helm · infra-values/staging", local: ".env.example" };
 const HOSTS: Record<EnvName, [string, string, string, string]> = {
@@ -33,7 +32,7 @@ export const CHUNKS = [
   { id: "cards", label: "Node cards: name, path, summary and main links", n: nodeCards, on: true },
   { id: "symbols", label: "Function and class bodies", n: fileCount * 6, on: true },
   { id: "changes", label: "Code changes from the last 2 years", n: fileCount * 9, on: true },
-  { id: "contracts", label: "API operations and event channels", n: SPECS.reduce((n, s) => n + s.operations.length, 0), on: true },
+  { id: "contracts", label: "API operations and event channels", n: 14, on: true },
   { id: "docs", label: "READMEs, ADRs and docs", n: SERVICES.length * 3, on: true },
   { id: "commit_messages", label: "Commit messages only, without the changes", n: 22, on: false },
 ];
