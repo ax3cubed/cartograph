@@ -51,6 +51,10 @@ mod value;
 #[cfg(test)]
 mod tests;
 
+/// The most bytes read of a blob: generated clients (XS-11) are exempt from the 1 MB parse cap up to
+/// this, and only an adapter that names a larger `max_bytes` runs on a blob over its own.
+pub const MAX_GENERATED_BYTES: usize = 8 << 20;
+
 /// Run limits (XS-03). The defaults are the ones every run uses; tests lower them.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
@@ -64,7 +68,7 @@ impl Default for Limits {
         Self {
             match_limit: 65_536,
             time_budget: Duration::from_millis(250),
-            max_bytes: cartograph_parse::MAX_BLOB_BYTES as usize,
+            max_bytes: MAX_GENERATED_BYTES,
         }
     }
 }
@@ -75,10 +79,11 @@ enum Grammar {
     Ts,
     Tsx,
     Js,
+    Go,
 }
 
 impl Grammar {
-    const ALL: [Grammar; 3] = [Self::Ts, Self::Tsx, Self::Js];
+    const ALL: [Grammar; 4] = [Self::Ts, Self::Tsx, Self::Js, Self::Go];
 
     /// The parser's key, and the cache key's grammar part.
     fn key(self) -> &'static str {
@@ -86,6 +91,7 @@ impl Grammar {
             Self::Ts => "ts",
             Self::Tsx => "tsx",
             Self::Js => "js",
+            Self::Go => "go",
         }
     }
 
@@ -94,6 +100,7 @@ impl Grammar {
             Self::Ts => "adapters/ts",
             Self::Tsx => "adapters/tsx",
             Self::Js => "adapters/js",
+            Self::Go => "adapters/go",
         }
     }
 
@@ -102,6 +109,7 @@ impl Grammar {
             Self::Ts => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
             Self::Js => tree_sitter_javascript::LANGUAGE.into(),
+            Self::Go => tree_sitter_go::LANGUAGE.into(),
         }
     }
 
@@ -110,6 +118,7 @@ impl Grammar {
             "ts" | "mts" | "cts" => Some(Self::Ts),
             "tsx" => Some(Self::Tsx),
             "js" | "jsx" | "mjs" | "cjs" => Some(Self::Js),
+            "go" => Some(Self::Go),
             _ => None,
         }
     }
@@ -120,8 +129,9 @@ impl Grammar {
             "typescript" => vec![Self::Ts],
             "tsx" => vec![Self::Tsx],
             "javascript" => vec![Self::Js],
+            "go" => vec![Self::Go],
             // One query set for the whole family; the node types they share are most of them.
-            "ecmascript" => Self::ALL.to_vec(),
+            "ecmascript" => vec![Self::Ts, Self::Tsx, Self::Js],
             _ => return None,
         })
     }
@@ -144,6 +154,10 @@ struct Manifest {
     files: Vec<String>,
     #[serde(default)]
     requires: Vec<String>,
+    /// The largest blob this adapter reads; the parse cap when absent.
+    max_bytes: Option<usize>,
+    /// An attribute whose value a blob's facts hold once: the first place is evidence enough.
+    unique: Option<String>,
 }
 
 /// One loaded adapter.
@@ -153,6 +167,8 @@ pub struct Adapter {
     grammars: Vec<Grammar>,
     files: Vec<Regex>,
     requires: Vec<String>,
+    max_bytes: usize,
+    unique: Option<String>,
     scm: String,
 }
 
@@ -222,7 +238,8 @@ impl Adapter {
         Ok(a)
     }
 
-    /// Everything [`Adapter::load`] checks but the query compile.
+    /// [`Adapter::load`] without compiling the queries: the built-in adapters, which a test
+    /// loads in full, so a process that never parses doesn't pay for them.
     fn parse(manifest: &str, queries: &[(&str, &str)]) -> Result<Self, LoadError> {
         let m: Manifest = toml::from_str(manifest).map_err(|e| LoadError(e.to_string()))?;
         if !valid_name(&m.name) || m.version.is_empty() || m.version.len() > 32 {
@@ -249,6 +266,10 @@ impl Adapter {
             grammars,
             files,
             requires: m.requires,
+            max_bytes: m
+                .max_bytes
+                .unwrap_or(cartograph_parse::MAX_BLOB_BYTES as usize),
+            unique: m.unique,
             scm,
         })
     }
@@ -259,11 +280,12 @@ impl Adapter {
 
     /// False when none of the `requires` hints appears in the file (no hints: always true).
     fn wanted(&self, bytes: &[u8]) -> bool {
-        self.requires.is_empty()
-            || self
-                .requires
-                .iter()
-                .any(|h| bytes.windows(h.len().max(1)).any(|w| w == h.as_bytes()))
+        bytes.len() <= self.max_bytes
+            && (self.requires.is_empty()
+                || self
+                    .requires
+                    .iter()
+                    .any(|h| bytes.windows(h.len().max(1)).any(|w| w == h.as_bytes())))
     }
 
     fn cache_key(&self, grammar: Grammar) -> String {
@@ -415,12 +437,10 @@ struct Pass {
     complete: bool,
 }
 
-/// The adapters, their queries compiled per grammar.
+/// The adapters, their queries compiled per grammar on the first blob of that grammar.
 pub struct AdapterSet {
     adapters: Vec<Adapter>,
-    /// Compiled on the first parse for the built-in set: compiling takes about 90 ms, and a sync
-    /// whose blobs are all in the fact cache never parses.
-    compiled: OnceLock<Vec<(Grammar, Compiled)>>,
+    compiled: Vec<(Grammar, OnceLock<Compiled>)>,
 }
 
 /// The facts of one adapter for one blob.
@@ -442,26 +462,36 @@ pub struct Extracted {
 }
 
 impl AdapterSet {
-    pub fn new(adapters: Vec<Adapter>) -> Result<Self, LoadError> {
-        let compiled = OnceLock::from(compile(&adapters)?);
-        Ok(Self { adapters, compiled })
+    pub fn new(adapters: Vec<Adapter>) -> Self {
+        let compiled = Grammar::ALL
+            .into_iter()
+            .filter(|g| adapters.iter().any(|a| a.grammars.contains(g)))
+            .map(|g| (g, OnceLock::new()))
+            .collect();
+        Self { adapters, compiled }
     }
 
-    /// The adapters embedded in the binary: express and fetch.
+    /// The adapters embedded in the binary.
     pub fn builtin() -> &'static Self {
         static SET: OnceLock<AdapterSet> = OnceLock::new();
-        SET.get_or_init(|| {
-            // ponytail: unchecked here, compiled on first use; a test compiles them.
-            let adapters = BUILTIN
+        SET.get_or_init(|| Self::embedded(BUILTIN))
+    }
+
+    /// The adapters that read the names a file calls.
+    pub fn refs() -> &'static Self {
+        static SET: OnceLock<AdapterSet> = OnceLock::new();
+        SET.get_or_init(|| Self::embedded(REFS))
+    }
+
+    fn embedded(list: &[Embedded]) -> Self {
+        {
+            let adapters = list
                 .iter()
                 .map(|(manifest, queries)| Adapter::parse(manifest, queries))
                 .collect::<Result<_, _>>()
                 .expect("built-in adapters load");
-            Self {
-                adapters,
-                compiled: OnceLock::new(),
-            }
-        })
+            Self::new(adapters)
+        }
     }
 
     pub fn adapters(&self) -> &[Adapter] {
@@ -552,6 +582,30 @@ impl AdapterSet {
         }
     }
 
+    /// Facts for a blob that the caller keeps itself: no cache is read or written.
+    pub fn run(&self, path: &str, bytes: &[u8], limits: &Limits) -> Vec<AdapterFacts> {
+        let Some(grammar) = Grammar::for_path(path) else {
+            return Vec::new();
+        };
+        let Some(pass) = self.pass(grammar, bytes, limits) else {
+            return Vec::new();
+        };
+        pass.per_adapter
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| self.adapters[*i].applies_to(grammar, path))
+            .map(|(i, mut facts)| {
+                facts.sort();
+                facts.dedup();
+                AdapterFacts {
+                    name: self.adapters[i].name.clone(),
+                    version: self.adapters[i].version.clone(),
+                    facts,
+                }
+            })
+            .collect()
+    }
+
     /// Parses `bytes` once and runs every adapter's queries in one cursor pass. `None` when the
     /// parse hit its time limit or no adapter's hints are in the file.
     fn pass(&self, grammar: Grammar, bytes: &[u8], limits: &Limits) -> Option<Pass> {
@@ -563,10 +617,21 @@ impl AdapterSet {
         if !active.iter().any(|&a| a) {
             return None;
         }
+        // Compiled after the hints check, so a blob no adapter wants never pays for it.
         let compiled = self
             .compiled
-            .get_or_init(|| compile(&self.adapters).expect("built-in adapters compile"));
-        let compiled = &compiled.iter().find(|(g, _)| *g == grammar)?.1;
+            .iter()
+            .find(|(g, _)| *g == grammar)?
+            .1
+            .get_or_init(|| {
+                let mine: Vec<(usize, &Adapter)> = self
+                    .adapters
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| a.grammars.contains(&grammar))
+                    .collect();
+                Compiled::new(grammar, &mine).expect("adapters compile")
+            });
         let tree = parse(grammar.parser_key(), language_of, bytes)?;
         let start = Instant::now();
         let timed_out = Cell::new(false);
@@ -627,7 +692,14 @@ impl AdapterSet {
         }
         let complete = !timed_out.get() && !cursor.did_exceed_match_limit();
         let mut per_adapter = vec![Vec::new(); self.adapters.len()];
+        let mut seen = std::collections::HashSet::new();
         for ((adapter, kind, _, _), d) in drafts {
+            if let Some(attr) = &self.adapters[adapter].unique {
+                let v = d.attrs.get(attr).map(|(v, _)| value::plain(v));
+                if v.is_none_or(|v| !seen.insert((adapter, v))) {
+                    continue;
+                }
+            }
             per_adapter[adapter].push(d.finish(kind));
         }
         Some(Pass {
@@ -635,22 +707,6 @@ impl AdapterSet {
             complete,
         })
     }
-}
-
-/// Every adapter's queries, one compiled query per grammar any of them reads.
-fn compile(adapters: &[Adapter]) -> Result<Vec<(Grammar, Compiled)>, LoadError> {
-    let mut compiled = Vec::new();
-    for g in Grammar::ALL {
-        let mine: Vec<(usize, &Adapter)> = adapters
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| a.grammars.contains(&g))
-            .collect();
-        if !mine.is_empty() {
-            compiled.push((g, Compiled::new(g, &mine)?));
-        }
-    }
-    Ok(compiled)
 }
 
 /// (adapter.toml, [(query file name, text)]) for each built-in adapter.
@@ -673,5 +729,50 @@ static BUILTIN: &[Embedded] = &[
             ),
             ("env.scm", include_str!("../adapters/fetch/queries/env.scm")),
         ],
+    ),
+    (
+        include_str!("../adapters/codegen/adapter.toml"),
+        &[
+            (
+                "generated.scm",
+                include_str!("../adapters/codegen/queries/generated.scm"),
+            ),
+            (
+                "aliases.scm",
+                include_str!("../adapters/codegen/queries/aliases.scm"),
+            ),
+        ],
+    ),
+    (
+        include_str!("../adapters/codegen-go/adapter.toml"),
+        &[
+            (
+                "generated.scm",
+                include_str!("../adapters/codegen-go/queries/generated.scm"),
+            ),
+            (
+                "aliases.scm",
+                include_str!("../adapters/codegen-go/queries/aliases.scm"),
+            ),
+        ],
+    ),
+];
+
+/// The adapters that say which names a file calls. They are not part of [`AdapterSet::builtin`]: the
+/// index runs them only on the files that import a generated client (XS-11).
+static REFS: &[Embedded] = &[
+    (
+        include_str!("../adapters/refs/adapter.toml"),
+        &[(
+            "calls.scm",
+            include_str!("../adapters/refs/queries/calls.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/refs-go/adapter.toml"),
+        &[(
+            "calls.scm",
+            include_str!("../adapters/refs-go/queries/calls.scm"),
+        )],
     ),
 ];

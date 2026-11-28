@@ -25,6 +25,8 @@ use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{self, Connection, params};
 use sha2::{Digest, Sha256};
 
+pub(crate) mod codegen;
+
 use crate::derive::{Inputs, key};
 use crate::links::http::normalise_route;
 use crate::rows::cut;
@@ -403,7 +405,7 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     }
 
     conn.execute_batch(
-        "DELETE FROM contract_version; DELETE FROM binding; DELETE FROM contract_schema; DELETE FROM operation;
+        "DELETE FROM contract_version; DELETE FROM binding; DELETE FROM client_alias; DELETE FROM contract_schema; DELETE FROM operation;
          DELETE FROM contract; DELETE FROM unresolved WHERE fact_kind = 'openapi.ref';",
     )?;
     let mut written = 0;

@@ -18,6 +18,19 @@ CREATE TABLE binding (
   from_seq INTEGER NOT NULL,
   to_seq INTEGER
 ) STRICT;
+CREATE TABLE blob_ref (
+  blob BLOB PRIMARY KEY,
+  version TEXT NOT NULL,
+  payload BLOB NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE TABLE client_alias (
+  operation INTEGER NOT NULL REFERENCES operation (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  symbol TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
 CREATE TABLE codeowners (
   repo INTEGER NOT NULL REFERENCES repo (id),
   blob BLOB NOT NULL,
@@ -188,7 +201,9 @@ CREATE TABLE node (
   service INTEGER,
   detected_by TEXT,
   detect_source TEXT,
-  fan_in INTEGER NOT NULL DEFAULT 0
+  fan_in INTEGER NOT NULL DEFAULT 0,
+  -- XS-11: the generator that made this file (orval, oapi-codegen, ...) at the last run, else NULL.
+  generated TEXT
 ) STRICT;
 CREATE TABLE node_span (
   node INTEGER NOT NULL REFERENCES node (id),
@@ -290,6 +305,7 @@ CREATE TABLE unresolved (
 CREATE INDEX archived_interval_rewrite ON archived_interval (rewrite);
 CREATE INDEX binding_kind ON binding (kind, from_seq);
 CREATE INDEX binding_operation ON binding (operation);
+CREATE INDEX client_alias_operation ON client_alias (operation);
 CREATE INDEX codeowners_repo ON codeowners (repo, from_seq);
 CREATE UNIQUE INDEX commits_repo_sha ON commits (repo, sha);
 CREATE INDEX commits_sha ON commits (sha);

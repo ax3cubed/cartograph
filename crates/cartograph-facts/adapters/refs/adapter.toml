@@ -1,0 +1,6 @@
+name = "refs"
+version = "1.0.0"
+language = "ecmascript"
+files = ["**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx"]
+# A name is held once per file.
+unique = "name"

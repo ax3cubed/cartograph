@@ -248,7 +248,8 @@ fn status_prints_coverage_and_lists_unresolved_imports() {
     assert_eq!(o.status.code(), Some(0));
     let text = String::from_utf8(o.stdout).unwrap();
     assert!(
-        text.contains("files parsed 2 / 3, imports resolved 66.7% (2 of 3)"),
+        // The generated file is not a gap (XS-11): it is left out of both numbers.
+        text.contains("files parsed 2 / 2, imports resolved 66.7% (2 of 3)"),
         "{text}"
     );
     assert!(text.contains("\n  a.ts:2  ./missing"), "{text}");

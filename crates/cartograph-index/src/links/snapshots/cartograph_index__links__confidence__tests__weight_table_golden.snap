@@ -12,3 +12,4 @@ full_path_match          likely   Target    0.70
 partial_path_match       guessed  Target    0.45
 unique_across_workspace  guessed  Base      0.40
 name_similarity          weak     Target    0.15
+generated_client_spec    likely   All       0.80

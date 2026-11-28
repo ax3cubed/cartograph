@@ -29,19 +29,19 @@ use cartograph_facts::schema::{AttrValue, Attrs, EvidenceType, FactKind, Part};
 use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{self, Connection, params};
 
-use crate::contracts;
 use crate::config::{self, Env};
+use crate::contracts::{self, codegen};
 use crate::derive::key;
 use crate::ifaces;
 use crate::links::confidence::{self, EvidenceType as Ev};
 use crate::links::http::{
     Alias, CallSite, Delta, HttpResolver, Kind, LinkResolver, LinkSink, Match, Pair, Reason,
-    RouteSite, Site, SiteKey, Template, call_target, normalise_route,
+    RouteSite, Site, SiteKey, Target, Template, call_target, normalise, normalise_route,
 };
 use crate::rows::cut;
 
 /// Bump when what the rows hold changes, so every index rebuilds them.
-const HTTP_VERSION: &str = "http 3";
+const HTTP_VERSION: &str = "http 5";
 /// The `meta` key holding the env keys the call sites read, so the pass key hashes only the values
 /// those keys have (XS-09: a values-file change that touches no read key costs nothing).
 const READ_KEYS: &str = "http_env_keys";
@@ -84,17 +84,20 @@ struct Row {
     payload: Vec<u8>,
 }
 
-fn load(conn: &Connection) -> rusqlite::Result<Vec<Row>> {
+/// The rows of the interface facts, or (`refs`) of the names the importers of generated clients call.
+fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
     let mut st = conn.prepare_cached(
         "SELECT fp.file, n.id, coalesce(n.service, 0), fv.blob, fp.from_seq, fp.to_seq,
                 fv.from_seq, fv.to_seq, fa.payload
-         FROM fact fa JOIN extractor e ON e.id = fa.extractor AND e.name = ?1
+         FROM (SELECT fa.blob, fa.payload FROM fact fa JOIN extractor e ON e.id = fa.extractor
+                 WHERE e.name = ?1 AND NOT ?2
+               UNION ALL SELECT blob, payload FROM blob_ref WHERE ?2) fa
            JOIN file_version fv ON fv.blob = fa.blob
            JOIN file_path fp ON fp.file = fv.file
            JOIN node n ON n.file = fv.file AND n.kind = 'file'
          ORDER BY fp.file, fv.blob, fp.from_seq, fv.from_seq",
     )?;
-    let mut rows = st.query([ifaces::EXTRACTOR])?;
+    let mut rows = st.query(params![ifaces::EXTRACTOR, refs])?;
     let mut out: Vec<Row> = Vec::new();
     while let Some(r) = rows.next()? {
         let from = r.get::<_, i64>(4)?.max(r.get(6)?);
@@ -632,6 +635,7 @@ impl Sweep {
                 match i.kind {
                     "literal" => types.insert(Ev::LiteralCallSiteUrl),
                     "template" => types.insert(Ev::TemplateCallSiteUrl),
+                    "generated" => types.insert(Ev::GeneratedClientSpec),
                     _ => false,
                 };
                 if i.host {
@@ -830,6 +834,8 @@ type Timeline = (
     BTreeSet<String>,
     // The calls no value reaches, as unresolved rows.
     Vec<UnresolvedRow>,
+    Vec<codegen::Alias>,
+    BTreeMap<i64, String>,
 );
 
 /// A config row as the resolver reads it: (source, value, from, to).
@@ -862,6 +868,7 @@ fn load_values(conn: &Connection) -> rusqlite::Result<Values> {
 
 fn timeline(
     rows: &[Row],
+    refs: &[Row],
     aliases: &[Aliases],
     ops: &[OpRow],
     envs: &[Env],
@@ -885,8 +892,30 @@ fn timeline(
         deltas.entry(from).or_default().add.push(site);
         infos.insert((k, from), info);
     };
+    // Generated clients (XS-11): the files that say they are, and the functions that are operations.
+    let mut generated = BTreeMap::new();
+    let mut defs = Vec::new();
     for row in rows {
         node_of.insert(row.file, row.node);
+        let mut found = codegen::Found::default();
+        codegen::read(&row.payload, &mut found);
+        if let Some(g) = found.generator
+            && row.to.is_none()
+        {
+            generated.insert(row.node, g);
+        }
+        for (names, method, path, line) in found.defs {
+            let (method, segs) = codegen::segs(&method, &path);
+            defs.push(codegen::Def {
+                file: row.file,
+                service: row.service,
+                names,
+                method,
+                segs,
+                line,
+                span: (row.from, row.to),
+            });
+        }
         let mut v = Vec::new();
         sites(row, &mut v);
         for prep in v {
@@ -969,6 +998,84 @@ fn timeline(
                 .push(a.alias.clone());
         }
     }
+    let mut called = Vec::new();
+    for row in refs {
+        node_of.insert(row.file, row.node);
+        let mut found = codegen::Found::default();
+        codegen::read(&row.payload, &mut found);
+        for (name, at, extractor) in found.refs {
+            called.push(codegen::Ref {
+                file: row.file,
+                service: row.service,
+                name,
+                at,
+                extractor,
+                span: (row.from, row.to),
+            });
+        }
+    }
+    let views: Vec<codegen::Op> = ops
+        .iter()
+        .map(|o| {
+            let (method, segs) = codegen::segs(&o.method, &o.path);
+            codegen::Op {
+                id: o.id,
+                method,
+                path: o.path.clone(),
+                segs,
+                span: (o.from, o.to),
+            }
+        })
+        .collect();
+    let (client_aliases, through) = codegen::link(&defs, &called, &views);
+    for c in through {
+        let t = normalise(&c.method, &c.path);
+        let key = SiteKey {
+            file: c.file,
+            span: c.at,
+            env: 0,
+            kind: Kind::Call,
+        };
+        if infos.contains_key(&(key.clone(), c.span.0)) {
+            continue;
+        }
+        if let Some(to) = c.span.1 {
+            deltas.entry(to).or_default().remove.push(key.clone());
+        }
+        deltas
+            .entry(c.span.0)
+            .or_default()
+            .add
+            .push(Site::Call(CallSite {
+                key: key.clone(),
+                service: c.service,
+                method: t.method.clone(),
+                target: Target {
+                    host: None,
+                    segs: t.segs.clone(),
+                    prefix_unknown: false,
+                },
+            }));
+        infos.insert(
+            (key, c.span.0),
+            Info {
+                file: c.file,
+                kind: "generated",
+                text: cut(&format!(
+                    "{} -> {} {}",
+                    c.name,
+                    c.method.to_ascii_uppercase(),
+                    c.path
+                )),
+                span: c.at,
+                extractor: c.extractor,
+                raw: c.path.clone(),
+                template: format!("{} {}", t.method, t.path()),
+                host: false,
+                cfg: None,
+            },
+        );
+    }
     // The operations: sites of the contract layer only.
     let mut op_deltas: BTreeMap<i64, Delta> = BTreeMap::new();
     let extractor = contracts::extractor();
@@ -1003,13 +1110,23 @@ fn timeline(
             },
         );
     }
-    (deltas, infos, node_of, op_deltas, read, unresolved)
+    (
+        deltas,
+        infos,
+        node_of,
+        op_deltas,
+        read,
+        unresolved,
+        client_aliases,
+        generated,
+    )
 }
 
 /// Rebuilds the HTTP rows when the interface facts, the paths and versions of the files that
 /// carry them or the host aliases changed. Returns the intervals written.
 pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Result<usize> {
-    let rows = load(conn)?;
+    let rows = load(conn, false)?;
+    let refs = load(conn, true)?;
     let aliases = load_aliases(conn)?;
     let ops = load_ops(conn)?;
     let contracts_key = contracts::built_key(conn)?;
@@ -1043,6 +1160,16 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
             )
             .into_bytes()
         }));
+        inputs.extend(refs.iter().map(|r| {
+            let mut b = format!(
+                "ref\0{}\0{}\0{}\0{:?}\0{}\0",
+                r.file, r.node, r.from, r.to, r.service
+            )
+            .into_bytes();
+            b.extend_from_slice(&r.blob);
+            b
+        }));
+        inputs.push(codegen::refs_version().into_bytes());
         // The operations are rows of the contracts pass: its key says whether they changed.
         inputs.push([b"contracts\0".as_slice(), &contracts_key].concat());
         inputs.extend(
@@ -1092,8 +1219,8 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
         return Ok(0);
     }
 
-    let (deltas, mut infos, node_of, op_deltas, read, no_value) =
-        timeline(&rows, &aliases, &ops, &envs, &values);
+    let (deltas, mut infos, node_of, op_deltas, read, no_value, client_aliases, generated) =
+        timeline(&rows, &refs, &aliases, &ops, &envs, &values);
     let mut sweep = Sweep {
         resolver: HttpResolver::new(),
         layer: (!ops.is_empty()).then(Layer::default),
@@ -1140,8 +1267,14 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
          DELETE FROM evidence WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM interval WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM link WHERE kind = 'http';
-         DELETE FROM unresolved WHERE fact_kind = 'http.call'; DELETE FROM binding;",
+         DELETE FROM unresolved WHERE fact_kind = 'http.call'; DELETE FROM binding;
+         UPDATE node SET generated = NULL WHERE generated IS NOT NULL;",
     )?;
+    codegen::write_aliases(conn, &client_aliases)?;
+    for (node, generator) in &generated {
+        conn.prepare_cached("UPDATE node SET generated = ?2 WHERE id = ?1")?
+            .execute(params![node, cut(generator)])?;
+    }
     for (b, from, to) in &binds {
         let Some(i) = sweep.info.get(&b.site) else {
             continue;

@@ -51,6 +51,9 @@ pub const UNDO_V4: &str = concat!(
     // ---- XS-19 spec versions: begin ----
     "DROP TABLE contract_version;\n",
     // ---- XS-19 spec versions: end ----
+    // ---- XS-11 generated clients: begin ----
+    "DROP TABLE blob_ref; DROP TABLE client_alias; ALTER TABLE node DROP COLUMN generated;\n",
+    // ---- XS-11 generated clients: end ----
     // ---- XS-08 contracts: begin ----
     "DROP TABLE binding; DROP TABLE contract_schema; DROP TABLE operation; DROP TABLE contract;\n",
     // ---- XS-08 contracts: end ----
@@ -167,6 +170,15 @@ const V4: &str = concat!(
        source TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
      CREATE INDEX link_config_link ON link_config (link);\n",
     // ---- XS-09 config: end ----
+    // ---- XS-11 generated clients: begin (after the tables it refers to) ----
+    "CREATE TABLE client_alias (operation INTEGER NOT NULL REFERENCES operation (id),
+       file INTEGER NOT NULL REFERENCES file (id), symbol TEXT NOT NULL, line INTEGER NOT NULL,
+       from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX client_alias_operation ON client_alias (operation);
+     CREATE TABLE blob_ref (blob BLOB PRIMARY KEY, version TEXT NOT NULL, payload BLOB NOT NULL)
+       STRICT, WITHOUT ROWID;
+     ALTER TABLE node ADD COLUMN generated TEXT;\n",
+    // ---- XS-11 generated clients: end ----
 );
 
 /// Takes a format 3 file back to format 2 (test support: tests build an older file from a new one

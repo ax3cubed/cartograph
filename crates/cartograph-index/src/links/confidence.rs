@@ -85,10 +85,13 @@ pub enum EvidenceType {
     UniqueAcrossWorkspace,
     /// Names alone look alike. Never shown.
     NameSimilarity,
+    /// The call is to a function of a generated client whose method and path are an operation of
+    /// its spec (XS-11). The spec settles the call site, the base and the target alike.
+    GeneratedClientSpec,
 }
 
 impl EvidenceType {
-    pub const ALL: [EvidenceType; 10] = [
+    pub const ALL: [EvidenceType; 11] = [
         EvidenceType::ContractMatched,
         EvidenceType::LiteralCallSiteUrl,
         EvidenceType::TemplateCallSiteUrl,
@@ -99,6 +102,7 @@ impl EvidenceType {
         EvidenceType::PartialPathMatch,
         EvidenceType::UniqueAcrossWorkspace,
         EvidenceType::NameSimilarity,
+        EvidenceType::GeneratedClientSpec,
     ];
 
     /// The key used in `weights.toml` and in snapshots.
@@ -114,6 +118,7 @@ impl EvidenceType {
             EvidenceType::PartialPathMatch => "partial_path_match",
             EvidenceType::UniqueAcrossWorkspace => "unique_across_workspace",
             EvidenceType::NameSimilarity => "name_similarity",
+            EvidenceType::GeneratedClientSpec => "generated_client_spec",
         }
     }
 
@@ -126,7 +131,8 @@ impl EvidenceType {
             EvidenceType::TemplateCallSiteUrl
             | EvidenceType::EnvResolvedBase
             | EvidenceType::HostAliasResolved
-            | EvidenceType::FullPathMatch => Level::Likely,
+            | EvidenceType::FullPathMatch
+            | EvidenceType::GeneratedClientSpec => Level::Likely,
             EvidenceType::PartialPathMatch | EvidenceType::UniqueAcrossWorkspace => Level::Guessed,
             EvidenceType::NameSimilarity => Level::Weak,
         }
@@ -134,7 +140,7 @@ impl EvidenceType {
 
     pub fn step(self) -> Step {
         match self {
-            EvidenceType::ContractMatched => Step::All,
+            EvidenceType::ContractMatched | EvidenceType::GeneratedClientSpec => Step::All,
             EvidenceType::LiteralCallSiteUrl | EvidenceType::TemplateCallSiteUrl => Step::CallSite,
             // With no host, the one route that fits is what says which service is meant.
             EvidenceType::EnvResolvedBase

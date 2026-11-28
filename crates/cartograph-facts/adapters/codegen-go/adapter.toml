@@ -1,0 +1,6 @@
+name = "codegen-go"
+version = "1.0.0"
+language = "go"
+files = ["**/*.go"]
+requires = ["Code generated"]
+max_bytes = 8388608

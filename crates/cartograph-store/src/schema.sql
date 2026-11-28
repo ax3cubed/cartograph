@@ -109,7 +109,9 @@ CREATE TABLE node (
   service INTEGER,
   detected_by TEXT,
   detect_source TEXT,
-  fan_in INTEGER NOT NULL DEFAULT 0
+  fan_in INTEGER NOT NULL DEFAULT 0,
+  -- XS-11: the generator that made this file (orval, oapi-codegen, ...) at the last run, else NULL.
+  generated TEXT
 ) STRICT;
 CREATE INDEX node_file ON node (file);
 CREATE UNIQUE INDEX node_key ON node (key);
@@ -429,3 +431,24 @@ CREATE TABLE contract_version (
   PRIMARY KEY (contract, n)
 ) STRICT, WITHOUT ROWID;
 -- XS-19 spec versions (end)
+-- XS-11 generated clients (begin)
+-- A function of a generated client that is an operation of a spec: found by the method and path
+-- the function spells out, not by its name, so a regenerated client keeps its alias row. file is the
+-- generated file, line the function's.
+CREATE TABLE client_alias (
+  operation INTEGER NOT NULL REFERENCES operation (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  symbol TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX client_alias_operation ON client_alias (operation);
+-- The names the files that import a generated client call, per blob (the `refs` adapters), made
+-- when the client is found. A cache of the derived pass, not a fact: it is not in the fact hash.
+CREATE TABLE blob_ref (
+  blob BLOB PRIMARY KEY,
+  version TEXT NOT NULL,
+  payload BLOB NOT NULL
+) STRICT, WITHOUT ROWID;
+-- XS-11 generated clients (end)
