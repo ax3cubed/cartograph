@@ -11,7 +11,7 @@ const BROTLI_MAX = 1_800_000; // bytes, each file brotli-compressed
 const SETTINGS = ["connections", "repositories", "indexing", "services", "contracts", "models", "editor", "retrieval", "appearance", "keyboard"];
 const ROUTES = [
   "index", "ask", "welcome", "welcome/add", "404",
-  "concepts", "contracts", "coverage", "entrypoints", "impact",
+  "concepts", "contracts", "coverage", "entrypoints", "impact", "rules",
   ...SETTINGS.map((s) => `settings/${s}`),
 ].map((r) => `${r}.html`);
 

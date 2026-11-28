@@ -24,6 +24,7 @@ export const VIEW_TABS = [
   { href: "/concepts", label: "Concepts" },
   { href: "/coverage", label: "Coverage" },
   { href: "/impact", label: "Impact" },
+  { href: "/rules", label: "Rules" },
 ] as const;
 
 /** Window event the Ask trigger fires; the map listens for it and focuses the Ask bar. */
