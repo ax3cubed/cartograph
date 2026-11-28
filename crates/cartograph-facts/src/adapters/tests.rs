@@ -370,7 +370,7 @@ fn a_pathological_query_stops_at_the_budget_and_is_not_cached() {
         start.elapsed()
     );
     // A pass that ran out is not cached, so a run with a bigger budget can still finish it.
-    assert!(c.get_interface(&[8; 20], "adapter-t/js", "1").is_none());
+    assert!(c.get_adapters(&[8; 20], "adapters/js/t", "1").is_none());
 }
 
 #[test]
@@ -413,8 +413,30 @@ axios.get("https://api.test/", { headers: { Authorization: "Bearer ghp_wWPw5k4aX
     let e = run(&mut c, 11, "leak.js", src);
     assert_eq!(all(&e).len(), 4, "{}", pretty(&e));
     let facts = pretty(&e);
-    let cached =
-        serde_json::to_string(&c.get_interface(&[11; 20], "adapter-fetch/js", "1.1.0")).unwrap();
+    let set = AdapterSet::builtin();
+    let applies: Vec<_> = set
+        .adapters()
+        .iter()
+        .filter(|a| a.applies_to(Grammar::Js, "leak.js"))
+        .collect();
+    let key = format!(
+        "adapters/js/{}",
+        applies
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join("+")
+    );
+    let version = applies
+        .iter()
+        .map(|a| a.version.as_str())
+        .collect::<Vec<_>>()
+        .join("+");
+    let cached = serde_json::to_string(&c.get_adapters(&[11; 20], &key, &version)).unwrap();
+    assert!(
+        cached.contains("[REDACTED]"),
+        "the row is the one looked at"
+    );
     for planted in [
         "user:pw",
         "AKIAIOSFODNN7EXAMPLE",

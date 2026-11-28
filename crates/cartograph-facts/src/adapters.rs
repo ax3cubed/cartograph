@@ -374,10 +374,6 @@ impl Adapter {
             .collect();
         Some(format!("/{}", segs.join("/")))
     }
-
-    fn cache_key(&self, grammar: Grammar) -> String {
-        format!("adapter-{}/{}", self.name, grammar.key())
-    }
 }
 
 /// What a capture name means in a query.
@@ -662,90 +658,86 @@ impl AdapterSet {
         if applies.is_empty() {
             return Extracted::default();
         }
-        let mut have: Vec<Option<Vec<BlobFact>>> = applies
+        // One row per blob for all the adapters that apply, so a blob costs one read however many
+        // adapters there are: keyed by the adapters and their versions, so a new one misses.
+        let key = format!(
+            "adapters/{}/{}",
+            grammar.key(),
+            applies
+                .iter()
+                .map(|&i| self.adapters[i].name.as_str())
+                .collect::<Vec<_>>()
+                .join("+")
+        );
+        let version = applies
             .iter()
-            .map(|&i| {
-                let a = &self.adapters[i];
-                cache.get_interface(blob, &a.cache_key(grammar), &a.version)
-            })
-            .collect();
+            .map(|&i| self.adapters[i].version.as_str())
+            .collect::<Vec<_>>()
+            .join("+");
         let mut parsed = false;
-        if have.iter().any(Option::is_none) {
-            let bytes = read().filter(|b| b.len() <= limits.max_bytes);
-            let pass = bytes
-                .as_deref()
-                .and_then(|b| self.pass(grammar, path, b, limits));
-            parsed = pass.is_some();
-            let (mut per_adapter, complete) = match pass {
-                Some(p) => (p.per_adapter, p.complete),
-                // Too big, unreadable or past the time limit: nothing to say about it, now or
-                // later, unless the bytes couldn't be read.
-                None => (Vec::new(), bytes.is_some()),
-            };
-            let active: Vec<bool> = self
-                .adapters
-                .iter()
-                .map(|a| bytes.as_deref().is_some_and(|b| a.wanted(b)))
-                .collect();
-            let mut rows = Vec::new();
-            // A router file nobody found a route in (XS-15): looked for only when no adapter found one.
-            let routed = applies.iter().zip(&have).any(|(&i, h)| match h {
-                Some(f) => f.iter().any(|f| f.kind == FactKind::Route),
-                None => per_adapter
-                    .get(i)
-                    .is_some_and(|f| f.iter().any(|f| f.kind == FactKind::Route)),
-            });
-            let text = (!routed)
-                .then(|| bytes.as_deref().map(String::from_utf8_lossy))
-                .flatten();
-            let in_routes = path.split('/').rev().skip(1).any(|d| d == "routes");
-            let owner = applies
-                .iter()
-                .find(|&&i| self.adapters[i].router_import.is_some());
-            for (slot, &i) in have.iter_mut().zip(&applies) {
-                if slot.is_some() {
-                    continue;
-                }
-                let mut facts = if active[i] && !per_adapter.is_empty() {
-                    std::mem::take(&mut per_adapter[i])
-                } else {
-                    Vec::new()
+        let have = cache
+            .get_adapters(blob, &key, &version)
+            .filter(|h| h.len() == applies.len());
+        let have = match have {
+            Some(h) => h,
+            None => {
+                let bytes = read().filter(|b| b.len() <= limits.max_bytes);
+                let pass = bytes
+                    .as_deref()
+                    .and_then(|b| self.pass(grammar, path, b, limits));
+                parsed = pass.is_some();
+                let (mut per_adapter, complete) = match pass {
+                    Some(p) => (p.per_adapter, p.complete),
+                    // Too big, unreadable or past the time limit: nothing to say about it, now or
+                    // later, unless the bytes couldn't be read.
+                    None => (Vec::new(), bytes.is_some()),
                 };
-                let a = &self.adapters[i];
-                if let (Some(t), true) = (
-                    &text,
-                    complete && bytes.as_ref().is_some_and(|b| b.len() <= a.max_bytes),
-                ) && (a.router_import.as_ref().is_some_and(|r| r.is_match(t))
-                    || (owner == Some(&i) && in_routes))
-                {
-                    facts.push(unrecognised());
+                // A router file nobody found a route in (XS-15): looked for only when no adapter
+                // found one.
+                let routed = per_adapter
+                    .iter()
+                    .any(|f| f.iter().any(|f| f.kind == FactKind::Route));
+                let text = (!routed)
+                    .then(|| bytes.as_deref().map(String::from_utf8_lossy))
+                    .flatten();
+                let in_routes = path.split('/').rev().skip(1).any(|d| d == "routes");
+                let owner = applies
+                    .iter()
+                    .find(|&&i| self.adapters[i].router_import.is_some());
+                let mut have = Vec::with_capacity(applies.len());
+                for &i in &applies {
+                    let mut facts = per_adapter
+                        .get_mut(i)
+                        .map(std::mem::take)
+                        .unwrap_or_default();
+                    let a = &self.adapters[i];
+                    if let (Some(t), true) = (
+                        &text,
+                        complete && bytes.as_ref().is_some_and(|b| b.len() <= a.max_bytes),
+                    ) && (a.router_import.as_ref().is_some_and(|r| r.is_match(t))
+                        || (owner == Some(&i) && in_routes))
+                    {
+                        facts.push(unrecognised());
+                    }
+                    facts.sort();
+                    facts.dedup();
+                    have.push(facts);
                 }
-                facts.sort();
-                facts.dedup();
+                // ponytail: a failed cache write only costs a re-parse next time.
                 if complete {
-                    rows.push((i, facts.clone()));
+                    let _ = cache.put_adapters(blob, &key, &version, &have);
                 }
-                *slot = Some(facts);
+                have
             }
-            // ponytail: a failed cache write only costs a re-parse next time.
-            let keys: Vec<(String, &str, &[BlobFact])> = rows
-                .iter()
-                .map(|(i, f)| {
-                    let a = &self.adapters[*i];
-                    (a.cache_key(grammar), a.version.as_str(), f.as_slice())
-                })
-                .collect();
-            let _ =
-                cache.put_interface_many(keys.iter().map(|(k, v, f)| (blob, k.as_str(), *v, *f)));
-        }
+        };
         Extracted {
             facts: applies
                 .iter()
                 .zip(have)
-                .map(|(&i, f)| AdapterFacts {
+                .map(|(&i, facts)| AdapterFacts {
                     name: self.adapters[i].name.clone(),
                     version: self.adapters[i].version.clone(),
-                    facts: f.unwrap_or_default(),
+                    facts,
                 })
                 .collect(),
             parsed,
