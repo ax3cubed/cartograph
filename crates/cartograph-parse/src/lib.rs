@@ -17,6 +17,7 @@ mod manifest_lang;
 pub mod openapi;
 pub mod openapi_diff;
 pub mod proto;
+pub mod schema_files;
 pub mod syntax;
 mod ts;
 
@@ -26,6 +27,7 @@ pub use manifest::ManifestJs;
 pub use manifest_lang::{ManifestGo, ManifestPhp, ManifestPy};
 pub use openapi::ManifestOpenapi;
 pub use proto::ManifestProto;
+pub use schema_files::ManifestSchema;
 pub use ts::TsImports;
 
 /// Blobs over this size are skipped without being read.
@@ -194,6 +196,7 @@ pub static EXTRACTORS: [&dyn Extractor; 11] = [
     &ManifestPhp,
     &ManifestDeploy,
     &ManifestProto,
+    &ManifestSchema,
     // Last: it handles every YAML and JSON path the ones before it did not.
     &ManifestOpenapi,
 ];
