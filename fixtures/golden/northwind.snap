@@ -2,8 +2,9 @@
 source: fixtures/gen/tests/golden.rs
 expression: text
 ---
-sha256:1fb6cee1a9c5c526495e477eb6545cedf530f2c881182dad459e39c558a6faad
+sha256:f3fbcf0ec5dbe90afa3f5c8a007dad06d2e9550fded27a22aa056c5876b80de8
 
+extractor adapters express@1.1.0+fetch@1.1.0+codegen@1.0.0+codegen-go@1.0.0+nestjs@1.0.0+nextjs@1.0.0+nextjs-pages@1.0.0+fastapi@1.0.0+gin@1.0.0+grpc@1.0.0+bullmq@1.0.0+k8s-cronjob@1.0.0+laravel@1.0.0+go-http@1.0.0+python-http@1.0.0+guzzle@1.0.0
 extractor go-imports/go 1.0.0
 extractor manifest-js/package 1.0.0
 extractor py-imports/py 1.0.0

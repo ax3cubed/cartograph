@@ -12,8 +12,8 @@
   {"from": "orders", "to": "payments", "kind": "http", "operation": "POST /payments"},
   {"from": "orders", "to": "payments", "kind": "http", "operation": "POST /payments/:id/refund"},
   {"from": "orders", "to": "users", "kind": "http", "operation": "GET /users/:id"},
-  {"from": "orders", "to": "notifier", "kind": "http", "operation": "POST /notify", "why": "Python routes are not extracted"},
-  {"from": "users", "to": "notifier", "kind": "http", "operation": "POST /notify", "why": "Python routes are not extracted"},
+  {"from": "orders", "to": "notifier", "kind": "http", "operation": "POST /notify"},
+  {"from": "users", "to": "notifier", "kind": "http", "operation": "POST /notify"},
   {"from": "users", "to": "orders", "kind": "http", "operation": "GET /orders"},
   {"from": "payments", "to": "orders", "kind": "http", "operation": "GET /orders/:id"},
   {"from": "payments", "to": "orders", "kind": "http", "operation": "POST /hooks/(.*)"},
@@ -21,6 +21,6 @@
   {"from": "web", "to": "gateway", "kind": "http", "operation": "GET /api/orders/:id"},
   {"from": "web", "to": "gateway", "kind": "http", "operation": "GET /api/users/:id"},
   {"from": "web", "to": "gateway", "kind": "http", "operation": "POST /api/orders"},
-  {"from": "inventory", "to": "orders", "kind": "http", "operation": "GET /orders/:id", "why": "Go call sites are not extracted"},
-  {"from": "notifier", "to": "users", "kind": "http", "operation": "GET /users/:id", "why": "Python call sites are not extracted"}
+  {"from": "inventory", "to": "orders", "kind": "http", "operation": "GET /orders/:id"},
+  {"from": "notifier", "to": "users", "kind": "http", "operation": "GET /users/:id"}
 ]

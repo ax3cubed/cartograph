@@ -1,0 +1,16 @@
+name = "nextjs"
+version = "1.0.0"
+language = "ecmascript"
+files = ["**/app/**/route.ts", "**/app/**/route.js", "**/pages/api/**/*.ts", "**/pages/api/**/*.js"]
+router_import = "['\"]next/server['\"]"
+
+# The route's path is the file's: app/orders/[id]/route.ts is /orders/:id.
+[[path_rule]]
+kind = "route"
+match = "^(?:.*?/)?app/(.*?)/?route\\.[a-z]+$"
+path = "$1"
+
+[[path_rule]]
+kind = "route"
+match = "^(?:.*?/)?pages/(api/.*?)(?:/index)?\\.[a-z]+$"
+path = "$1"

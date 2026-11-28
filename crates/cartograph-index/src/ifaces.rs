@@ -45,7 +45,20 @@ pub fn applies(path: &str) -> bool {
     cartograph_parse::extractor_for(path).is_some()
         && matches!(
             path.rsplit_once('.').map(|x| x.1),
-            Some("ts" | "mts" | "cts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "go")
+            Some(
+                "ts" | "mts"
+                    | "cts"
+                    | "tsx"
+                    | "js"
+                    | "jsx"
+                    | "mjs"
+                    | "cjs"
+                    | "go"
+                    | "py"
+                    | "php"
+                    | "yaml"
+                    | "yml"
+            )
         )
 }
 

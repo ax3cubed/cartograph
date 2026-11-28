@@ -1,0 +1,9 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"route","span":[4,0,4,36],"attrs":{"method":"PREFIX","path":"/orders","router":{"parts":[{"expr":"router"}]}},"evidence":{"type":"literal","text":"router = APIRouter(prefix=\"/orders\")"}}
+{"kind":"route","span":[7,0,7,26],"attrs":{"method":"GET","path":"/{order_id}","router":{"parts":[{"expr":"router"}]}},"evidence":{"type":"literal","text":"@router.get(\"/{order_id}\")"}}
+{"kind":"route","span":[12,0,12,16],"attrs":{"method":"POST","path":"","router":{"parts":[{"expr":"router"}]}},"evidence":{"type":"literal","text":"@router.post(\"\")"}}
+{"kind":"route","span":[17,0,17,19],"attrs":{"method":"GET","path":"/health","router":{"parts":[{"expr":"app"}]}},"evidence":{"type":"literal","text":"@app.get(\"/health\")"}}
+{"kind":"route","span":[22,0,22,41],"attrs":{"method":"PREFIX","outer":"1","path":"/api","router":{"parts":[{"expr":"router"}]}},"evidence":{"type":"literal","text":"app.include_router(router, prefix=\"/api\")"}}

@@ -1,0 +1,8 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"http.call","span":[6,0,6,25],"attrs":{"client":{"parts":[{"expr":"$client"}]},"method":"GET","url":"/orders/1"},"evidence":{"type":"template","text":"$client->get('/orders/1')"}}
+{"kind":"http.call","span":[7,0,7,35],"attrs":{"client":{"parts":[{"expr":"$client"}]},"method":"POST","url":"/orders"},"evidence":{"type":"template","text":"$client->request('POST', '/orders')"}}
+{"kind":"http.call","span":[8,0,8,42],"attrs":{"method":"GET","url":"http://payments:8080/charge"},"evidence":{"type":"literal","text":"$other->get('http://payments:8080/charge')"}}
+{"kind":"client.base","span":[5,0,5,58],"attrs":{"name":{"parts":[{"expr":"$client"}]},"url":"http://orders:8080"},"evidence":{"type":"template","text":"$client = new Client(['base_uri' => 'http://orders:8080'])"}}

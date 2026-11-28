@@ -36,7 +36,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use cartograph_parse::syntax::{parse, span, text};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
 use tree_sitter::{Language, Node, Query, QueryCursor, QueryCursorOptions, StreamingIterator};
 
@@ -81,10 +81,21 @@ enum Grammar {
     Tsx,
     Js,
     Go,
+    Py,
+    Php,
+    Yaml,
 }
 
 impl Grammar {
-    const ALL: [Grammar; 4] = [Self::Ts, Self::Tsx, Self::Js, Self::Go];
+    const ALL: [Grammar; 7] = [
+        Self::Ts,
+        Self::Tsx,
+        Self::Js,
+        Self::Go,
+        Self::Py,
+        Self::Php,
+        Self::Yaml,
+    ];
 
     /// The parser's key, and the cache key's grammar part.
     fn key(self) -> &'static str {
@@ -93,6 +104,9 @@ impl Grammar {
             Self::Tsx => "tsx",
             Self::Js => "js",
             Self::Go => "go",
+            Self::Py => "py",
+            Self::Php => "php",
+            Self::Yaml => "yaml",
         }
     }
 
@@ -102,6 +116,9 @@ impl Grammar {
             Self::Tsx => "adapters/tsx",
             Self::Js => "adapters/js",
             Self::Go => "adapters/go",
+            Self::Py => "adapters/py",
+            Self::Php => "adapters/php",
+            Self::Yaml => "adapters/yaml",
         }
     }
 
@@ -111,6 +128,9 @@ impl Grammar {
             Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
             Self::Js => tree_sitter_javascript::LANGUAGE.into(),
             Self::Go => tree_sitter_go::LANGUAGE.into(),
+            Self::Py => tree_sitter_python::LANGUAGE.into(),
+            Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+            Self::Yaml => tree_sitter_yaml::LANGUAGE.into(),
         }
     }
 
@@ -120,6 +140,9 @@ impl Grammar {
             "tsx" => Some(Self::Tsx),
             "js" | "jsx" | "mjs" | "cjs" => Some(Self::Js),
             "go" => Some(Self::Go),
+            "py" => Some(Self::Py),
+            "php" => Some(Self::Php),
+            "yaml" | "yml" => Some(Self::Yaml),
             _ => None,
         }
     }
@@ -131,6 +154,9 @@ impl Grammar {
             "tsx" => vec![Self::Tsx],
             "javascript" => vec![Self::Js],
             "go" => vec![Self::Go],
+            "python" => vec![Self::Py],
+            "php" => vec![Self::Php],
+            "yaml" => vec![Self::Yaml],
             // One query set for the whole family; the node types they share are most of them.
             "ecmascript" => vec![Self::Ts, Self::Tsx, Self::Js],
             _ => return None,
@@ -159,6 +185,23 @@ struct Manifest {
     max_bytes: Option<usize>,
     /// An attribute whose value a blob's facts hold once: the first place is evidence enough.
     unique: Option<String>,
+    /// Where a fact's path comes from the file's own path (XS-15): the first rule of a kind
+    /// whose `match` the path fits gives the path, `$1` as in a regex replacement. An empty
+    /// `path` drops the fact. The `prefix` kind is put before every path of the adapter's routes.
+    #[serde(default)]
+    path_rule: Vec<PathRule>,
+    /// A regex over the text of a file: one that matches is a router file, and is flagged when no
+    /// adapter found a route in it.
+    router_import: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PathRule {
+    kind: String,
+    #[serde(rename = "match")]
+    pattern: String,
+    path: String,
 }
 
 /// One loaded adapter.
@@ -170,6 +213,8 @@ pub struct Adapter {
     requires: Vec<String>,
     max_bytes: usize,
     unique: Option<String>,
+    path_rules: Vec<(String, Regex, String)>,
+    router_import: Option<Regex>,
     scm: String,
 }
 
@@ -255,6 +300,21 @@ impl Adapter {
             return Err(LoadError("an adapter has 1 to 16 query files".into()));
         }
         let files = m.files.iter().map(|g| glob(g)).collect::<Result<_, _>>()?;
+        let re = |p: &str| {
+            RegexBuilder::new(p)
+                .size_limit(1 << 20)
+                .build()
+                .map_err(|e| LoadError(e.to_string()))
+        };
+        if m.path_rule.len() > MAX_GLOBS {
+            return Err(LoadError("path_rule takes up to 16 entries".into()));
+        }
+        let path_rules = m
+            .path_rule
+            .into_iter()
+            .map(|r| Ok((r.kind, re(&r.pattern)?, r.path)))
+            .collect::<Result<_, LoadError>>()?;
+        let router_import = m.router_import.as_deref().map(re).transpose()?;
         let mut scm = String::new();
         for (_, src) in queries {
             query::check(src)?;
@@ -271,6 +331,8 @@ impl Adapter {
                 .max_bytes
                 .unwrap_or(cartograph_parse::MAX_BLOB_BYTES as usize),
             unique: m.unique,
+            path_rules,
+            router_import,
             scm,
         })
     }
@@ -287,6 +349,30 @@ impl Adapter {
                     .requires
                     .iter()
                     .any(|h| bytes.windows(h.len().max(1)).any(|w| w == h.as_bytes())))
+    }
+
+    /// The path a file's location gives its facts of `kind` (`route`, `entrypoint`, or `prefix`):
+    /// Next.js's `app/orders/[id]/route.ts` is `/orders/:id`. `[x]` and `[...x]` are parameters and
+    /// `(group)` folders are not part of the path. None when no rule fits or the rule drops it.
+    pub fn path_for(&self, kind: &str, file: &str) -> Option<String> {
+        let (_, re, tpl) = self
+            .path_rules
+            .iter()
+            .find(|(k, re, _)| k == kind && re.is_match(file))?;
+        if tpl.is_empty() {
+            return None;
+        }
+        let mut raw = String::new();
+        re.captures(file)?.expand(tpl, &mut raw);
+        let segs: Vec<String> = raw
+            .split('/')
+            .filter(|s| !s.is_empty() && !(s.starts_with('(') && s.ends_with(')')))
+            .map(|s| match s.trim_matches(['[', ']']) {
+                p if p.len() < s.len() => format!(":{}", p.trim_start_matches("...")),
+                _ => s.to_owned(),
+            })
+            .collect();
+        Some(format!("/{}", segs.join("/")))
     }
 
     fn cache_key(&self, grammar: Grammar) -> String {
@@ -417,8 +503,7 @@ fn strip_url_queries(s: &str) -> String {
 impl Draft {
     fn finish(self, kind: FactKind) -> BlobFact {
         let events = matches!(kind, FactKind::EventPublish | FactKind::EventSubscribe);
-        let literal = self.attrs.values().all(|(v, _)| value::is_literal(v));
-        let attrs = self
+        let attrs: BTreeMap<_, _> = self
             .attrs
             .into_iter()
             .take(MAX_ATTRS)
@@ -429,8 +514,17 @@ impl Draft {
                     }
                     v => v,
                 };
-                (Capped::truncated(&k), normalise(&k, v))
+                (k.clone(), normalise(&k, v))
             })
+            .collect();
+        // The names a fact is bound to say nothing about how well its value is known.
+        let literal = attrs
+            .iter()
+            .filter(|(k, _)| !matches!(k.as_str(), "router" | "parent"))
+            .all(|(_, v)| value::is_literal(v));
+        let attrs = attrs
+            .into_iter()
+            .map(|(k, v)| (Capped::truncated(&k), v))
             .collect();
         BlobFact {
             kind,
@@ -455,11 +549,29 @@ impl Draft {
 /// HTTP methods are upper-case, and Express's `all` is every method.
 fn normalise(key: &str, v: AttrValue) -> AttrValue {
     match (key, &v) {
-        ("method", AttrValue::Str(s)) => {
-            let up = s.as_str().to_ascii_uppercase();
+        ("method", AttrValue::Str(_) | AttrValue::Parts { .. }) => {
+            // A method named by an identifier (`@Get`, `r.GET`) is as good as a string.
+            let up = value::plain(&v).to_ascii_uppercase();
             AttrValue::Str(Capped::truncated(if up == "ALL" { "ANY" } else { &up }))
         }
         _ => v,
+    }
+}
+
+/// The flag on a file that looks like it declares routes and none was found.
+fn unrecognised() -> BlobFact {
+    let attr = (
+        Capped::truncated("kind"),
+        AttrValue::Str(Capped::truncated("unrecognised-route-file")),
+    );
+    BlobFact {
+        kind: FactKind::Entrypoint,
+        span: crate::schema::FactSpan([0; 4]),
+        attrs: Attrs::new(BTreeMap::from([attr])).expect("one attribute"),
+        evidence: Evidence {
+            kind: EvidenceType::Inferred,
+            text: Capped::truncated("a router file with no route found"),
+        },
     }
 }
 
@@ -560,7 +672,9 @@ impl AdapterSet {
         let mut parsed = false;
         if have.iter().any(Option::is_none) {
             let bytes = read().filter(|b| b.len() <= limits.max_bytes);
-            let pass = bytes.as_deref().and_then(|b| self.pass(grammar, b, limits));
+            let pass = bytes
+                .as_deref()
+                .and_then(|b| self.pass(grammar, path, b, limits));
             parsed = pass.is_some();
             let (mut per_adapter, complete) = match pass {
                 Some(p) => (p.per_adapter, p.complete),
@@ -574,6 +688,20 @@ impl AdapterSet {
                 .map(|a| bytes.as_deref().is_some_and(|b| a.wanted(b)))
                 .collect();
             let mut rows = Vec::new();
+            // A router file nobody found a route in (XS-15): looked for only when no adapter found one.
+            let routed = applies.iter().zip(&have).any(|(&i, h)| match h {
+                Some(f) => f.iter().any(|f| f.kind == FactKind::Route),
+                None => per_adapter
+                    .get(i)
+                    .is_some_and(|f| f.iter().any(|f| f.kind == FactKind::Route)),
+            });
+            let text = (!routed)
+                .then(|| bytes.as_deref().map(String::from_utf8_lossy))
+                .flatten();
+            let in_routes = path.split('/').rev().skip(1).any(|d| d == "routes");
+            let owner = applies
+                .iter()
+                .find(|&&i| self.adapters[i].router_import.is_some());
             for (slot, &i) in have.iter_mut().zip(&applies) {
                 if slot.is_some() {
                     continue;
@@ -583,6 +711,15 @@ impl AdapterSet {
                 } else {
                     Vec::new()
                 };
+                let a = &self.adapters[i];
+                if let (Some(t), true) = (
+                    &text,
+                    complete && bytes.as_ref().is_some_and(|b| b.len() <= a.max_bytes),
+                ) && (a.router_import.as_ref().is_some_and(|r| r.is_match(t))
+                    || (owner == Some(&i) && in_routes))
+                {
+                    facts.push(unrecognised());
+                }
                 facts.sort();
                 facts.dedup();
                 if complete {
@@ -620,7 +757,7 @@ impl AdapterSet {
         let Some(grammar) = Grammar::for_path(path) else {
             return Vec::new();
         };
-        let Some(pass) = self.pass(grammar, bytes, limits) else {
+        let Some(pass) = self.pass(grammar, path, bytes, limits) else {
             return Vec::new();
         };
         pass.per_adapter
@@ -641,11 +778,11 @@ impl AdapterSet {
 
     /// Parses `bytes` once and runs every adapter's queries in one cursor pass. `None` when the
     /// parse hit its time limit or no adapter's hints are in the file.
-    fn pass(&self, grammar: Grammar, bytes: &[u8], limits: &Limits) -> Option<Pass> {
+    fn pass(&self, grammar: Grammar, path: &str, bytes: &[u8], limits: &Limits) -> Option<Pass> {
         let active: Vec<bool> = self
             .adapters
             .iter()
-            .map(|a| a.grammars.contains(&grammar) && a.wanted(bytes))
+            .map(|a| a.applies_to(grammar, path) && a.wanted(bytes))
             .collect();
         if !active.iter().any(|&a| a) {
             return None;
@@ -809,6 +946,83 @@ static BUILTIN: &[Embedded] = &[
         &[(
             "kafka.scm",
             include_str!("../adapters/events-go/queries/kafka.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/nestjs/adapter.toml"),
+        &[(
+            "routes.scm",
+            include_str!("../adapters/nestjs/queries/routes.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/nextjs/adapter.toml"),
+        &[(
+            "routes.scm",
+            include_str!("../adapters/nextjs/queries/routes.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/nextjs-pages/adapter.toml"),
+        &[(
+            "pages.scm",
+            include_str!("../adapters/nextjs-pages/queries/pages.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/fastapi/adapter.toml"),
+        &[(
+            "routes.scm",
+            include_str!("../adapters/fastapi/queries/routes.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/gin/adapter.toml"),
+        &[(
+            "routes.scm",
+            include_str!("../adapters/gin/queries/routes.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/grpc/adapter.toml"),
+        &[(
+            "register.scm",
+            include_str!("../adapters/grpc/queries/register.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/k8s-cronjob/adapter.toml"),
+        &[(
+            "cronjob.scm",
+            include_str!("../adapters/k8s-cronjob/queries/cronjob.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/laravel/adapter.toml"),
+        &[(
+            "routes.scm",
+            include_str!("../adapters/laravel/queries/routes.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/go-http/adapter.toml"),
+        &[(
+            "calls.scm",
+            include_str!("../adapters/go-http/queries/calls.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/python-http/adapter.toml"),
+        &[(
+            "calls.scm",
+            include_str!("../adapters/python-http/queries/calls.scm"),
+        )],
+    ),
+    (
+        include_str!("../adapters/guzzle/adapter.toml"),
+        &[(
+            "calls.scm",
+            include_str!("../adapters/guzzle/queries/calls.scm"),
         )],
     ),
 ];

@@ -1,0 +1,6 @@
+name = "nestjs"
+version = "1.0.0"
+language = "typescript"
+files = ["**/*.ts"]
+requires = ["@nestjs"]
+router_import = "['\"]@nestjs/common['\"]"

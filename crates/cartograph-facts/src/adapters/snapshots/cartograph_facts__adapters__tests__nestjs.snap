@@ -1,0 +1,8 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"route","span":[5,2,5,8],"attrs":{"method":"GET","path":"","prefix":"orders"},"evidence":{"type":"literal","text":"@Get()"}}
+{"kind":"route","span":[8,2,8,13],"attrs":{"method":"GET","path":":id","prefix":"orders"},"evidence":{"type":"literal","text":"@Get(\":id\")"}}
+{"kind":"route","span":[11,2,11,15],"attrs":{"method":"POST","path":"bulk","prefix":"orders"},"evidence":{"type":"literal","text":"@Post(\"bulk\")"}}
+{"kind":"route","span":[17,2,17,16],"attrs":{"method":"GET","path":"health"},"evidence":{"type":"literal","text":"@Get(\"health\")"}}

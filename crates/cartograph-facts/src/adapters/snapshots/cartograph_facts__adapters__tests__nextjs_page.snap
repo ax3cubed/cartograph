@@ -1,0 +1,6 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"entrypoint","span":[1,0,3,1],"attrs":{"kind":"ui"},"evidence":{"type":"literal","text":"export default function Page() { return <main>orders</main>; }"}}
+path_rule entrypoint /orders/:id

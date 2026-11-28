@@ -1,0 +1,7 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"http.call","span":[6,1,6,44],"attrs":{"method":"GET","url":{"parts":[{"lit":"http://orders:8080/orders/"},{"expr":"id"}]}},"evidence":{"type":"template","text":"http.Get(\"http://orders:8080/orders/\" + id)"}}
+{"kind":"http.call","span":[7,1,7,64],"attrs":{"method":"POST","url":"http://orders:8080/orders"},"evidence":{"type":"literal","text":"http.Post(\"http://orders:8080/orders\", \"application/json\", nil)"}}
+{"kind":"http.call","span":[8,11,8,72],"attrs":{"method":"DELETE","url":"http://orders:8080/orders/1"},"evidence":{"type":"literal","text":"http.NewRequest(\"DELETE\", \"http://orders:8080/orders/1\", nil)"}}

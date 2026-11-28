@@ -1,0 +1,7 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"route","span":[3,0,5,1],"attrs":{"method":"GET"},"evidence":{"type":"literal","text":"export async function GET(req: Request) { return NextResponse.json([]); }"}}
+{"kind":"route","span":[7,0,7,66],"attrs":{"method":"POST"},"evidence":{"type":"literal","text":"export const POST = async (req: Request) => NextResponse.json({});"}}
+path_rule route /api/orders/:id

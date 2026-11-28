@@ -1,0 +1,5 @@
+name = "go-http"
+version = "1.0.0"
+language = "go"
+files = ["**/*.go"]
+requires = ["net/http"]

@@ -1,0 +1,6 @@
+name = "fastapi"
+version = "1.0.0"
+language = "python"
+files = ["**/*.py"]
+requires = ["fastapi"]
+router_import = "(?m)^\\s*(?:from|import)\\s+fastapi"

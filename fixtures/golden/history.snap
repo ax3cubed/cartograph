@@ -2,9 +2,9 @@
 source: fixtures/gen/tests/golden.rs
 expression: text
 ---
-sha256:7be37f32e06ddb62447aff2933a404625b7707b76d63194c82e973add032173d
+sha256:e7f4bec8ce630d2685289a8b4b68fc5e4262d4c126d362e53f0d3c146c1feae0
 
-extractor adapters express@1.0.0+fetch@1.1.0+codegen@1.1.0+codegen-go@1.1.0+events@1.0.0+events-go@1.0.0
+extractor adapters express@1.1.0+fetch@1.1.0+codegen@1.0.0+codegen-go@1.0.0+nestjs@1.0.0+nextjs@1.0.0+nextjs-pages@1.0.0+fastapi@1.0.0+gin@1.0.0+grpc@1.0.0+bullmq@1.0.0+k8s-cronjob@1.0.0+laravel@1.0.0+go-http@1.0.0+python-http@1.0.0+guzzle@1.0.0
 extractor manifest-js/package 1.0.0
 extractor ts-imports/ts 1.0.0
 commit 860aed9d77bf27a37c409c234e34e61cf432ec7e Ada: start

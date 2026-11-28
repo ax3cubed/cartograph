@@ -1,0 +1,5 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"entrypoint","span":[2,0,2,13],"attrs":{"kind":"job","name":"nightly-report","schedule":"0 2 * * *"},"evidence":{"type":"literal","text":"kind: CronJob"}}

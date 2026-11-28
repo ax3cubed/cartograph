@@ -1,0 +1,5 @@
+name = "python-http"
+version = "1.0.0"
+language = "python"
+files = ["**/*.py"]
+requires = ["requests", "httpx"]

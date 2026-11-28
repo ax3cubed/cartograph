@@ -1,0 +1,6 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: "out.join(\"\\n\")"
+---
+{"kind":"entrypoint","span":[11,1,11,38],"attrs":{"kind":"grpc","register":{"parts":[{"expr":"RegisterOrdersServer"}]}},"evidence":{"type":"template","text":"pb.RegisterOrdersServer(s, &orders{})"}}
+{"kind":"entrypoint","span":[12,1,12,38],"attrs":{"kind":"grpc","register":{"parts":[{"expr":"RegisterHealthServer"}]}},"evidence":{"type":"template","text":"pb.RegisterHealthServer(s, &health{})"}}

@@ -25,6 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use cartograph_facts::adapters::AdapterSet;
 use cartograph_facts::schema::{AttrValue, Attrs, EvidenceType, FactKind, Part};
 use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{self, Connection, params};
@@ -76,6 +77,7 @@ struct Info {
 /// One version of a file at a path: its sites, over the overlap of the two intervals.
 pub(crate) struct Row {
     pub(crate) file: i64,
+    pub(crate) path: String,
     pub(crate) node: i64,
     pub(crate) service: i64,
     pub(crate) blob: Vec<u8>,
@@ -97,7 +99,7 @@ pub(crate) fn load_from(
 ) -> rusqlite::Result<Vec<Row>> {
     let mut st = conn.prepare_cached(
         "SELECT fp.file, n.id, coalesce(n.service, 0), fv.blob, fp.from_seq, fp.to_seq,
-                fv.from_seq, fv.to_seq, fa.payload
+                fv.from_seq, fv.to_seq, fa.payload, fp.path
          FROM (SELECT fa.blob, fa.payload FROM fact fa JOIN extractor e ON e.id = fa.extractor
                  WHERE e.name = ?1 AND NOT ?2
                UNION ALL SELECT blob, payload FROM blob_ref WHERE ?2) fa
@@ -118,10 +120,12 @@ pub(crate) fn load_from(
             continue;
         }
         let (file, blob): (i64, Vec<u8>) = (r.get(0)?, r.get(3)?);
+        let path: String = r.get(9)?;
         // A rename keeps the blob: one stretch, not two.
         if let Some(last) = out.last_mut()
             && last.file == file
             && last.blob == blob
+            && last.path == path
             && last.to == Some(from)
         {
             last.to = to;
@@ -129,6 +133,7 @@ pub(crate) fn load_from(
         }
         out.push(Row {
             file,
+            path,
             node: r.get(1)?,
             service: r.get(2)?,
             blob,
@@ -284,6 +289,48 @@ pub(crate) fn name_of(v: &AttrValue) -> Option<String> {
     }
 }
 
+/// A route's path text, an expression as `${}`.
+fn raw_path(v: &AttrValue) -> String {
+    pieces(v)
+        .iter()
+        .map(|(e, t)| if *e { "${}".to_owned() } else { t.clone() })
+        .collect()
+}
+
+/// `a` and `b` as one path: `/api` and `orders/:id` are `/api/orders/:id`.
+fn join_path(a: &str, b: &str) -> String {
+    let (a, b) = (a.trim_matches('/'), b.trim_matches('/'));
+    match (a.is_empty(), b.is_empty()) {
+        (true, true) => "/".to_owned(),
+        (true, false) => format!("/{b}"),
+        (false, true) => format!("/{a}"),
+        _ => format!("/{a}/{b}"),
+    }
+}
+
+/// The prefixes a file gives its routers: a router's own (`APIRouter(prefix=)`, `r.Group()` after
+/// its parent's) and the one it was included with, which goes first.
+#[derive(Default)]
+struct Prefixes(HashMap<String, Vec<(String, Option<String>, bool)>>);
+
+impl Prefixes {
+    fn of(&self, router: &str, depth: u8) -> String {
+        let Some(defs) = self.0.get(router).filter(|_| depth < 8) else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for outer in [true, false] {
+            for (path, parent, _) in defs.iter().filter(|d| d.2 == outer) {
+                if let Some(p) = parent {
+                    out = join_path(&out, &self.of(p, depth + 1));
+                }
+                out = join_path(&out, path);
+            }
+        }
+        out
+    }
+}
+
 /// The sites of one version of a file.
 fn sites(row: &Row, out: &mut Vec<Prep>) {
     let Some(per) = ifaces::decode(&row.payload) else {
@@ -292,9 +339,26 @@ fn sites(row: &Row, out: &mut Vec<Prep>) {
     // The names the file binds to an env var, and its named clients' bases.
     let mut bound: HashMap<String, String> = HashMap::new();
     let mut clients: HashMap<String, Vec<(bool, String)>> = HashMap::new();
+    let mut prefixes = Prefixes::default();
     for (_, _, facts) in &per {
         for f in facts {
             match f.kind {
+                FactKind::Route
+                    if attr(&f.attrs, "method")
+                        .and_then(text_of)
+                        .is_some_and(|m| m == "PREFIX") =>
+                {
+                    if let (Some(r), Some(p)) = (
+                        attr(&f.attrs, "router").and_then(name_of),
+                        attr(&f.attrs, "path"),
+                    ) {
+                        prefixes.0.entry(r).or_default().push((
+                            raw_path(p),
+                            attr(&f.attrs, "parent").and_then(name_of),
+                            attr(&f.attrs, "outer").is_some(),
+                        ));
+                    }
+                }
                 FactKind::EnvRead => {
                     if let (Some(k), Some(n)) = (
                         attr(&f.attrs, "key").and_then(name_of),
@@ -346,17 +410,37 @@ fn sites(row: &Row, out: &mut Vec<Prep>) {
                         continue;
                     };
                     let method = method.to_ascii_lowercase();
-                    // A mount (`app.use("/api", router)`) names no route of its own.
-                    if method == "use" {
+                    // A mount (`app.use("/api", router)`) names no route of its own, nor does a prefix.
+                    if method == "use" || method == "prefix" {
                         continue;
                     }
-                    let Some(path) = attr(&f.attrs, "path") else {
-                        continue;
-                    };
-                    let raw: String = pieces(path)
+                    // The path is in the fact, or (Next.js) in the file's own path.
+                    let adapter = AdapterSet::builtin()
+                        .adapters()
                         .iter()
-                        .map(|(e, t)| if *e { "${}".to_owned() } else { t.clone() })
-                        .collect();
+                        .find(|a| a.name == name);
+                    let own = match attr(&f.attrs, "path") {
+                        Some(p) => raw_path(p),
+                        None => match adapter.and_then(|a| a.path_for("route", &row.path)) {
+                            Some(p) => p,
+                            None => continue,
+                        },
+                    };
+                    // Prefixes: the file's (Laravel's /api), a router's, the controller's.
+                    let mut raw = adapter
+                        .and_then(|a| a.path_for("prefix", &row.path))
+                        .unwrap_or_default();
+                    if let Some(r) = attr(&f.attrs, "router").and_then(name_of) {
+                        raw = join_path(&raw, &prefixes.of(&r, 0));
+                    }
+                    if let Some(p) = attr(&f.attrs, "prefix") {
+                        raw = join_path(&raw, &raw_path(p));
+                    }
+                    let raw = if raw.is_empty() && !own.is_empty() {
+                        own
+                    } else {
+                        join_path(&raw, &own)
+                    };
                     let t = normalise_route(&method, &raw);
                     let info = mk_info(t.to_string(), raw);
                     out.push(Prep::Site(

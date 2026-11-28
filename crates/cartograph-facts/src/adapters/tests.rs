@@ -27,6 +27,10 @@ export const client = axios.create({ baseURL: process.env.ORDERS_URL });
 export const one = (id: string) => axios.get("/orders/" + id);
 "#;
 
+fn want_has(_: &str) -> bool {
+    false
+}
+
 fn cache() -> (tempfile::TempDir, FactCache) {
     let d = tempfile::tempdir().unwrap();
     let c = FactCache::open(&d.path().join("facts.db")).unwrap();
@@ -64,17 +68,17 @@ fn the_builtin_adapters_load() {
         .iter()
         .map(|a| a.name.as_str())
         .collect();
-    assert_eq!(
-        names,
-        [
-            "express",
-            "fetch",
-            "codegen",
-            "codegen-go",
-            "events",
-            "events-go"
-        ]
-    );
+    let mut want = vec![
+        "express",
+        "fetch",
+        "codegen",
+        "codegen-go",
+        "events",
+        "events-go",
+    ];
+    want.extend(GOLDEN.iter().map(|g| g.1).filter(|n| !want_has(n)));
+    want.dedup();
+    assert_eq!(names, want);
     // They are not compiled until a blob needs them, so this is where a bad query is found.
     for (manifest, queries) in BUILTIN.iter().chain(REFS) {
         Adapter::load(manifest, queries).unwrap();
@@ -247,7 +251,7 @@ fn a_path_no_adapter_handles_costs_nothing() {
     let e = AdapterSet::builtin().extract(
         &mut c,
         &[7; 20],
-        "main.py",
+        "main.rb",
         || panic!("read"),
         &Limits::default(),
     );
@@ -680,4 +684,151 @@ func f() {
         out.push(format!("== {name}\n{}", pretty(&e)));
     }
     insta::assert_snapshot!(out.join("\n"));
+}
+
+macro_rules! fixture {
+    ($snap:literal, $adapter:literal, $path:literal, $file:literal) => {
+        (
+            $snap,
+            $adapter,
+            $path,
+            include_str!(concat!("../../adapters/", $file)),
+        )
+    };
+}
+
+/// XS-15: (snapshot, adapter, the path the fixture sits at, its source). Every adapter has a row.
+const GOLDEN: &[(&str, &str, &str, &str)] = &[
+    fixture!(
+        "nestjs",
+        "nestjs",
+        "orders/src/orders.controller.ts",
+        "nestjs/fixture/orders.controller.ts"
+    ),
+    fixture!(
+        "nextjs_route",
+        "nextjs",
+        "web/src/app/api/orders/[id]/route.ts",
+        "nextjs/fixture/route.ts"
+    ),
+    fixture!(
+        "nextjs_api",
+        "nextjs",
+        "web/pages/api/orders/index.ts",
+        "nextjs/fixture/api-handler.ts"
+    ),
+    fixture!(
+        "nextjs_page",
+        "nextjs-pages",
+        "web/src/app/(shop)/orders/[id]/page.tsx",
+        "nextjs-pages/fixture/page.tsx"
+    ),
+    fixture!(
+        "fastapi",
+        "fastapi",
+        "orders/app/orders.py",
+        "fastapi/fixture/orders.py"
+    ),
+    fixture!("gin", "gin", "orders/main.go", "gin/fixture/main.go"),
+    fixture!("grpc", "grpc", "orders/server.go", "grpc/fixture/server.go"),
+    fixture!(
+        "k8s_cronjob",
+        "k8s-cronjob",
+        "deploy/k8s/cronjob.yaml",
+        "k8s-cronjob/fixture/cronjob.yaml"
+    ),
+    fixture!(
+        "laravel",
+        "laravel",
+        "shop/routes/api.php",
+        "laravel/fixture/api.php"
+    ),
+    fixture!(
+        "go_http",
+        "go-http",
+        "orders/client.go",
+        "go-http/fixture/client.go"
+    ),
+    fixture!(
+        "python_http",
+        "python-http",
+        "notifier/client.py",
+        "python-http/fixture/client.py"
+    ),
+    fixture!(
+        "guzzle",
+        "guzzle",
+        "shop/app/Client.php",
+        "guzzle/fixture/Client.php"
+    ),
+];
+
+#[test]
+fn every_framework_adapter_has_a_golden_fixture() {
+    let set = AdapterSet::builtin();
+    for (n, (snap, adapter, path, src)) in GOLDEN.iter().enumerate() {
+        let (_d, mut c) = cache();
+        let e = run(&mut c, 100 + n as u8, path, src);
+        let a = set.adapters().iter().find(|a| a.name == *adapter).unwrap();
+        let mut out: Vec<String> = e
+            .facts
+            .iter()
+            .filter(|f| f.name == *adapter)
+            .flat_map(|f| &f.facts)
+            .map(|f| serde_json::to_string(f).unwrap())
+            .collect();
+        assert!(!out.is_empty(), "{snap} found nothing");
+        for kind in ["route", "entrypoint", "prefix"] {
+            if let Some(p) = a.path_for(kind, path) {
+                out.push(format!("path_rule {kind} {p}"));
+            }
+        }
+        insta::assert_snapshot!(*snap, out.join("\n"));
+    }
+    let named: Vec<_> = GOLDEN.iter().map(|g| g.1).collect();
+    for a in set.adapters() {
+        assert!(
+            ["express", "fetch", "codegen", "codegen-go"].contains(&a.name.as_str())
+                || named.contains(&a.name.as_str()),
+            "{} has no golden fixture",
+            a.name
+        );
+    }
+}
+
+#[test]
+fn a_router_file_without_a_route_is_flagged_once_and_a_routed_one_is_not() {
+    let (_d, mut c) = cache();
+    let flagged = |e: &Extracted| {
+        all(e)
+            .iter()
+            .any(|f| f.kind == FactKind::Entrypoint && f.evidence.kind == EvidenceType::Inferred)
+    };
+    let e = run(
+        &mut c,
+        90,
+        "api/src/health.ts",
+        "import express from 'express';\nexport const x = 1;\n",
+    );
+    assert!(flagged(&e), "{}", pretty(&e));
+    let e = run(
+        &mut c,
+        91,
+        "api/src/routes/util.ts",
+        "export const x = 1;\n",
+    );
+    assert!(flagged(&e), "under routes/");
+    let e = run(&mut c, 92, "api/src/util.ts", "export const x = 1;\n");
+    assert!(!flagged(&e));
+    let e = run(&mut c, 93, "api/src/s.ts", ORDERS_SERVER);
+    assert!(!flagged(&e), "{}", pretty(&e));
+    // The answer is cached with the facts.
+    let again = AdapterSet::builtin().extract(
+        &mut c,
+        &[90; 20],
+        "api/src/health.ts",
+        || panic!("read"),
+        &Limits::default(),
+    );
+    assert!(flagged(&again));
 }

@@ -1,0 +1,6 @@
+name = "gin"
+version = "1.0.0"
+language = "go"
+files = ["**/*.go"]
+requires = ["gin-gonic"]
+router_import = "gin-gonic/gin"
