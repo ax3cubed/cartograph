@@ -343,6 +343,8 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     crate::config::refresh(conn, inputs.environments, inputs.default_environment)?;
     // HTTP links (XS-04) need every repository's services and host aliases, and the config values.
     crate::http::refresh(conn, config)?;
+    // Event links (XS-16) read the same facts, the config values and the AsyncAPI operations.
+    crate::events::refresh(conn, config)?;
     // Corrections (XS-12) sit on the links that pass wrote, before anything counts them.
     crate::corrections::refresh(conn, inputs.overrides, seq)?;
 

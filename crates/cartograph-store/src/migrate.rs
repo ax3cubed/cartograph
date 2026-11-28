@@ -48,6 +48,10 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-16 events: begin ----
+    "DROP TABLE channel_edge; ALTER TABLE contract DROP COLUMN kind;
+     DELETE FROM link WHERE kind = 'event';\n",
+    // ---- XS-16 events: end ----
     // ---- XS-12 corrections: begin ----
     "DROP TABLE correction_interval; DROP TABLE correction_base; DROP TABLE correction;
      DROP INDEX link_dst; ALTER TABLE link DROP COLUMN layer;\n",
@@ -197,6 +201,14 @@ const V4: &str = concat!(
        STRICT, WITHOUT ROWID;
      ALTER TABLE node ADD COLUMN generated TEXT;\n",
     // ---- XS-11 generated clients: end ----
+    // ---- XS-16 events: begin (after the table it alters) ----
+    "ALTER TABLE contract ADD COLUMN kind TEXT NOT NULL DEFAULT 'openapi';
+     CREATE TABLE channel_edge (broker TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL,
+       file INTEGER NOT NULL REFERENCES file (id), line INTEGER NOT NULL, from_seq INTEGER NOT NULL,
+       to_seq INTEGER) STRICT;
+     CREATE INDEX channel_edge_name ON channel_edge (name, broker);
+     CREATE INDEX channel_edge_file ON channel_edge (file);\n",
+    // ---- XS-16 events: end ----
 );
 
 /// Takes a format 3 file back to format 2 (test support: tests build an older file from a new one

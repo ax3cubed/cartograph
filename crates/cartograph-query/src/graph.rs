@@ -319,7 +319,7 @@ impl Snapshot<'_> {
         mut each: impl FnMut(i64, i64, i64, Option<i64>, i64, LinkKind, f32) -> Result<(), QueryError>,
     ) -> Result<(), QueryError> {
         let mut st = self.conn().prepare_cached(
-            "SELECT l.id, l.src, l.dst, i.from_seq, i.to_seq, l.kind = 'http', l.score
+            "SELECT l.id, l.src, l.dst, i.from_seq, i.to_seq, l.kind, l.score
              FROM interval i JOIN link l ON l.id = i.link
              WHERE i.from_seq <= ?1 AND (i.to_seq IS NULL OR i.to_seq > ?1)",
         )?;
@@ -328,10 +328,10 @@ impl Snapshot<'_> {
         let mut live: Vec<Live> = Vec::new();
         let mut rows = st.query([seq])?;
         while let Some(r) = rows.next()? {
-            let kind = if r.get::<_, bool>(5)? {
-                LinkKind::Http
-            } else {
-                LinkKind::Imports
+            let kind = match r.get_ref(5)?.as_str().unwrap_or("") {
+                "http" => LinkKind::Http,
+                "event" => LinkKind::Event,
+                _ => LinkKind::Imports,
             };
             let score = r.get::<_, Option<f64>>(6)?.map_or(1.0, |s| s as f32);
             if keeps_link(q, kind, level(score)) {

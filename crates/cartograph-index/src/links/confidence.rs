@@ -61,8 +61,8 @@ pub enum Step {
     All,
 }
 
-/// Everything that can support a link. The order is the registry order and fixes the order the
-/// cap applies in.
+/// Everything that can support a link. The order is the registry order, which breaks ties in the
+/// order the cap applies in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EvidenceType {
     /// OpenAPI or proto operation matched on both ends.
@@ -88,10 +88,18 @@ pub enum EvidenceType {
     /// The call is to a function of a generated client whose method and path are an operation of
     /// its spec (XS-11). The spec settles the call site, the base and the target alike.
     GeneratedClientSpec,
+    /// Publisher and subscriber spell the same channel as a literal (XS-16).
+    ChannelLiteral,
+    /// One end names the channel through an environment value (XS-16).
+    ChannelViaConfig,
+    /// The subscriber's broker wildcard matches the publisher's channel (XS-16).
+    ChannelWildcard,
+    /// A prefix, or the name of the constant both ends use, and nothing more (XS-16).
+    ChannelNameMatch,
 }
 
 impl EvidenceType {
-    pub const ALL: [EvidenceType; 11] = [
+    pub const ALL: [EvidenceType; 15] = [
         EvidenceType::ContractMatched,
         EvidenceType::LiteralCallSiteUrl,
         EvidenceType::TemplateCallSiteUrl,
@@ -103,6 +111,10 @@ impl EvidenceType {
         EvidenceType::UniqueAcrossWorkspace,
         EvidenceType::NameSimilarity,
         EvidenceType::GeneratedClientSpec,
+        EvidenceType::ChannelLiteral,
+        EvidenceType::ChannelViaConfig,
+        EvidenceType::ChannelWildcard,
+        EvidenceType::ChannelNameMatch,
     ];
 
     /// The key used in `weights.toml` and in snapshots.
@@ -119,6 +131,10 @@ impl EvidenceType {
             EvidenceType::UniqueAcrossWorkspace => "unique_across_workspace",
             EvidenceType::NameSimilarity => "name_similarity",
             EvidenceType::GeneratedClientSpec => "generated_client_spec",
+            EvidenceType::ChannelLiteral => "channel_literal",
+            EvidenceType::ChannelViaConfig => "channel_via_config",
+            EvidenceType::ChannelWildcard => "channel_wildcard",
+            EvidenceType::ChannelNameMatch => "channel_name_match",
         }
     }
 
@@ -127,20 +143,31 @@ impl EvidenceType {
         match self {
             EvidenceType::ContractMatched
             | EvidenceType::LiteralCallSiteUrl
-            | EvidenceType::HandlerAnchored => Level::Exact,
+            | EvidenceType::HandlerAnchored
+            | EvidenceType::ChannelLiteral => Level::Exact,
             EvidenceType::TemplateCallSiteUrl
             | EvidenceType::EnvResolvedBase
             | EvidenceType::HostAliasResolved
             | EvidenceType::FullPathMatch
-            | EvidenceType::GeneratedClientSpec => Level::Likely,
-            EvidenceType::PartialPathMatch | EvidenceType::UniqueAcrossWorkspace => Level::Guessed,
+            | EvidenceType::GeneratedClientSpec
+            | EvidenceType::ChannelViaConfig
+            | EvidenceType::ChannelWildcard => Level::Likely,
+            EvidenceType::PartialPathMatch
+            | EvidenceType::UniqueAcrossWorkspace
+            | EvidenceType::ChannelNameMatch => Level::Guessed,
             EvidenceType::NameSimilarity => Level::Weak,
         }
     }
 
     pub fn step(self) -> Step {
         match self {
-            EvidenceType::ContractMatched | EvidenceType::GeneratedClientSpec => Step::All,
+            // A channel match is one fact about both ends: it settles every step.
+            EvidenceType::ContractMatched
+            | EvidenceType::GeneratedClientSpec
+            | EvidenceType::ChannelLiteral
+            | EvidenceType::ChannelViaConfig
+            | EvidenceType::ChannelWildcard
+            | EvidenceType::ChannelNameMatch => Step::All,
             EvidenceType::LiteralCallSiteUrl | EvidenceType::TemplateCallSiteUrl => Step::CallSite,
             // With no host, the one route that fits is what says which service is meant.
             EvidenceType::EnvResolvedBase
@@ -192,15 +219,24 @@ pub fn extractor_version() -> &'static str {
     })
 }
 
-/// Scores one link from its evidence. At most [`MAX_EVIDENCE`] rows count, taken in registry
-/// order, so the result does not depend on the order of `evidence`.
+/// Scores one link from its evidence. At most [`MAX_EVIDENCE`] rows count, strongest first, so the result does not depend on the order of `evidence`.
 pub fn score(evidence: &[EvidenceType]) -> Confidence {
     let mut counts = [0usize; EvidenceType::ALL.len()];
     for &e in evidence {
         counts[e as usize] += 1;
     }
+    // The cap is spent on the strongest evidence first, so more evidence can't push a stronger
+    // kind out of the count and lower the score.
+    let mut order = EvidenceType::ALL;
+    order.sort_by(|a, b| {
+        (b.class(), b.weight())
+            .partial_cmp(&(a.class(), a.weight()))
+            .expect("weights are numbers")
+            .then(a.cmp(b))
+    });
     let mut budget = MAX_EVIDENCE;
-    for c in &mut counts {
+    for t in order {
+        let c = &mut counts[t as usize];
         *c = (*c).min(budget);
         budget -= *c;
     }

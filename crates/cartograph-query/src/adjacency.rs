@@ -176,10 +176,10 @@ impl Adjacency {
                 src,
                 dst,
                 // `package` links are imports of a workspace package; the wire has one kind for both.
-                kind: if r.get_ref(1)?.as_str() == Ok("http") {
-                    LinkKind::Http
-                } else {
-                    LinkKind::Imports
+                kind: match r.get_ref(1)?.as_str().unwrap_or("") {
+                    "http" => LinkKind::Http,
+                    "event" => LinkKind::Event,
+                    _ => LinkKind::Imports,
                 },
                 from: r.get::<_, i64>(4)? as u32,
                 to: r.get::<_, Option<i64>>(5)?.map_or(NONE, |t| t as u32),

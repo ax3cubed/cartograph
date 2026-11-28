@@ -16,6 +16,9 @@ use cartograph_git::{GitError, ObjectId, Repo, read_blob};
 /// It can overcount after a rewrite drops facts (a wasted look), never undercount.
 pub(crate) const CODEGEN_BLOBS: &str = "codegen_blobs";
 
+/// The `meta` key counting the blobs with an event fact (XS-16), kept like [`CODEGEN_BLOBS`].
+pub(crate) const EVENT_BLOBS: &str = "event_blobs";
+
 /// The extractor name in the `fact` table.
 pub const EXTRACTOR: &str = "adapters";
 
@@ -111,6 +114,21 @@ pub(crate) fn write(
         conn.execute(
             "UPDATE meta SET value = CAST(value AS INTEGER) + ?1 WHERE key = ?2",
             cartograph_store::rusqlite::params![marked as i64, CODEGEN_BLOBS],
+        )?;
+    }
+    let events = facts
+        .values()
+        .filter(|f| {
+            f.iter().any(|(_, _, fs)| {
+                fs.iter()
+                    .any(|b| matches!(b.kind, FactKind::EventPublish | FactKind::EventSubscribe))
+            })
+        })
+        .count();
+    if events > 0 {
+        conn.execute(
+            "UPDATE meta SET value = CAST(value AS INTEGER) + ?1 WHERE key = ?2",
+            cartograph_store::rusqlite::params![events as i64, EVENT_BLOBS],
         )?;
     }
     let mut rows: Vec<_> = facts.iter().collect();

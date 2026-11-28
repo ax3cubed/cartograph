@@ -6,6 +6,7 @@ pub mod config;
 pub mod contracts;
 pub mod corrections;
 pub mod derive;
+pub mod events;
 pub mod extract;
 pub mod freshness;
 pub mod http;

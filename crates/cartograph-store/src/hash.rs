@@ -299,7 +299,7 @@ fn repo_sections<'scope>(
     let mut intervals: Vec<Vec<Vec<u8>>> = vec![Vec::new(); repos.len()];
     let mut st = conn.prepare(
         "SELECT l.kind, l.src, l.dst, x.from_seq, x.to_seq FROM interval x
-         JOIN link l ON l.id = x.link WHERE l.kind != 'http'",
+         JOIN link l ON l.id = x.link WHERE l.kind NOT IN ('http', 'event')",
     )?;
     let mut rows = st.query([])?;
     while let Some(r) = rows.next()? {

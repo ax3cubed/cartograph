@@ -119,8 +119,6 @@ pub fn read(root: &Value, version: &str, bytes: &[u8]) -> Option<Contract> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     fn ops(spec: &str) -> Vec<String> {
         let c = crate::openapi::parse(spec.as_bytes(), None)
             .unwrap()

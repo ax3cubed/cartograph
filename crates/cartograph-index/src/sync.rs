@@ -1247,8 +1247,8 @@ fn reextract_ifaces(
     }
     // Every adapter fact is made again: the marker count starts over.
     conn.execute(
-        "UPDATE meta SET value = 0 WHERE key = ?1",
-        [ifaces::CODEGEN_BLOBS],
+        "UPDATE meta SET value = 0 WHERE key IN (?1, ?2)",
+        [ifaces::CODEGEN_BLOBS, ifaces::EVENT_BLOBS],
     )?;
     ifaces::write(conn, &found, subs)?;
     Ok(())

@@ -380,7 +380,8 @@ CREATE TABLE contract (
   file INTEGER NOT NULL REFERENCES file (id),
   service INTEGER REFERENCES node (id),
   title TEXT NOT NULL,
-  version TEXT NOT NULL
+  version TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'openapi'
 ) STRICT;
 CREATE UNIQUE INDEX contract_file ON contract (file);
 CREATE TABLE operation (
@@ -504,3 +505,24 @@ CREATE TABLE correction_interval (
 ) STRICT;
 CREATE INDEX correction_interval_link ON correction_interval (link);
 -- XS-12 corrections (end)
+
+-- XS-16 events (begin)
+-- Channels are keyed by (broker, name): the kind of broker (kafka, amqp, bullmq, sqs, sns, nats,
+-- redis) and the topic or queue as resolved. A row is a file that publishes to or subscribes to one
+-- (role `publish` or `subscribe`) over an interval, and is the reverse index from a channel name to
+-- both sides. Queue URLs are stored by queue name: no account id, no query string. An AsyncAPI spec
+-- is a contract of kind `events`: its operations are `publish` and `subscribe` on a channel address,
+-- seen from the application; bindings of kind `publishes` and `subscribes` join them to code. An
+-- `event` link runs from the subscriber's file to the publisher's.
+CREATE TABLE channel_edge (
+  broker TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  file INTEGER NOT NULL REFERENCES file (id),
+  line INTEGER NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX channel_edge_name ON channel_edge (name, broker);
+CREATE INDEX channel_edge_file ON channel_edge (file);
+-- XS-16 events (end)

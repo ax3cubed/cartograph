@@ -74,18 +74,18 @@ struct Info {
 }
 
 /// One version of a file at a path: its sites, over the overlap of the two intervals.
-struct Row {
-    file: i64,
-    node: i64,
-    service: i64,
-    blob: Vec<u8>,
-    from: i64,
-    to: Option<i64>,
-    payload: Vec<u8>,
+pub(crate) struct Row {
+    pub(crate) file: i64,
+    pub(crate) node: i64,
+    pub(crate) service: i64,
+    pub(crate) blob: Vec<u8>,
+    pub(crate) from: i64,
+    pub(crate) to: Option<i64>,
+    pub(crate) payload: Vec<u8>,
 }
 
 /// The rows of the interface facts, or (`refs`) of the names the importers of generated clients call.
-fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
+pub(crate) fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
     let mut st = conn.prepare_cached(
         "SELECT fp.file, n.id, coalesce(n.service, 0), fv.blob, fp.from_seq, fp.to_seq,
                 fv.from_seq, fv.to_seq, fa.payload
@@ -146,7 +146,8 @@ struct OpRow {
 fn load_ops(conn: &Connection) -> rusqlite::Result<Vec<OpRow>> {
     let mut st = conn.prepare_cached(
         "SELECT o.id, c.file, coalesce(c.service, 0), o.method, o.path, o.line, o.from_seq, o.to_seq
-         FROM operation o JOIN contract c ON c.id = o.contract ORDER BY o.id",
+         FROM operation o JOIN contract c ON c.id = o.contract WHERE c.kind = 'openapi'
+         ORDER BY o.id",
     )?;
     let rows = st.query_map([], |r| {
         Ok(OpRow {
@@ -200,7 +201,7 @@ fn load_aliases(conn: &Connection) -> rusqlite::Result<Vec<Aliases>> {
     rows.collect()
 }
 
-fn text_of(v: &AttrValue) -> Option<String> {
+pub(crate) fn text_of(v: &AttrValue) -> Option<String> {
     match v {
         AttrValue::Str(s) => Some(s.as_str().to_owned()),
         AttrValue::Parts { .. } => None,
@@ -208,7 +209,7 @@ fn text_of(v: &AttrValue) -> Option<String> {
 }
 
 /// `(is_expression, text)` pieces of a value, and the same as source-like text.
-fn pieces(v: &AttrValue) -> Vec<(bool, String)> {
+pub(crate) fn pieces(v: &AttrValue) -> Vec<(bool, String)> {
     match v {
         AttrValue::Str(s) => vec![(false, s.as_str().to_owned())],
         AttrValue::Parts { parts } => parts
@@ -222,7 +223,7 @@ fn pieces(v: &AttrValue) -> Vec<(bool, String)> {
     }
 }
 
-fn attr<'a>(a: &'a Attrs, k: &str) -> Option<&'a AttrValue> {
+pub(crate) fn attr<'a>(a: &'a Attrs, k: &str) -> Option<&'a AttrValue> {
     a.get(k)
 }
 
@@ -247,7 +248,7 @@ enum Prep {
 
 /// The variable an expression reads: `process.env.X`, `process.env["X"]`, `import.meta.env.X`, or
 /// a name the file bound to one.
-fn env_var(expr: &str, bound: &HashMap<String, String>) -> Option<String> {
+pub(crate) fn env_var(expr: &str, bound: &HashMap<String, String>) -> Option<String> {
     let e = expr.trim().trim_end_matches('!');
     if let Some(n) = bound.get(e) {
         return Some(n.clone());
@@ -267,7 +268,7 @@ fn env_var(expr: &str, bound: &HashMap<String, String>) -> Option<String> {
 }
 
 /// The text of a one-expression or one-string value (an identifier the adapter captured).
-fn name_of(v: &AttrValue) -> Option<String> {
+pub(crate) fn name_of(v: &AttrValue) -> Option<String> {
     match pieces(v).as_slice() {
         [(_, t)] => Some(t.clone()),
         _ => None,
@@ -839,16 +840,16 @@ type Timeline = (
 );
 
 /// A config row as the resolver reads it: (source, value, from, to).
-type Cv = (String, Option<String>, i64, Option<i64>);
+pub(crate) type Cv = (String, Option<String>, i64, Option<i64>);
 
 /// Config rows by key, split into those of each environment and those of every one.
 #[derive(Default)]
-struct Values {
-    own: HashMap<(String, i64), Vec<Cv>>,
-    base: HashMap<String, Vec<Cv>>,
+pub(crate) struct Values {
+    pub(crate) own: HashMap<(String, i64), Vec<Cv>>,
+    pub(crate) base: HashMap<String, Vec<Cv>>,
 }
 
-fn load_values(conn: &Connection) -> rusqlite::Result<Values> {
+pub(crate) fn load_values(conn: &Connection) -> rusqlite::Result<Values> {
     let mut v = Values::default();
     let mut st = conn.prepare_cached(
         "SELECT key, env_id, value, source, valid_from, valid_to FROM config_value
@@ -1317,7 +1318,8 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
          DELETE FROM evidence WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM interval WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM link WHERE kind = 'http';
-         DELETE FROM unresolved WHERE fact_kind = 'http.call'; DELETE FROM binding;
+         DELETE FROM unresolved WHERE fact_kind = 'http.call';
+         DELETE FROM binding WHERE kind NOT IN ('publishes', 'subscribes');
          UPDATE node SET generated = NULL WHERE generated IS NOT NULL;",
     )?;
     codegen::write_aliases(conn, &client_aliases)?;

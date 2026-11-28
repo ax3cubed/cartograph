@@ -685,7 +685,7 @@ impl Snapshot<'_> {
             .copied()
             .ok_or_else(missing)?;
         let mut link = self.wire_link(&g, e)?;
-        let http = e.kind == LinkKind::Http;
+        let http = matches!(e.kind, LinkKind::Http | LinkKind::Event);
         let mut evidence = EvidenceGroups::default();
         let mut operation = None;
         let mut resolved = crate::config::LinkEnv {

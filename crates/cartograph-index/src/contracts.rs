@@ -294,6 +294,8 @@ struct OpAcc {
 struct Parts {
     title: String,
     version: String,
+    /// An AsyncAPI document (XS-16): the contract's kind is `events`.
+    events: bool,
     service: Option<i64>,
     /// (method, path with its base) -> the operation.
     ops: BTreeMap<(String, String), OpAcc>,
@@ -425,6 +427,7 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
             let p = parts.entry(v.file).or_default();
             p.title = cut(&s.contract.title);
             p.version.clone_from(&s.contract.version);
+            p.events = s.contract.events;
             p.service = owner(v);
             for o in &s.contract.operations {
                 for base in &s.contract.bases {
@@ -433,7 +436,12 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
                         .ops
                         .entry((o.method.clone(), full.clone()))
                         .or_insert_with(|| OpAcc {
-                            template: normalise_route(&o.method, &full).path(),
+                            // A channel address isn't a path: it is kept as the spec spells it.
+                            template: if s.contract.events {
+                                full.clone()
+                            } else {
+                                normalise_route(&o.method, &full).path()
+                            },
                             ..Default::default()
                         });
                     e.operation_id.clone_from(&o.operation_id);
@@ -476,9 +484,18 @@ pub(crate) fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     let mut written = 0;
     for (file, p) in parts {
         conn.prepare_cached(
-            "INSERT INTO contract (file, service, title, version) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO contract (file, service, title, version, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
         )
-        .and_then(|mut s| s.execute(params![file, p.service, p.title, p.version]))?;
+        .and_then(|mut s| {
+            s.execute(params![
+                file,
+                p.service,
+                p.title,
+                p.version,
+                if p.events { "events" } else { "openapi" }
+            ])
+        })?;
         let id = conn.last_insert_rowid();
         versions_of(conn, id, history.remove(&file).unwrap_or_default())?;
         for ((method, path), op) in &p.ops {

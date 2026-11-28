@@ -13,3 +13,7 @@ partial_path_match       guessed  Target    0.45
 unique_across_workspace  guessed  Base      0.40
 name_similarity          weak     Target    0.15
 generated_client_spec    likely   All       0.80
+channel_literal          exact    All       0.95
+channel_via_config       likely   All       0.80
+channel_wildcard         likely   All       0.70
+channel_name_match       guessed  All       0.40
