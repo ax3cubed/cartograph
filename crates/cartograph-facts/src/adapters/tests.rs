@@ -65,6 +65,8 @@ fn the_builtin_adapters_load() {
         .map(|a| a.name.as_str())
         .collect();
     assert_eq!(names, ["express", "fetch"]);
+    // The built-in set compiles lazily: this is where a bad built-in query fails.
+    assert!(compile(AdapterSet::builtin().adapters()).is_ok());
 }
 
 /// The Done-when of XS-03: on a two-service fixture the Express route and the fetch call each
