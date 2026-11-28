@@ -23,6 +23,7 @@ use cartograph_facts::adapters::AdapterSet;
 use cartograph_facts::schema::FactKind;
 use cartograph_store::derived::{changed, record};
 use cartograph_store::rusqlite::{Connection, Result, params};
+use sha2::{Digest, Sha256};
 
 use crate::derive::key;
 use crate::http::{Prep, Row, attr, load, sites, text_of};
@@ -336,49 +337,41 @@ pub(crate) fn refresh(
     Ok(written)
 }
 
-/// Counts what each entrypoint open at HEAD reaches, when anything that decides it changed:
-/// `facts` is the run's fact hash, and the derived keys of the passes that write links, of the
-/// corrections and of the entrypoints stand for the rest.
-pub(crate) fn reach(
-    conn: &Connection,
-    config: Option<&str>,
-    facts: &[u8],
-    structure_keys: &[Vec<u8>],
-) -> Result<usize> {
-    let mut inputs = vec![facts.to_vec()];
-    inputs.extend(structure_keys.iter().cloned());
-    let mut st = conn.prepare_cached(
-        "SELECT kind, scope, inputs_key FROM derived
-         WHERE kind IN ('http', 'events', 'tables', 'corrections', 'entrypoints', 'contracts')
-         ORDER BY kind, scope",
-    )?;
-    let mut rows = st.query([])?;
-    while let Some(r) = rows.next()? {
-        let mut b =
-            format!("{}\0{}\0", r.get::<_, String>(0)?, r.get::<_, String>(1)?).into_bytes();
-        b.extend(r.get::<_, Vec<u8>>(2)?);
-        inputs.push(b);
+/// Counts what each entrypoint open at HEAD reaches, when the live links or the open
+/// entrypoints changed: those are all a walk reads.
+pub(crate) fn reach(conn: &Connection, config: Option<&str>) -> Result<usize> {
+    // The walks read the live links and the open entrypoints, nothing else: a sync whose commits
+    // change no link recounts nothing, though the facts changed.
+    let links: Vec<(i64, i64)> = conn
+        .prepare_cached(
+            "SELECT l.src, l.dst FROM interval i JOIN link l ON l.id = i.link
+             WHERE i.to_seq IS NULL ORDER BY l.src, l.dst",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_>>()?;
+    let open: Vec<(i64, i64)> = conn
+        .prepare_cached("SELECT id, node FROM entrypoint WHERE to_seq IS NULL ORDER BY id")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_>>()?;
+    let mut digest = Sha256::new();
+    for (a, b) in links.iter().chain(&open) {
+        digest.update(a.to_le_bytes());
+        digest.update(b.to_le_bytes());
     }
-    let k = key("reach", REACH_VERSION, inputs, config);
+    let k = key(
+        "reach",
+        REACH_VERSION,
+        vec![digest.finalize().to_vec()],
+        config,
+    );
     if !changed(conn, "reach", "workspace", &k)? {
         return Ok(0);
     }
-    let open: Vec<(i64, i64)> = conn
-        .prepare_cached("SELECT id, node FROM entrypoint WHERE to_seq IS NULL")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<Result<_>>()?;
     conn.execute(
         "UPDATE entrypoint SET reach = NULL WHERE to_seq IS NOT NULL AND reach IS NOT NULL",
         [],
     )?;
     if !open.is_empty() {
-        let links: Vec<(i64, i64)> = conn
-            .prepare_cached(
-                "SELECT l.src, l.dst FROM interval i JOIN link l ON l.id = i.link
-                 WHERE i.to_seq IS NULL",
-            )?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<Result<_>>()?;
         let mut ids: Vec<i64> = links.iter().flat_map(|l| [l.0, l.1]).collect();
         ids.extend(open.iter().map(|o| o.1));
         ids.sort_unstable();

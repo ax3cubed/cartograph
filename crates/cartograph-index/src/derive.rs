@@ -354,7 +354,7 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     // Entrypoints (XS-20) read the facts, the channels and the paths; their reach at HEAD reads
     // the links, so it comes last.
     crate::entrypoints::refresh(conn, inputs.clients, config, &structure_keys)?;
-    crate::entrypoints::reach(conn, config, &hash.digest(), &structure_keys)?;
+    crate::entrypoints::reach(conn, config)?;
 
     let mut c_in = structure_keys;
     c_in.push(hash.digest().to_vec());
