@@ -793,6 +793,9 @@ fn coverage_runs_extractors_and_services_read_what_the_index_stored() {
          INSERT INTO unresolved (file, spec, line, stage, reason, from_seq, to_seq) VALUES
            (1, '@shared/money', 3, 'resolve', 'not-found', 1, NULL),
            (1, './gone', 9, 'resolve', 'not-found', 1, 2);
+         INSERT INTO coverage_row (row, seq, done, total, unresolved) VALUES
+           ('files', 2, 2, 2, 0), ('imports', 2, 4, 5, 1), ('calls', 2, 0, 0, 0),
+           ('handlers', 2, 0, 0, 0), ('routes', 2, 0, 0, 0), ('consumers', 2, 0, 0, 0);
          INSERT INTO run (id, started_at, finished_at, writer_version, files_total, files_parsed,
                           imports_total, imports_resolved) VALUES
            (1, 1000, 1041, '0.1.0', 2, 2, 5, 3),
@@ -804,21 +807,38 @@ fn coverage_runs_extractors_and_services_read_what_the_index_stored() {
     let store = Store::open_path(&path).unwrap();
     let s = store.snapshot(Limits::default()).unwrap();
 
-    let rows = s.coverage().unwrap();
-    assert_eq!(rows.len(), 2);
+    // The last run's figures are the derived row; any other date counts from the intervals.
+    let rows = s.coverage(&At::parse("now").unwrap()).unwrap();
+    let ids: Vec<_> = rows.iter().map(|r| r.id.as_str()).collect();
     assert_eq!(
-        (rows[0].id.as_str(), rows[0].done, rows[0].total),
-        ("files", 2, 2)
+        ids,
+        [
+            "files",
+            "imports",
+            "calls",
+            "handlers",
+            "routes",
+            "consumers"
+        ]
+    );
+    assert_eq!(
+        (rows[0].done, rows[0].total, rows[0].target),
+        (2, 2, Some(98.0))
     );
     assert!(rows[0].gap.is_none());
+    assert_eq!((rows[1].done, rows[1].total), (4, 5));
+    assert_eq!(rows[1].gap.as_ref().unwrap().what, "1 import");
+    assert_eq!(rows[1].gaps[0].reason, "not-found");
+    assert_eq!(rows[3].target, None);
+    let then = s.coverage(&At::parse("aa01").unwrap()).unwrap();
     assert_eq!(
-        (rows[1].id.as_str(), rows[1].done, rows[1].total),
-        ("imports", 3, 5)
+        (then[0].done, then[0].total, then[1].done, then[1].total),
+        (2, 2, 0, 2),
+        "a past date: paths alive, import links alive plus the gaps open then"
     );
-    assert_eq!(rows[1].gap.as_ref().unwrap().what, "2 unresolved imports");
 
     let now = s
-        .unresolved(IMPORTS_ROW, &At::parse("now").unwrap(), Page::default())
+        .unresolved("imports", &At::parse("now").unwrap(), Page::default())
         .unwrap();
     assert_eq!(now.rows.len(), 1);
     let u = &now.rows[0];
@@ -827,7 +847,7 @@ fn coverage_runs_extractors_and_services_read_what_the_index_stored() {
         (node_id(20).as_str(), "r/src/a.ts", 3, "@shared/money")
     );
     let then = s
-        .unresolved(IMPORTS_ROW, &At::parse("aa01").unwrap(), Page::default())
+        .unresolved("imports", &At::parse("aa01").unwrap(), Page::default())
         .unwrap();
     assert_eq!(
         then.rows.len(),
@@ -835,7 +855,7 @@ fn coverage_runs_extractors_and_services_read_what_the_index_stored() {
         "a closed interval is listed as of a commit inside it"
     );
     assert!(matches!(
-        s.unresolved("calls", &At::parse("now").unwrap(), Page::default()),
+        s.unresolved("nope", &At::parse("now").unwrap(), Page::default()),
         Err(QueryError::NotFound { .. })
     ));
 

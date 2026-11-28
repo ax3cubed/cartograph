@@ -119,6 +119,7 @@ pub fn plan(dir: &Path, workspace_file: Option<&Path>) -> Result<Plan, Discovery
         default_environment: None,
         environments: Default::default(),
         adapters: vec![],
+        coverage: Default::default(),
     });
     let committed_at: Vec<Option<PathBuf>> = previous
         .repos

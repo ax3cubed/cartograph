@@ -1007,8 +1007,19 @@ pub struct CoverageRow {
     pub label: String,
     pub done: u32,
     pub total: u32,
+    /// In percent: the manifest's `coverage.targets`, else the default; none for `handlers`.
     pub target: Option<f32>,
+    /// The reason that affects the most rows.
     pub gap: Option<Problem>,
+    /// Every reason, most rows first (XS-14).
+    pub gaps: Vec<GapGroup>,
+}
+
+/// The unresolved rows of one reason (XS-14). `reason` can carry repo text: untrusted text (F8).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GapGroup {
+    pub reason: String,
+    pub rows: u32,
 }
 
 /// A reference that didn't resolve (IDX-22). `text` is the raw specifier: untrusted text (F8),

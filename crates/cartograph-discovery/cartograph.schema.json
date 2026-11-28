@@ -82,6 +82,10 @@
       "items": {
         "type": "string"
       }
+    },
+    "coverage": {
+      "description": "What the Coverage view aims for (XS-14).",
+      "$ref": "#/$defs/Coverage"
     }
   },
   "required": [
@@ -443,6 +447,44 @@
           }
         }
       }
+    },
+    "Coverage": {
+      "description": "`coverage:` (XS-14).",
+      "type": "object",
+      "properties": {
+        "targets": {
+          "description": "A target in percent for each of `files`, `imports`, `calls`, `handlers`, `routes` and\n`consumers`; the defaults are 98, 99, 85, none, 80 and 75.",
+          "type": "object",
+          "properties": {
+            "calls": {
+              "type": "number",
+              "format": "float"
+            },
+            "consumers": {
+              "type": "number",
+              "format": "float"
+            },
+            "files": {
+              "type": "number",
+              "format": "float"
+            },
+            "handlers": {
+              "type": "number",
+              "format": "float"
+            },
+            "imports": {
+              "type": "number",
+              "format": "float"
+            },
+            "routes": {
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

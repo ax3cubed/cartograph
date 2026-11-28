@@ -81,6 +81,8 @@ pub struct Workspace {
     pub environments: Vec<crate::config::EnvSpec>,
     /// The manifest's `default_environment`.
     pub default_environment: Option<String>,
+    /// The manifest's `coverage.targets`: a row id to its target, in percent (XS-14).
+    pub coverage_targets: std::collections::BTreeMap<String, f32>,
     /// `cartograph.overrides.yaml` beside the manifest (XS-12), when there is a manifest.
     pub overrides: Option<PathBuf>,
     /// The subprocess adapters the user approved, and the declared ones that won't run (XS-24).
@@ -463,6 +465,7 @@ pub fn restructure(ws: &Workspace, repo: &str) -> Result<DerivedStats, SyncError
         clients: &ws.clients,
         environments: &ws.environments,
         default_environment: ws.default_environment.as_deref(),
+        coverage_targets: ws.coverage_targets.clone(),
         exclude: &ws.exclude,
         overrides: ws.overrides.as_deref(),
         config_hash: ws.config_hash.as_deref(),
@@ -1031,6 +1034,7 @@ fn round_on(
     s.watermark = seq;
     s.replay_ms += t.elapsed().as_millis();
     s.coverage = coverage(&replay);
+    crate::coverage::write_skipped(conn, &crate::coverage::skipped(&replay), seq)?;
     // The replay is done with: its snapshot is encoded, and it and the facts are freed, on another
     // thread while this one writes the derived rows. The file is written after the commit below.
     let snapshot_body = std::thread::spawn(move || {
@@ -1089,6 +1093,7 @@ fn round_on(
         clients: &ws.clients,
         environments: &ws.environments,
         default_environment: ws.default_environment.as_deref(),
+        coverage_targets: ws.coverage_targets.clone(),
         exclude: &ws.exclude,
         overrides: ws.overrides.as_deref(),
         config_hash: ws.config_hash.as_deref(),

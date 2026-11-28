@@ -866,9 +866,19 @@ export interface CorrectionRequest {
  */
 export interface CoverageRow {
   done: number;
+  /**
+   * The reason that affects the most rows.
+   */
   gap?: Problem | null;
+  /**
+   * Every reason, most rows first (XS-14).
+   */
+  gaps: GapGroup[];
   id: string;
   label: string;
+  /**
+   * In percent: the manifest's `coverage.targets`, else the default; none for `handlers`.
+   */
   target?: number | null;
   total: number;
 }
@@ -882,6 +892,16 @@ export interface Problem {
   try: string;
   what: string;
   why: string;
+}
+/**
+ * The unresolved rows of one reason (XS-14). `reason` can carry repo text: untrusted text (F8).
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "GapGroup".
+ */
+export interface GapGroup {
+  reason: string;
+  rows: number;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema

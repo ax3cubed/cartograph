@@ -111,6 +111,13 @@ pub fn workspace_checked(data: &Path, ws: &str) -> Result<(Workspace, Vec<String
                 })
                 .collect(),
             default_environment: parsed.manifest.default_environment.clone(),
+            coverage_targets: parsed
+                .manifest
+                .coverage
+                .targets
+                .iter()
+                .map(|(r, v)| (r.id().to_owned(), *v))
+                .collect(),
             overrides: Some(base.join(cartograph_discovery::overrides::FILE_NAME)),
             subs: subprocess_adapters(&reg, ws, base, &parsed.manifest.adapters),
         },

@@ -48,6 +48,10 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-14 coverage: begin ----
+    "DROP TABLE coverage_row; DROP TABLE coverage_total;
+     DROP INDEX unresolved_stage_reason; DROP INDEX unresolved_open;\n",
+    // ---- XS-14 coverage: end ----
     // ---- XS-20 entrypoints: begin ----
     "DROP TABLE entrypoint_client; DROP TABLE entrypoint;\n",
     // ---- XS-20 entrypoints: end ----
@@ -222,6 +226,14 @@ const V4: &str = concat!(
      CREATE TABLE entrypoint_client (uid TEXT NOT NULL, name TEXT NOT NULL) STRICT;
      CREATE INDEX entrypoint_client_uid ON entrypoint_client (uid);\n",
     // ---- XS-20 entrypoints: end ----
+    // ---- XS-14 coverage: begin ----
+    "CREATE INDEX unresolved_stage_reason ON unresolved (stage, reason);
+     CREATE INDEX unresolved_open ON unresolved (fact_kind) WHERE to_seq IS NULL;
+     CREATE TABLE coverage_total (row TEXT NOT NULL, seq INTEGER NOT NULL, total INTEGER NOT NULL,
+       PRIMARY KEY (row, seq)) STRICT, WITHOUT ROWID;
+     CREATE TABLE coverage_row (row TEXT PRIMARY KEY, seq INTEGER NOT NULL, done INTEGER NOT NULL,
+       total INTEGER NOT NULL, unresolved INTEGER NOT NULL) STRICT, WITHOUT ROWID;\n",
+    // ---- XS-14 coverage: end ----
 );
 
 /// Takes a format 3 file back to format 2 (test support: tests build an older file from a new one

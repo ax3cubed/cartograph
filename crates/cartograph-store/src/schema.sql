@@ -556,3 +556,26 @@ CREATE TABLE entrypoint_client (
 ) STRICT;
 CREATE INDEX entrypoint_client_uid ON entrypoint_client (uid);
 -- XS-20 entrypoints (end)
+-- XS-14 coverage (begin)
+-- The six rows of the Coverage view: files, imports, calls, handlers, routes, consumers. A row's
+-- gaps are the open `unresolved` rows of its fact_kind (files: file, imports: NULL, calls:
+-- http.call, handlers: operation.handler, routes: http.route, consumers: operation.consumer),
+-- counted once per (file, line, spec). coverage_total steps the total of the four cross-service
+-- rows at each commit that changes it, so any date's figure comes from intervals; coverage_row is
+-- the figure at the last run (a derived row, kind coverage), rebuilt when its inputs key changes.
+CREATE INDEX unresolved_stage_reason ON unresolved (stage, reason);
+CREATE INDEX unresolved_open ON unresolved (fact_kind) WHERE to_seq IS NULL;
+CREATE TABLE coverage_total (
+  row TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  total INTEGER NOT NULL,
+  PRIMARY KEY (row, seq)
+) STRICT, WITHOUT ROWID;
+CREATE TABLE coverage_row (
+  row TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL,
+  done INTEGER NOT NULL,
+  total INTEGER NOT NULL,
+  unresolved INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+-- XS-14 coverage (end)

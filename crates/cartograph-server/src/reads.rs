@@ -638,9 +638,18 @@ async fn source(
 }
 
 /// The Coverage view, Indexing and Services settings (IDX-20 to IDX-22): what the index can see,
-/// how it was built and what it found. Each answers as of the last run.
-async fn coverage(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
-    read(app, ws, |s| s.coverage()).await
+/// how it was built and what it found. Coverage answers as of `at` (XS-14), the rest as of the
+/// last run.
+async fn coverage(
+    State(app): State<Arc<App>>,
+    Path(ws): Path<String>,
+    q: Result<Query<ReadParams>, QueryRejection>,
+) -> Response {
+    let at = match params(q).and_then(|p| at(p.at.as_deref())) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| s.coverage(&at)).await
 }
 
 async fn runs(

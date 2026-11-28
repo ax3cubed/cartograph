@@ -5,6 +5,7 @@ pub mod build;
 pub mod config;
 pub mod contracts;
 pub mod corrections;
+pub mod coverage;
 pub mod derive;
 pub mod entrypoints;
 pub mod events;

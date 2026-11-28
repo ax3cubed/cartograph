@@ -1010,7 +1010,15 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The reason that affects the most rows."
+          },
+          "gaps": {
+            "description": "Every reason, most rows first (XS-14).",
+            "items": {
+              "$ref": "#/components/schemas/GapGroup"
+            },
+            "type": "array"
           },
           "id": {
             "type": "string"
@@ -1019,6 +1027,7 @@
             "type": "string"
           },
           "target": {
+            "description": "In percent: the manifest's `coverage.targets`, else the default; none for `handlers`.",
             "format": "float",
             "type": [
               "number",
@@ -1035,7 +1044,8 @@
           "id",
           "label",
           "done",
-          "total"
+          "total",
+          "gaps"
         ],
         "type": "object"
       },
@@ -1726,6 +1736,24 @@
         },
         "required": [
           "name"
+        ],
+        "type": "object"
+      },
+      "GapGroup": {
+        "description": "The unresolved rows of one reason (XS-14). `reason` can carry repo text: untrusted text (F8).",
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "rows": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reason",
+          "rows"
         ],
         "type": "object"
       },

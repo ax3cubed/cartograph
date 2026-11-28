@@ -65,6 +65,53 @@ pub struct Manifest {
     /// runs nothing: each needs `cartograph adapters allow <name>` on every machine.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub adapters: Vec<String>,
+    /// What the Coverage view aims for (XS-14).
+    #[serde(default, skip_serializing_if = "Coverage::is_empty")]
+    pub coverage: Coverage,
+}
+
+/// `coverage:` (XS-14).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Coverage {
+    /// A target in percent for each of `files`, `imports`, `calls`, `handlers`, `routes` and
+    /// `consumers`; the defaults are 98, 99, 85, none, 80 and 75.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub targets: BTreeMap<CoverageRow, f32>,
+}
+
+impl Coverage {
+    fn is_empty(&self) -> bool {
+        self.targets.is_empty()
+    }
+}
+
+/// A row of the Coverage view.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum CoverageRow {
+    Files,
+    Imports,
+    Calls,
+    Handlers,
+    Routes,
+    Consumers,
+}
+
+impl CoverageRow {
+    /// The row's id in the API.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Files => "files",
+            Self::Imports => "imports",
+            Self::Calls => "calls",
+            Self::Handlers => "handlers",
+            Self::Routes => "routes",
+            Self::Consumers => "consumers",
+        }
+    }
 }
 
 /// One environment of `environments:` (XS-09).
@@ -656,6 +703,24 @@ services:
     }
 
     #[test]
+    fn coverage_targets_are_set_by_row() {
+        let p = parse(&format!(
+            "{GOOD}coverage:\n  targets:\n    calls: 90\n    files: 99.5\n"
+        ))
+        .unwrap();
+        assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+        let t: Vec<_> = p
+            .manifest
+            .coverage
+            .targets
+            .iter()
+            .map(|(r, v)| (r.id(), *v))
+            .collect();
+        assert_eq!(t, [("files", 99.5), ("calls", 90.0)]);
+        assert!(parse(&format!("{GOOD}coverage:\n  targets:\n    nope: 90\n")).is_err());
+    }
+
+    #[test]
     fn retrieval_is_a_known_section_with_closed_kinds() {
         let p = parse(&format!(
             "{GOOD}retrieval:\n  include: [cards, changes, commit_messages]\n  secret_scan: false\n"
@@ -832,6 +897,7 @@ services:
                 options: Options::default(),
                 services: vec![], rules: vec![], baseline: None, contracts: vec![], clients: vec![], retrieval: Default::default(),
                 default_environment: None, environments: Default::default(), adapters: vec![],
+                coverage: Default::default(),
             };
             let again = parse(&to_yaml(&m)).unwrap().manifest;
             proptest::prop_assert_eq!(again, m);
