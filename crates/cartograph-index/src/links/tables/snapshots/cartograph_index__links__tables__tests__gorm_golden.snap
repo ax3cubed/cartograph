@@ -1,0 +1,7 @@
+---
+source: crates/cartograph-index/src/links/tables/tests.rs
+expression: "show(\"models/models.go\", src)"
+---
+db.table.def orders gorm convention - line 1
+db.table.def categories gorm convention - line 6
+db.table.def shopping_carts gorm literal - line 14

@@ -1220,10 +1220,13 @@ fn reextract_ifaces(
     subs: &cartograph_facts::adapters::subprocess::SubSet,
 ) -> Result<(), SyncError> {
     conn.execute(
-        "DELETE FROM fact WHERE extractor IN (SELECT id FROM extractor WHERE name = ?1)",
-        [ifaces::EXTRACTOR],
+        "DELETE FROM fact WHERE extractor IN (SELECT id FROM extractor WHERE name IN (?1, ?2))",
+        [ifaces::EXTRACTOR, ifaces::TABLES],
     )?;
-    conn.execute("DELETE FROM extractor WHERE name = ?1", [ifaces::EXTRACTOR])?;
+    conn.execute(
+        "DELETE FROM extractor WHERE name IN (?1, ?2)",
+        [ifaces::EXTRACTOR, ifaces::TABLES],
+    )?;
     let mut found = ifaces::Ifaces::new();
     let mut seen = HashSet::new();
     for p in parts {

@@ -185,7 +185,7 @@ pub trait Extractor: Sync {
 }
 
 /// The built-in extractors.
-pub static EXTRACTORS: [&dyn Extractor; 11] = [
+pub static EXTRACTORS: [&dyn Extractor; 12] = [
     &TsImports,
     &ManifestJs,
     &GoImports,

@@ -1,0 +1,7 @@
+---
+source: crates/cartograph-index/src/links/tables/tests.rs
+expression: "show(\"src/entities.ts\", src)"
+---
+db.table.def orders typeorm literal - line 1
+db.table.def user_profile typeorm convention - line 4
+db.table.def carts typeorm literal - line 8

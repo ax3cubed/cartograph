@@ -349,7 +349,16 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
             }
         }
     }
-    inputs.push(ifaces::version().into_bytes());
+    // The adapters that made the facts, subprocess ones included (XS-24).
+    inputs.push(
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = 'adapters_version'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap_or_default()
+        .into_bytes(),
+    );
     inputs.push(
         format!(
             "{}\0{}",

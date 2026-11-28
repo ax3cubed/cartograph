@@ -18,3 +18,7 @@ channel_literal = 0.95
 channel_via_config = 0.80
 channel_wildcard = 0.70
 channel_name_match = 0.40
+# XS-17: a query's table is defined by a migration or a model that spells its name; an ORM derived the name; only the names look alike.
+table_defined = 0.92
+table_convention = 0.75
+table_name_only = 0.45

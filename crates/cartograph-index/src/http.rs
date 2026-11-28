@@ -86,6 +86,15 @@ pub(crate) struct Row {
 
 /// The rows of the interface facts, or (`refs`) of the names the importers of generated clients call.
 pub(crate) fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> {
+    load_from(conn, ifaces::EXTRACTOR, refs)
+}
+
+/// [`load`] for the facts of another extractor (the table facts, XS-17).
+pub(crate) fn load_from(
+    conn: &Connection,
+    extractor: &str,
+    refs: bool,
+) -> rusqlite::Result<Vec<Row>> {
     let mut st = conn.prepare_cached(
         "SELECT fp.file, n.id, coalesce(n.service, 0), fv.blob, fp.from_seq, fp.to_seq,
                 fv.from_seq, fv.to_seq, fa.payload
@@ -97,7 +106,7 @@ pub(crate) fn load(conn: &Connection, refs: bool) -> rusqlite::Result<Vec<Row>> 
            JOIN node n ON n.file = fv.file AND n.kind = 'file'
          ORDER BY fp.file, fv.blob, fp.from_seq, fv.from_seq",
     )?;
-    let mut rows = st.query(params![ifaces::EXTRACTOR, refs])?;
+    let mut rows = st.query(params![extractor, refs])?;
     let mut out: Vec<Row> = Vec::new();
     while let Some(r) = rows.next()? {
         let from = r.get::<_, i64>(4)?.max(r.get(6)?);

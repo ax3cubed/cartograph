@@ -345,6 +345,8 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     crate::http::refresh(conn, config)?;
     // Event links (XS-16) read the same facts, the config values and the AsyncAPI operations.
     crate::events::refresh(conn, config)?;
+    // Table links (XS-17) need the same, and the table facts.
+    crate::tables::refresh(conn, config)?;
     // Corrections (XS-12) sit on the links that pass wrote, before anything counts them.
     crate::corrections::refresh(conn, inputs.overrides, seq)?;
 
@@ -496,7 +498,7 @@ fn search_rows(
     }
     if full || structure {
         let rows: Vec<(i64, String, String)> = conn
-            .prepare("SELECT id, coalesce(name, ''), key FROM node WHERE kind != 'file' AND key IS NOT NULL")?
+            .prepare("SELECT id, coalesce(name, ''), key FROM node WHERE kind NOT IN ('file', 'table') AND key IS NOT NULL")?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<Result<_, _>>()?;
         for (id, name, key) in rows {

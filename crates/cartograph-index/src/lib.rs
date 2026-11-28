@@ -17,6 +17,7 @@ pub mod owners;
 mod rows;
 pub mod structure;
 pub mod sync;
+mod tables;
 pub mod timeline;
 
 use std::path::Path;

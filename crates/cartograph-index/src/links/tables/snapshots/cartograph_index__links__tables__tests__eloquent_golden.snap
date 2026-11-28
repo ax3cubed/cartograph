@@ -1,0 +1,6 @@
+---
+source: crates/cartograph-index/src/links/tables/tests.rs
+expression: "format!(\"{}{}\", show(\"app/Order.php\", src), show(\"app/Invoice.php\", named))"
+---
+db.table.def orders eloquent convention - line 2
+db.table.def billing_invoices eloquent literal - line 2

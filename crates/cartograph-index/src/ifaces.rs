@@ -12,6 +12,8 @@ use cartograph_facts::adapters::{AdapterSet, Limits, MAX_GENERATED_BYTES};
 use cartograph_facts::schema::{BlobFact, FactKind};
 use cartograph_git::{GitError, ObjectId, Repo, read_blob};
 
+use crate::links::tables;
+
 /// The `meta` key counting the blobs with a generated-client marker (XS-11). Absent: unknown.
 /// It can overcount after a rewrite drops facts (a wasted look), never undercount.
 pub(crate) const CODEGEN_BLOBS: &str = "codegen_blobs";
@@ -47,8 +49,13 @@ pub fn applies(path: &str) -> bool {
         )
 }
 
+/// The extractor name of the table facts (XS-17), which share [`IfaceFacts`] until [`write`] splits
+/// them off: the table pass reads them without the HTTP pass's payloads.
+pub const TABLES: &str = "tables";
+
 /// Interface facts for each (blob, path) not in `seen`, from the fact cache or by running the
-/// built-in adapters, and the approved subprocess adapters (`sub`), on the blob.
+/// built-in adapters, and the approved subprocess adapters (`sub`), on the blob. The table facts
+/// (XS-17) of the same blob are an entry named [`TABLES`].
 pub fn extract(
     repo: &Repo,
     items: impl IntoIterator<Item = (ObjectId, String)>,
@@ -61,22 +68,41 @@ pub fn extract(
     let local = repo.local();
     for (oid, path) in items {
         let builtin = applies(&path);
-        if (!builtin && sub.is_idle()) || !seen.insert(oid) {
+        let tables = tables::applies(&path);
+        if (!builtin && !tables && sub.is_idle()) || !seen.insert(oid) {
             continue;
         }
-        let read = || read_blob(&local, oid, MAX_GENERATED_BYTES as u64).ok();
+        // One read of the blob for the adapters and the table scan.
+        let bytes = std::cell::OnceCell::new();
+        let read = || bytes.get_or_init(|| read_blob(&local, oid, MAX_GENERATED_BYTES as u64).ok());
         let mut facts = if builtin {
-            set.extract(cache, oid.as_bytes(), &path, read, &Limits::default())
-                .facts
+            set.extract(
+                cache,
+                oid.as_bytes(),
+                &path,
+                || read().clone(),
+                &Limits::default(),
+            )
+            .facts
         } else {
             Vec::new()
         };
-        facts.extend(sub.extract(cache, oid.as_bytes(), &path, read));
-        let mine: IfaceFacts = facts
+        facts.extend(sub.extract(cache, oid.as_bytes(), &path, || read().clone()));
+        let mut mine: IfaceFacts = facts
             .into_iter()
             .filter(|a| !a.facts.is_empty())
             .map(|a| (a.name, a.version, a.facts))
             .collect();
+        if tables
+            && let Some(b) = read()
+                .as_deref()
+                .filter(|b| b.len() as u64 <= cartograph_parse::MAX_BLOB_BYTES)
+        {
+            let facts = tables::scan(&path, b);
+            if !facts.is_empty() {
+                mine.push((TABLES.into(), tables::VERSION.into(), facts));
+            }
+        }
         if !mine.is_empty() {
             into.insert(oid, Arc::new(mine));
         }
@@ -133,16 +159,40 @@ pub(crate) fn write(
     }
     let mut rows: Vec<_> = facts.iter().collect();
     rows.sort_by_key(|(o, _)| **o);
+    // Made with the first table fact, so an index without any has no such extractor.
+    let mut tables_id: Option<i64> = None;
     for (oid, f) in rows {
-        conn.prepare_cached(
-            "INSERT INTO fact (blob, extractor, payload) VALUES (?1, ?2, ?3)
-             ON CONFLICT DO NOTHING",
-        )?
-        .execute(cartograph_store::rusqlite::params![
-            oid.as_bytes(),
-            ex,
-            serde_json::to_vec(&**f).expect("facts encode")
-        ])?;
+        // The table facts (XS-17) are their own row: one list, read by the table pass alone.
+        let (theirs, mine): (IfaceFacts, IfaceFacts) =
+            f.iter().cloned().partition(|(name, _, _)| name == TABLES);
+        if tables_id.is_none() && !theirs.is_empty() {
+            conn.execute(
+                "INSERT INTO extractor (name, version) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
+                cartograph_store::rusqlite::params![TABLES, tables::VERSION],
+            )?;
+            tables_id = Some(conn.query_row(
+                "SELECT id FROM extractor WHERE name = ?1 AND version = ?2",
+                cartograph_store::rusqlite::params![TABLES, tables::VERSION],
+                |r| r.get(0),
+            )?);
+        }
+        let tables_ex = tables_id.unwrap_or_default();
+        let payloads = [
+            (ex, (!mine.is_empty()).then(|| serde_json::to_vec(&mine))),
+            (tables_ex, theirs.first().map(|t| serde_json::to_vec(&t.2))),
+        ];
+        for (extractor, payload) in payloads {
+            let Some(payload) = payload else { continue };
+            conn.prepare_cached(
+                "INSERT INTO fact (blob, extractor, payload) VALUES (?1, ?2, ?3)
+                 ON CONFLICT DO NOTHING",
+            )?
+            .execute(cartograph_store::rusqlite::params![
+                oid.as_bytes(),
+                extractor,
+                payload.expect("facts encode")
+            ])?;
+        }
     }
     Ok(())
 }
@@ -163,7 +213,12 @@ pub(crate) fn current(
             |r| r.get(0),
         )
         .ok();
-    Ok(stored.as_deref() == Some(version(subs).as_str()))
+    Ok(stored.as_deref() == Some(stamp(subs).as_str()))
+}
+
+/// What `adapters_version` holds: the adapters' version and the table scan's.
+fn stamp(subs: &SubSet) -> String {
+    format!("{}|{}", version(subs), tables::VERSION)
 }
 
 pub(crate) fn mark_current(
@@ -172,7 +227,7 @@ pub(crate) fn mark_current(
 ) -> cartograph_store::rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('adapters_version', ?1)",
-        [version(subs)],
+        [stamp(subs)],
     )?;
     Ok(())
 }

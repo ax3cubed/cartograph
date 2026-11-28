@@ -67,6 +67,9 @@ pub enum Step {
 pub enum EvidenceType {
     /// OpenAPI or proto operation matched on both ends.
     ContractMatched,
+    /// A table's name, as a migration or an ORM model spells it, is the name a query uses (XS-17).
+    /// The definition settles every step: the query's own text and the table it names.
+    TableDefined,
     /// The call site holds the whole URL as a literal.
     LiteralCallSiteUrl,
     /// The call site builds the URL from literals and expressions, such as `"/orders/" + id`.
@@ -75,12 +78,16 @@ pub enum EvidenceType {
     HandlerAnchored,
     /// The base URL or host came from a resolved env or config value.
     EnvResolvedBase,
+    /// The table's name is the one an ORM derives from its class name (XS-17).
+    TableConvention,
     /// The host matched a known service alias.
     HostAliasResolved,
     /// The whole path template matched a route.
     FullPathMatch,
     /// Only part of the path matched.
     PartialPathMatch,
+    /// The names differ in case, underscores or a plural, and nothing else ties them (XS-17).
+    TableNameOnly,
     /// One route in the workspace fits, and the host is unknown.
     UniqueAcrossWorkspace,
     /// Names alone look alike. Never shown.
@@ -99,15 +106,18 @@ pub enum EvidenceType {
 }
 
 impl EvidenceType {
-    pub const ALL: [EvidenceType; 15] = [
+    pub const ALL: [EvidenceType; 18] = [
         EvidenceType::ContractMatched,
+        EvidenceType::TableDefined,
         EvidenceType::LiteralCallSiteUrl,
         EvidenceType::TemplateCallSiteUrl,
         EvidenceType::HandlerAnchored,
         EvidenceType::EnvResolvedBase,
+        EvidenceType::TableConvention,
         EvidenceType::HostAliasResolved,
         EvidenceType::FullPathMatch,
         EvidenceType::PartialPathMatch,
+        EvidenceType::TableNameOnly,
         EvidenceType::UniqueAcrossWorkspace,
         EvidenceType::NameSimilarity,
         EvidenceType::GeneratedClientSpec,
@@ -135,6 +145,9 @@ impl EvidenceType {
             EvidenceType::ChannelViaConfig => "channel_via_config",
             EvidenceType::ChannelWildcard => "channel_wildcard",
             EvidenceType::ChannelNameMatch => "channel_name_match",
+            EvidenceType::TableDefined => "table_defined",
+            EvidenceType::TableConvention => "table_convention",
+            EvidenceType::TableNameOnly => "table_name_only",
         }
     }
 
@@ -144,8 +157,10 @@ impl EvidenceType {
             EvidenceType::ContractMatched
             | EvidenceType::LiteralCallSiteUrl
             | EvidenceType::HandlerAnchored
-            | EvidenceType::ChannelLiteral => Level::Exact,
+            | EvidenceType::ChannelLiteral
+            | EvidenceType::TableDefined => Level::Exact,
             EvidenceType::TemplateCallSiteUrl
+            | EvidenceType::TableConvention
             | EvidenceType::EnvResolvedBase
             | EvidenceType::HostAliasResolved
             | EvidenceType::FullPathMatch
@@ -154,7 +169,8 @@ impl EvidenceType {
             | EvidenceType::ChannelWildcard => Level::Likely,
             EvidenceType::PartialPathMatch
             | EvidenceType::UniqueAcrossWorkspace
-            | EvidenceType::ChannelNameMatch => Level::Guessed,
+            | EvidenceType::ChannelNameMatch
+            | EvidenceType::TableNameOnly => Level::Guessed,
             EvidenceType::NameSimilarity => Level::Weak,
         }
     }
@@ -167,7 +183,10 @@ impl EvidenceType {
             | EvidenceType::ChannelLiteral
             | EvidenceType::ChannelViaConfig
             | EvidenceType::ChannelWildcard
-            | EvidenceType::ChannelNameMatch => Step::All,
+            | EvidenceType::ChannelNameMatch
+            | EvidenceType::TableDefined
+            | EvidenceType::TableConvention
+            | EvidenceType::TableNameOnly => Step::All,
             EvidenceType::LiteralCallSiteUrl | EvidenceType::TemplateCallSiteUrl => Step::CallSite,
             // With no host, the one route that fits is what says which service is meant.
             EvidenceType::EnvResolvedBase

@@ -1,0 +1,5 @@
+---
+source: crates/cartograph-index/src/links/tables/tests.rs
+expression: "show(\"app/models.py\", src)"
+---
+db.table.def orders sqlalchemy literal - line 2
