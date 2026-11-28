@@ -15,7 +15,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::routing::get;
 use cartograph_api::types::{ApiError, Bin, ErrorCode, ImpactRequest, ReadParams};
-use cartograph_query::{At, ImpactInput, Page, QueryError, SearchQuery};
+use cartograph_query::{At, EntryFilter, ImpactInput, Page, QueryError, SearchQuery};
 use serde::Deserialize;
 
 use crate::routes::{Answer, App, body, error, read, read_page};
@@ -56,7 +56,14 @@ pub(crate) fn router() -> Router<Arc<App>> {
         .route("/api/v1/w/{ws}/owners", get(owners))
         .route("/api/v1/w/{ws}/contracts", get(contracts))
         .route("/api/v1/w/{ws}/entrypoints", get(entrypoints))
+        .route("/api/v1/w/{ws}/entrypoints/counts", get(entrypoint_counts))
         .route("/api/v1/w/{ws}/entrypoints/{id}", get(entrypoint))
+        .route("/api/v1/w/{ws}/concepts", get(concepts))
+        .route("/api/v1/w/{ws}/concepts/{id}", get(concept))
+        .route(
+            "/api/v1/w/{ws}/commits/{sha}/impact/markdown",
+            get(commit_impact_markdown),
+        )
         .route(
             "/api/v1/w/{ws}/entrypoints/{id}/trace",
             get(entrypoint_trace),
@@ -225,6 +232,47 @@ async fn commit_impact(
     Path((ws, sha)): Path<(String, String)>,
 ) -> Response {
     read(app, ws, move |s| s.commit_impact(&sha)).await
+}
+
+/// `GET …/commits/{sha}/impact/markdown`: what depends on the files whose links the commit
+/// changed, as the Markdown `cartograph impact` prints. Text only, never HTML.
+async fn commit_impact_markdown(
+    State(app): State<Arc<App>>,
+    Path((ws, sha)): Path<(String, String)>,
+) -> Response {
+    let done = tokio::task::spawn_blocking(move || -> Result<String, QueryError> {
+        let store = app.store(&ws)?;
+        let snap = store.snapshot(cartograph_query::Limits::default())?;
+        let c = snap.commit_impact(&sha)?;
+        let mut nodes: Vec<String> = c
+            .added_links
+            .iter()
+            .chain(&c.removed_links)
+            .map(|l| l.from.0.clone())
+            .collect();
+        nodes.sort();
+        nodes.dedup();
+        nodes.truncate(1000);
+        crate::mcp::impact_markdown(&app.data_dir, &ws, &snap, nodes)
+    })
+    .await;
+    match done {
+        Ok(Ok(text)) => {
+            let mut res = Response::new(Body::from(text));
+            let h = res.headers_mut();
+            h.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/plain; charset=utf-8"),
+            );
+            h.insert(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            );
+            res
+        }
+        Ok(Err(e)) => bad(e),
+        Err(_) => bad(QueryError::Internal),
+    }
 }
 
 #[derive(Deserialize)]
@@ -687,7 +735,41 @@ async fn contracts(
 }
 
 /// The Entrypoints view (XS-20): what starts work in a service, who calls it, what it reaches.
+#[derive(Deserialize)]
+struct EntrypointsParams {
+    at: Option<String>,
+    limit: Option<u32>,
+    cursor: Option<String>,
+    kind: Option<String>,
+    q: Option<String>,
+    sort: Option<String>,
+}
+
+/// Paged at 50 by default; `kind`, `q` and `sort` are applied here, not by the app.
 async fn entrypoints(
+    State(app): State<Arc<App>>,
+    Path(ws): Path<String>,
+    q: Result<Query<EntrypointsParams>, QueryRejection>,
+) -> Response {
+    let got = params(q).and_then(|p| {
+        Ok((
+            at(p.at.as_deref())?,
+            EntryFilter::parse(p.kind.as_deref(), p.q.as_deref(), p.sort.as_deref())
+                .map_err(bad)?,
+            Page::parse(p.limit, p.cursor.as_deref()).map_err(bad)?,
+        ))
+    });
+    let (at, filter, page) = match got {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    read_page(app, ws, move |s| {
+        s.entrypoints_page(&at, &filter, page).map(Answer::from)
+    })
+    .await
+}
+
+async fn entrypoint_counts(
     State(app): State<Arc<App>>,
     Path(ws): Path<String>,
     q: Result<Query<ReadParams>, QueryRejection>,
@@ -696,7 +778,24 @@ async fn entrypoints(
         Ok(a) => a,
         Err(e) => return e,
     };
-    read(app, ws, move |s| s.entrypoints(&at)).await
+    read(app, ws, move |s| s.entrypoint_counts(&at)).await
+}
+
+async fn concepts(
+    State(app): State<Arc<App>>,
+    Path(ws): Path<String>,
+    q: Result<Query<ReadParams>, QueryRejection>,
+) -> Response {
+    let page = match params(q).and_then(|p| Page::parse(p.limit, p.cursor.as_deref()).map_err(bad))
+    {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    read_page(app, ws, move |s| s.concepts(page).map(Answer::from)).await
+}
+
+async fn concept(State(app): State<Arc<App>>, Path((ws, id)): Path<(String, String)>) -> Response {
+    read(app, ws, move |s| s.concept(&id)).await
 }
 
 #[derive(Deserialize)]

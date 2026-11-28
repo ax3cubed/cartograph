@@ -1268,6 +1268,34 @@
         ],
         "type": "object"
       },
+      "EntrypointCounts": {
+        "description": "`GET …/entrypoints/counts`: the numbers the Entrypoints view's heading and filters show, so the\nlist can be paged without counting it on the client.",
+        "properties": {
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/KindCount"
+            },
+            "type": "array"
+          },
+          "services": {
+            "description": "Services that have at least one entrypoint.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "services",
+          "kinds"
+        ],
+        "type": "object"
+      },
       "EntrypointDetail": {
         "properties": {
           "consumers": {
@@ -2121,6 +2149,23 @@
         },
         "required": [
           "key"
+        ],
+        "type": "object"
+      },
+      "KindCount": {
+        "properties": {
+          "count": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EntrypointKind"
+          }
+        },
+        "required": [
+          "kind",
+          "count"
         ],
         "type": "object"
       },
@@ -3495,6 +3540,32 @@
           "description",
           "violations",
           "baselined"
+        ],
+        "type": "object"
+      },
+      "RuleCommit": {
+        "description": "One commit of the merged timeline and what the rules say of it (`GET …/rules/commits`).",
+        "properties": {
+          "commit": {
+            "$ref": "#/components/schemas/Commit"
+          },
+          "failing": {
+            "description": "Error-severity violations, not baselined, that held after the commit: what fails\n`cartograph check` there.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "violations": {
+            "description": "Every violation that held after the commit, baselined ones and warnings included.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "commit",
+          "failing",
+          "violations"
         ],
         "type": "object"
       },
@@ -7646,6 +7717,56 @@
         "x-cartograph-kind": "read"
       }
     },
+    "/api/v1/w/{ws}/commits/{sha}/impact/markdown": {
+      "get": {
+        "operationId": "getWsCommitsShaImpactMarkdown",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sha",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Blob text"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "A commit's impact as the Markdown `cartograph impact` prints",
+        "tags": [
+          "SRV-12"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
     "/api/v1/w/{ws}/concepts": {
       "get": {
         "operationId": "getWsConcepts",
@@ -9245,6 +9366,46 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9312,9 +9473,99 @@
             "description": "Error"
           }
         },
-        "summary": "Entrypoints with their consumer and reach counts",
+        "summary": "Entrypoints with their consumer and reach counts, paged; filter by kind and text, sort by name, consumers or reach",
         "tags": [
-          "XS-20"
+          "SRV-12"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
+    "/api/v1/w/{ws}/entrypoints/counts": {
+      "get": {
+        "operationId": "getWsEntrypointsCounts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/EntrypointCounts"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Entrypoints in all, by kind, and how many services they are in",
+        "tags": [
+          "SRV-12"
         ],
         "x-cartograph-kind": "read"
       }
@@ -12149,9 +12400,9 @@
         "x-cartograph-kind": "read"
       }
     },
-    "/api/v1/w/{ws}/rules/violations": {
+    "/api/v1/w/{ws}/rules/commits": {
       "get": {
-        "operationId": "getWsRulesViolations",
+        "operationId": "getWsRulesCommits",
         "parameters": [
           {
             "in": "path",
@@ -12163,8 +12414,101 @@
           },
           {
             "in": "query",
-            "name": "at",
+            "name": "limit",
             "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/RuleCommit"
+                      },
+                      "type": "array"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Commits newest first, each with the rule violations that held after it",
+        "tags": [
+          "SRV-12"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
+    "/api/v1/w/{ws}/rules/violations": {
+      "get": {
+        "operationId": "getWsRulesViolations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
             "schema": {
               "type": "string"
             }
@@ -12187,7 +12531,7 @@
           },
           {
             "in": "query",
-            "name": "include",
+            "name": "rule",
             "required": false,
             "schema": {
               "type": "string"
@@ -12259,7 +12603,7 @@
             "description": "Error"
           }
         },
-        "summary": "Current violations",
+        "summary": "Violations, live ones first, paged; `rule` names one rule",
         "tags": [
           "SRV-12"
         ],

@@ -1141,6 +1141,34 @@
       ],
       "type": "object"
     },
+    "EntrypointCounts": {
+      "description": "`GET …/entrypoints/counts`: the numbers the Entrypoints view's heading and filters show, so the\nlist can be paged without counting it on the client.",
+      "properties": {
+        "kinds": {
+          "items": {
+            "$ref": "#/definitions/KindCount"
+          },
+          "type": "array"
+        },
+        "services": {
+          "description": "Services that have at least one entrypoint.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "services",
+        "kinds"
+      ],
+      "type": "object"
+    },
     "EntrypointDetail": {
       "properties": {
         "consumers": {
@@ -2071,6 +2099,23 @@
       },
       "required": [
         "key"
+      ],
+      "type": "object"
+    },
+    "KindCount": {
+      "properties": {
+        "count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/definitions/EntrypointKind"
+        }
+      },
+      "required": [
+        "kind",
+        "count"
       ],
       "type": "object"
     },
@@ -3505,6 +3550,32 @@
       ],
       "type": "object"
     },
+    "RuleCommit": {
+      "description": "One commit of the merged timeline and what the rules say of it (`GET …/rules/commits`).",
+      "properties": {
+        "commit": {
+          "$ref": "#/definitions/Commit"
+        },
+        "failing": {
+          "description": "Error-severity violations, not baselined, that held after the commit: what fails\n`cartograph check` there.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "violations": {
+          "description": "Every violation that held after the commit, baselined ones and warnings included.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "commit",
+        "failing",
+        "violations"
+      ],
+      "type": "object"
+    },
     "RuleViolation": {
       "description": "A link a rule forbids, in the natural keys of cartograph.baseline.json. It carries the link's\nintervals, so whether a commit passes is a lookup.",
       "properties": {
@@ -4922,6 +4993,9 @@
     "Entrypoint": {
       "$ref": "#/definitions/Entrypoint"
     },
+    "EntrypointCounts": {
+      "$ref": "#/definitions/EntrypointCounts"
+    },
     "EntrypointDetail": {
       "$ref": "#/definitions/EntrypointDetail"
     },
@@ -5033,6 +5107,9 @@
     "Rule": {
       "$ref": "#/definitions/Rule"
     },
+    "RuleCommit": {
+      "$ref": "#/definitions/RuleCommit"
+    },
     "RuleViolation": {
       "$ref": "#/definitions/RuleViolation"
     },
@@ -5108,6 +5185,7 @@
     "DiscoverRequest",
     "Discovery",
     "Entrypoint",
+    "EntrypointCounts",
     "EntrypointDetail",
     "Environment",
     "ErrorBody",
@@ -5145,6 +5223,7 @@
     "ReadParams",
     "Repo",
     "Rule",
+    "RuleCommit",
     "RuleViolation",
     "RunEvent",
     "RunRequest",

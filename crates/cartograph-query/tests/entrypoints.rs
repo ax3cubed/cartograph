@@ -10,7 +10,7 @@ use cartograph_index::entrypoints::ClientSpec;
 use cartograph_index::structure::ServiceSpec;
 use cartograph_index::sync::{SyncOptions, SyncOutcome, Workspace, sync};
 use cartograph_index::timeline::RepoSpec;
-use cartograph_query::{At, Limits, Store};
+use cartograph_query::{At, EntryFilter, Limits, Page, Store};
 
 const COMPOSE: &str = "services:\n  orders:\n    build: ./orders\n  web:\n    build: ./web\n";
 const SERVER: &str = "import express from \"express\";\nimport { find } from \"./db\";\nconst app = express();\n\napp.get(\"/orders/:id\", (req, res) => res.json(find(1)));\napp.get(\"/health\", (req, res) => res.send(\"ok\"));\n";
@@ -92,6 +92,36 @@ fn entrypoints_have_consumers_a_reach_and_a_trace() {
     assert!(all.iter().any(|e| e.label == "GET /orders/{}"));
     assert!(all.iter().any(|e| e.label == "/orders/:id"));
     assert!(all.iter().any(|e| e.label == "nightly-report (0 2 * * *)"));
+
+    // SRV-12: the list pages with a cursor, and the filter and the sort run on the server.
+    let page = |f: &EntryFilter, limit: usize, offset: usize| {
+        snap.entrypoints_page(&At::Now, f, Page { offset, limit })
+            .unwrap()
+    };
+    let none = EntryFilter::default();
+    let first = page(&none, 3, 0);
+    assert_eq!(first.rows.len(), 3);
+    assert_eq!(first.next_cursor.as_deref(), Some("o3"));
+    let last = page(&none, 3, 6);
+    assert_eq!((last.rows.len(), last.next_cursor), (2, None));
+    let ids: Vec<_> = [0, 3, 6]
+        .into_iter()
+        .flat_map(|o| page(&none, 3, o).rows)
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(ids, all.iter().map(|e| e.id.clone()).collect::<Vec<_>>());
+    let http = EntryFilter::parse(Some("http"), None, Some("-consumers")).unwrap();
+    let rows = page(&http, 50, 0).rows;
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].consumers >= rows[1].consumers);
+    let by_text = EntryFilter::parse(None, Some("HEALTH"), None).unwrap();
+    assert_eq!(page(&by_text, 50, 0).rows.len(), 1);
+    assert!(EntryFilter::parse(Some("nope"), None, None).is_err());
+    assert!(EntryFilter::parse(None, None, Some("sideways")).is_err());
+    let counts = snap.entrypoint_counts(&At::Now).unwrap();
+    assert_eq!(counts.total, 8);
+    assert_eq!(counts.services, 2);
+    assert_eq!(counts.kinds.len(), 6);
 
     // The HTTP entrypoint: one found caller and one declared client.
     let order = all.iter().find(|e| e.label == "GET /orders/{}").unwrap();

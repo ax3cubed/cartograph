@@ -458,6 +458,7 @@ export interface CartographApi {
   DiscoverRequest: DiscoverRequest;
   Discovery: Discovery;
   Entrypoint: Entrypoint;
+  EntrypointCounts: EntrypointCounts;
   EntrypointDetail: EntrypointDetail;
   Environment: Environment;
   ErrorBody: ErrorBody;
@@ -495,6 +496,7 @@ export interface CartographApi {
   ReadParams: ReadParams;
   Repo: Repo;
   Rule: Rule;
+  RuleCommit: RuleCommit;
   RuleViolation: RuleViolation;
   RunEvent: RunEvent;
   RunRequest: RunRequest;
@@ -1023,6 +1025,29 @@ export interface Entrypoint {
    */
   reach: number;
   service?: NodeId | null;
+}
+/**
+ * `GET …/entrypoints/counts`: the numbers the Entrypoints view's heading and filters show, so the
+ * list can be paged without counting it on the client.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "EntrypointCounts".
+ */
+export interface EntrypointCounts {
+  kinds: KindCount[];
+  /**
+   * Services that have at least one entrypoint.
+   */
+  services: number;
+  total: number;
+}
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "KindCount".
+ */
+export interface KindCount {
+  count: number;
+  kind: EntrypointKind;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -1812,6 +1837,24 @@ export interface Rule {
   severity: string;
   /**
    * Violations that hold now, baselined ones included.
+   */
+  violations: number;
+}
+/**
+ * One commit of the merged timeline and what the rules say of it (`GET …/rules/commits`).
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "RuleCommit".
+ */
+export interface RuleCommit {
+  commit: Commit;
+  /**
+   * Error-severity violations, not baselined, that held after the commit: what fails
+   * `cartograph check` there.
+   */
+  failing: number;
+  /**
+   * Every violation that held after the commit, baselined ones and warnings included.
    */
   violations: number;
 }

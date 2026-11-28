@@ -956,6 +956,22 @@ pub struct Entrypoint {
     pub reach: u32,
 }
 
+/// `GET …/entrypoints/counts`: the numbers the Entrypoints view's heading and filters show, so the
+/// list can be paged without counting it on the client.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct EntrypointCounts {
+    pub total: u32,
+    /// Services that have at least one entrypoint.
+    pub services: u32,
+    pub kinds: Vec<KindCount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KindCount {
+    pub kind: EntrypointKind,
+    pub count: u32,
+}
+
 /// Who calls an entrypoint: a link into its operation or channel, or a client the manifest
 /// declares. Corrections and declared clients carry `overridden`, the view's "override" chip.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1107,6 +1123,17 @@ pub struct RuleViolation {
     pub live: bool,
     /// The steps it held over: from, and to (none while it still holds).
     pub intervals: Vec<(u32, Option<u32>)>,
+}
+
+/// One commit of the merged timeline and what the rules say of it (`GET …/rules/commits`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RuleCommit {
+    pub commit: Commit,
+    /// Error-severity violations, not baselined, that held after the commit: what fails
+    /// `cartograph check` there.
+    pub failing: u32,
+    /// Every violation that held after the commit, baselined ones and warnings included.
+    pub violations: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

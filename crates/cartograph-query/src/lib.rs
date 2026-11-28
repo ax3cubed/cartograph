@@ -16,6 +16,7 @@
 
 mod adjacency;
 mod at;
+mod concepts;
 mod config;
 mod contracts;
 mod coverage;
@@ -38,6 +39,7 @@ mod versions;
 pub use at::{At, parse_instant, rfc3339};
 pub use cartograph_store::FORMAT_VERSION;
 pub use detail::{WORKSPACE, level};
+pub use entrypoints::{EntryFilter, EntrySort};
 pub use error::QueryError;
 pub use find::{MAX_QUERY, SearchQuery};
 pub use graph::{GraphQuery, MAX_LINKS, MAX_NODES};
