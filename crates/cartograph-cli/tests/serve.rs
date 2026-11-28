@@ -365,6 +365,9 @@ fn only_the_listed_write_routes_accept_a_state_changing_method() {
         "DELETE /api/v1/jobs/x".into(),
         format!("POST /api/v1/w/{ws}/config/preview"),
         format!("PUT /api/v1/w/{ws}/config"),
+        // XS-13: the override file's writer; the id in the DELETE's path is any value.
+        format!("POST /api/v1/w/{ws}/corrections"),
+        format!("DELETE /api/v1/w/{ws}/corrections/x"),
         // A read that carries a body (SRV-11): it changes nothing, and refuses unknown fields.
         format!("POST /api/v1/w/{ws}/impact"),
         // SRV-21: the preview changes nothing; the install writes the user's agent config.
