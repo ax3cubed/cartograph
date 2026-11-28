@@ -214,6 +214,16 @@ impl Adapter {
     /// An adapter from its `adapter.toml` and its `queries/*.scm` files (name, text). Everything
     /// about it is checked here, so a bad adapter fails at load and not at the first blob.
     pub fn load(manifest: &str, queries: &[(&str, &str)]) -> Result<Self, LoadError> {
+        let a = Self::parse(manifest, queries)?;
+        // Compiling is the rest of the check: syntax, node types of every grammar, capture names.
+        for g in &a.grammars {
+            Compiled::new(*g, &[(0, &a)])?;
+        }
+        Ok(a)
+    }
+
+    /// Everything [`Adapter::load`] checks but the query compile.
+    fn parse(manifest: &str, queries: &[(&str, &str)]) -> Result<Self, LoadError> {
         let m: Manifest = toml::from_str(manifest).map_err(|e| LoadError(e.to_string()))?;
         if !valid_name(&m.name) || m.version.is_empty() || m.version.len() > 32 {
             return Err(LoadError(format!("bad name or version: {}", m.name)));
@@ -233,19 +243,14 @@ impl Adapter {
             scm.push_str(src);
             scm.push('\n');
         }
-        let a = Self {
+        Ok(Self {
             name: m.name,
             version: m.version,
             grammars,
             files,
             requires: m.requires,
             scm,
-        };
-        // Compiling is the rest of the check: syntax, node types of every grammar, capture names.
-        for g in &a.grammars {
-            Compiled::new(*g, &[(0, &a)])?;
-        }
-        Ok(a)
+        })
     }
 
     fn applies_to(&self, grammar: Grammar, path: &str) -> bool {
@@ -413,7 +418,9 @@ struct Pass {
 /// The adapters, their queries compiled per grammar.
 pub struct AdapterSet {
     adapters: Vec<Adapter>,
-    compiled: Vec<(Grammar, Compiled)>,
+    /// Compiled on the first parse for the built-in set: compiling takes about 90 ms, and a sync
+    /// whose blobs are all in the fact cache never parses.
+    compiled: OnceLock<Vec<(Grammar, Compiled)>>,
 }
 
 /// The facts of one adapter for one blob.
@@ -436,17 +443,7 @@ pub struct Extracted {
 
 impl AdapterSet {
     pub fn new(adapters: Vec<Adapter>) -> Result<Self, LoadError> {
-        let mut compiled = Vec::new();
-        for g in Grammar::ALL {
-            let mine: Vec<(usize, &Adapter)> = adapters
-                .iter()
-                .enumerate()
-                .filter(|(_, a)| a.grammars.contains(&g))
-                .collect();
-            if !mine.is_empty() {
-                compiled.push((g, Compiled::new(g, &mine)?));
-            }
-        }
+        let compiled = OnceLock::from(compile(&adapters)?);
         Ok(Self { adapters, compiled })
     }
 
@@ -454,12 +451,16 @@ impl AdapterSet {
     pub fn builtin() -> &'static Self {
         static SET: OnceLock<AdapterSet> = OnceLock::new();
         SET.get_or_init(|| {
+            // ponytail: unchecked here, compiled on first use; a test compiles them.
             let adapters = BUILTIN
                 .iter()
-                .map(|(manifest, queries)| Adapter::load(manifest, queries))
+                .map(|(manifest, queries)| Adapter::parse(manifest, queries))
                 .collect::<Result<_, _>>()
                 .expect("built-in adapters load");
-            Self::new(adapters).expect("built-in adapters compile")
+            Self {
+                adapters,
+                compiled: OnceLock::new(),
+            }
         })
     }
 
@@ -554,7 +555,6 @@ impl AdapterSet {
     /// Parses `bytes` once and runs every adapter's queries in one cursor pass. `None` when the
     /// parse hit its time limit or no adapter's hints are in the file.
     fn pass(&self, grammar: Grammar, bytes: &[u8], limits: &Limits) -> Option<Pass> {
-        let compiled = &self.compiled.iter().find(|(g, _)| *g == grammar)?.1;
         let active: Vec<bool> = self
             .adapters
             .iter()
@@ -563,6 +563,10 @@ impl AdapterSet {
         if !active.iter().any(|&a| a) {
             return None;
         }
+        let compiled = self
+            .compiled
+            .get_or_init(|| compile(&self.adapters).expect("built-in adapters compile"));
+        let compiled = &compiled.iter().find(|(g, _)| *g == grammar)?.1;
         let tree = parse(grammar.parser_key(), language_of, bytes)?;
         let start = Instant::now();
         let timed_out = Cell::new(false);
@@ -631,6 +635,22 @@ impl AdapterSet {
             complete,
         })
     }
+}
+
+/// Every adapter's queries, one compiled query per grammar any of them reads.
+fn compile(adapters: &[Adapter]) -> Result<Vec<(Grammar, Compiled)>, LoadError> {
+    let mut compiled = Vec::new();
+    for g in Grammar::ALL {
+        let mine: Vec<(usize, &Adapter)> = adapters
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.grammars.contains(&g))
+            .collect();
+        if !mine.is_empty() {
+            compiled.push((g, Compiled::new(g, &mine)?));
+        }
+    }
+    Ok(compiled)
 }
 
 /// (adapter.toml, [(query file name, text)]) for each built-in adapter.
