@@ -926,23 +926,70 @@ pub struct ContractDiff {
     pub changes: Vec<SpecChange>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EntrypointKind {
     Http,
     Event,
+    /// A cron config, a k8s CronJob or a scheduler registration.
     Job,
+    /// A package's `bin`, a Go `main` package.
     Cli,
+    /// A package's entry files.
+    Export,
+    /// A file-system route.
+    Ui,
 }
 
+/// What starts work in a service (XS-20). `id` is not a node.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Entrypoint {
     pub id: String,
     pub kind: EntrypointKind,
     pub label: String,
+    /// The file it starts in.
     pub node: NodeId,
-    pub service: NodeId,
+    pub service: Option<NodeId>,
+    /// Links into it, and declared clients.
     pub consumers: u32,
+    /// Nodes it reaches ("Symbols reached"), counted on the links at the date.
+    pub reach: u32,
+}
+
+/// Who calls an entrypoint: a link into its operation or channel, or a client the manifest
+/// declares. Corrections and declared clients carry `overridden`, the view's "override" chip.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Consumer {
+    /// The calling file; none for a declared client.
+    pub node: Option<NodeId>,
+    pub link: Option<LinkId>,
+    /// A declared client's name: untrusted text (F8).
+    pub name: Option<String>,
+    pub level: ConfidenceLevel,
+    pub overridden: bool,
+}
+
+/// The nodes an entrypoint reaches in one service.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceReach {
+    pub service: NodeId,
+    pub nodes: u32,
+}
+
+/// What an entrypoint reaches over the links valid at the date, by service, biggest first.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReachSummary {
+    pub nodes: u32,
+    pub services: Vec<ServiceReach>,
+    /// A bound (64 hops, 50,000 nodes) stopped the walk.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct EntrypointDetail {
+    pub entrypoint: Entrypoint,
+    pub consumers: Vec<Consumer>,
+    pub reach: ReachSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

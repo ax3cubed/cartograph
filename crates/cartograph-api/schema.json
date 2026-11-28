@@ -606,6 +606,50 @@
       ],
       "type": "object"
     },
+    "Consumer": {
+      "description": "Who calls an entrypoint: a link into its operation or channel, or a client the manifest\ndeclares. Corrections and declared clients carry `overridden`, the view's \"override\" chip.",
+      "properties": {
+        "level": {
+          "$ref": "#/definitions/ConfidenceLevel"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LinkId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "description": "A declared client's name: untrusted text (F8).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The calling file; none for a declared client."
+        },
+        "overridden": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "level",
+        "overridden"
+      ],
+      "type": "object"
+    },
     "ContextBlock": {
       "properties": {
         "cited": {
@@ -1035,8 +1079,10 @@
       "type": "object"
     },
     "Entrypoint": {
+      "description": "What starts work in a service (XS-20). `id` is not a node.",
       "properties": {
         "consumers": {
+          "description": "Links into it, and declared clients.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -1051,10 +1097,28 @@
           "type": "string"
         },
         "node": {
-          "$ref": "#/definitions/NodeId"
+          "allOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            }
+          ],
+          "description": "The file it starts in."
+        },
+        "reach": {
+          "description": "Nodes it reaches (\"Symbols reached\"), counted on the links at the date.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "service": {
-          "$ref": "#/definitions/NodeId"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1062,19 +1126,63 @@
         "kind",
         "label",
         "node",
-        "service",
-        "consumers"
+        "consumers",
+        "reach"
+      ],
+      "type": "object"
+    },
+    "EntrypointDetail": {
+      "properties": {
+        "consumers": {
+          "items": {
+            "$ref": "#/definitions/Consumer"
+          },
+          "type": "array"
+        },
+        "entrypoint": {
+          "$ref": "#/definitions/Entrypoint"
+        },
+        "reach": {
+          "$ref": "#/definitions/ReachSummary"
+        }
+      },
+      "required": [
+        "entrypoint",
+        "consumers",
+        "reach"
       ],
       "type": "object"
     },
     "EntrypointKind": {
-      "enum": [
-        "http",
-        "event",
-        "job",
-        "cli"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "http",
+            "event"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "job",
+          "description": "A cron config, a k8s CronJob or a scheduler registration.",
+          "type": "string"
+        },
+        {
+          "const": "cli",
+          "description": "A package's `bin`, a Go `main` package.",
+          "type": "string"
+        },
+        {
+          "const": "export",
+          "description": "A package's entry files.",
+          "type": "string"
+        },
+        {
+          "const": "ui",
+          "description": "A file-system route.",
+          "type": "string"
+        }
+      ]
     },
     "Environment": {
       "properties": {
@@ -3174,6 +3282,32 @@
       ],
       "type": "object"
     },
+    "ReachSummary": {
+      "description": "What an entrypoint reaches over the links valid at the date, by service, biggest first.",
+      "properties": {
+        "nodes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/definitions/ServiceReach"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "description": "A bound (64 hops, 50,000 nodes) stopped the walk.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "nodes",
+        "services",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "ReadParams": {
       "description": "Common read parameters. Every read takes them; each route documents which it honours.",
       "properties": {
@@ -4334,6 +4468,24 @@
       ],
       "type": "object"
     },
+    "ServiceReach": {
+      "description": "The nodes an entrypoint reaches in one service.",
+      "properties": {
+        "nodes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "service": {
+          "$ref": "#/definitions/NodeId"
+        }
+      },
+      "required": [
+        "service",
+        "nodes"
+      ],
+      "type": "object"
+    },
     "SpecKind": {
       "enum": [
         "openapi",
@@ -4712,6 +4864,9 @@
     "ConfigWrite": {
       "$ref": "#/definitions/ConfigWrite"
     },
+    "Consumer": {
+      "$ref": "#/definitions/Consumer"
+    },
     "Contract": {
       "$ref": "#/definitions/Contract"
     },
@@ -4738,6 +4893,9 @@
     },
     "Entrypoint": {
       "$ref": "#/definitions/Entrypoint"
+    },
+    "EntrypointDetail": {
+      "$ref": "#/definitions/EntrypointDetail"
     },
     "Environment": {
       "$ref": "#/definitions/Environment"
@@ -4835,6 +4993,9 @@
     "Reach": {
       "$ref": "#/definitions/Reach"
     },
+    "ReachSummary": {
+      "$ref": "#/definitions/ReachSummary"
+    },
     "ReadParams": {
       "$ref": "#/definitions/ReadParams"
     },
@@ -4867,6 +5028,9 @@
     },
     "Service": {
       "$ref": "#/definitions/Service"
+    },
+    "ServiceReach": {
+      "$ref": "#/definitions/ServiceReach"
     },
     "SymbolCalls": {
       "$ref": "#/definitions/SymbolCalls"
@@ -4906,6 +5070,7 @@
     "ConceptDecision",
     "ConfigFile",
     "ConfigWrite",
+    "Consumer",
     "Contract",
     "Correction",
     "CorrectionRequest",
@@ -4915,6 +5080,7 @@
     "DiscoverRequest",
     "Discovery",
     "Entrypoint",
+    "EntrypointDetail",
     "Environment",
     "ErrorBody",
     "ExtractorInfo",
@@ -4947,6 +5113,7 @@
     "ProviderWrite",
     "RankedNode",
     "Reach",
+    "ReachSummary",
     "ReadParams",
     "Repo",
     "Rule",
@@ -4958,6 +5125,7 @@
     "Selection",
     "ServerEvent",
     "Service",
+    "ServiceReach",
     "SymbolCalls",
     "Thread",
     "TimelineDensity",

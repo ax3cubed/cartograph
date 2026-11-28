@@ -654,6 +654,50 @@
         ],
         "type": "object"
       },
+      "Consumer": {
+        "description": "Who calls an entrypoint: a link into its operation or channel, or a client the manifest\ndeclares. Corrections and declared clients carry `overridden`, the view's \"override\" chip.",
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/ConfidenceLevel"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "description": "A declared client's name: untrusted text (F8).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "node": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The calling file; none for a declared client."
+          },
+          "overridden": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "level",
+          "overridden"
+        ],
+        "type": "object"
+      },
       "ContextBlock": {
         "properties": {
           "cited": {
@@ -1166,8 +1210,10 @@
         "type": "object"
       },
       "Entrypoint": {
+        "description": "What starts work in a service (XS-20). `id` is not a node.",
         "properties": {
           "consumers": {
+            "description": "Links into it, and declared clients.",
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
@@ -1182,10 +1228,24 @@
             "type": "string"
           },
           "node": {
-            "$ref": "#/components/schemas/NodeId"
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The file it starts in."
+          },
+          "reach": {
+            "description": "Nodes it reaches (\"Symbols reached\"), counted on the links at the date.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
           },
           "service": {
-            "$ref": "#/components/schemas/NodeId"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeId"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1193,19 +1253,63 @@
           "kind",
           "label",
           "node",
-          "service",
-          "consumers"
+          "consumers",
+          "reach"
+        ],
+        "type": "object"
+      },
+      "EntrypointDetail": {
+        "properties": {
+          "consumers": {
+            "items": {
+              "$ref": "#/components/schemas/Consumer"
+            },
+            "type": "array"
+          },
+          "entrypoint": {
+            "$ref": "#/components/schemas/Entrypoint"
+          },
+          "reach": {
+            "$ref": "#/components/schemas/ReachSummary"
+          }
+        },
+        "required": [
+          "entrypoint",
+          "consumers",
+          "reach"
         ],
         "type": "object"
       },
       "EntrypointKind": {
-        "enum": [
-          "http",
-          "event",
-          "job",
-          "cli"
-        ],
-        "type": "string"
+        "oneOf": [
+          {
+            "enum": [
+              "http",
+              "event"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "job",
+            "description": "A cron config, a k8s CronJob or a scheduler registration.",
+            "type": "string"
+          },
+          {
+            "const": "cli",
+            "description": "A package's `bin`, a Go `main` package.",
+            "type": "string"
+          },
+          {
+            "const": "export",
+            "description": "A package's entry files.",
+            "type": "string"
+          },
+          {
+            "const": "ui",
+            "description": "A file-system route.",
+            "type": "string"
+          }
+        ]
       },
       "Environment": {
         "properties": {
@@ -3212,6 +3316,32 @@
         ],
         "type": "object"
       },
+      "ReachSummary": {
+        "description": "What an entrypoint reaches over the links valid at the date, by service, biggest first.",
+        "properties": {
+          "nodes": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceReach"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "A bound (64 hops, 50,000 nodes) stopped the walk.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "nodes",
+          "services",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "Repo": {
         "properties": {
           "behind": {
@@ -4328,6 +4458,24 @@
           "paths",
           "tags",
           "library"
+        ],
+        "type": "object"
+      },
+      "ServiceReach": {
+        "description": "The nodes an entrypoint reaches in one service.",
+        "properties": {
+          "nodes": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "service": {
+            "$ref": "#/components/schemas/NodeId"
+          }
+        },
+        "required": [
+          "service",
+          "nodes"
         ],
         "type": "object"
       },
@@ -9069,30 +9217,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -9160,9 +9284,9 @@
             "description": "Error"
           }
         },
-        "summary": "Entrypoints",
+        "summary": "Entrypoints with their consumer and reach counts",
         "tags": [
-          "SRV-12"
+          "XS-20"
         ],
         "x-cartograph-kind": "read"
       }
@@ -9197,23 +9321,7 @@
           },
           {
             "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include",
+            "name": "env",
             "required": false,
             "schema": {
               "type": "string"
@@ -9227,7 +9335,7 @@
                 "schema": {
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/Entrypoint"
+                      "$ref": "#/components/schemas/EntrypointDetail"
                     },
                     "generation": {
                       "minimum": 0,
@@ -9282,9 +9390,115 @@
             "description": "Error"
           }
         },
-        "summary": "One entrypoint",
+        "summary": "One entrypoint: consumers with levels, reach by service",
         "tags": [
-          "SRV-12"
+          "XS-20"
+        ],
+        "x-cartograph-kind": "read"
+      }
+    },
+    "/api/v1/w/{ws}/entrypoints/{id}/trace": {
+      "get": {
+        "operationId": "getWsEntrypointsIdTrace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "env",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Reach"
+                    },
+                    "generation": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "schema": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "generation",
+                    "data",
+                    "next_cursor",
+                    "truncated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cartograph-Generation": {
+                "$ref": "#/components/headers/Cartograph-Generation"
+              },
+              "Cartograph-State": {
+                "$ref": "#/components/headers/Cartograph-State"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Trace on the map: the entrypoint's reach set as node ids",
+        "tags": [
+          "XS-20"
         ],
         "x-cartograph-kind": "read"
       }

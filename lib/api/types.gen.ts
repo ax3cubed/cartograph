@@ -95,7 +95,7 @@ export type FolderResult = "repo" | "scope" | "skipped";
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "EntrypointKind".
  */
-export type EntrypointKind = "http" | "event" | "job" | "cli";
+export type EntrypointKind = ("http" | "event") | "job" | "cli" | "export" | "ui";
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "ErrorCode".
@@ -448,6 +448,7 @@ export interface CartographApi {
   ConceptDecision: ConceptDecision;
   ConfigFile: ConfigFile;
   ConfigWrite: ConfigWrite;
+  Consumer: Consumer;
   Contract: Contract;
   Correction: Correction;
   CorrectionRequest: CorrectionRequest;
@@ -457,6 +458,7 @@ export interface CartographApi {
   DiscoverRequest: DiscoverRequest;
   Discovery: Discovery;
   Entrypoint: Entrypoint;
+  EntrypointDetail: EntrypointDetail;
   Environment: Environment;
   ErrorBody: ErrorBody;
   ExtractorInfo: ExtractorInfo;
@@ -489,6 +491,7 @@ export interface CartographApi {
   ProviderWrite: ProviderWrite;
   RankedNode: RankedNode;
   Reach: Reach;
+  ReachSummary: ReachSummary;
   ReadParams: ReadParams;
   Repo: Repo;
   Rule: Rule;
@@ -500,6 +503,7 @@ export interface CartographApi {
   Selection: Selection;
   ServerEvent: ServerEvent;
   Service: Service;
+  ServiceReach: ServiceReach;
   SymbolCalls: SymbolCalls;
   Thread: Thread;
   TimelineDensity: TimelineDensity;
@@ -705,6 +709,26 @@ export interface ConfigFile {
  */
 export interface ConfigWrite {
   yaml: string;
+}
+/**
+ * Who calls an entrypoint: a link into its operation or channel, or a client the manifest
+ * declares. Corrections and declared clients carry `overridden`, the view's "override" chip.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "Consumer".
+ */
+export interface Consumer {
+  level: ConfidenceLevel;
+  link?: LinkId | null;
+  /**
+   * A declared client's name: untrusted text (F8).
+   */
+  name?: string | null;
+  /**
+   * The calling file; none for a declared client.
+   */
+  node?: NodeId | null;
+  overridden: boolean;
 }
 /**
  * `lib/model.ts` Spec. Served from `…/contracts`.
@@ -957,15 +981,60 @@ export interface Service {
   tags: string[];
 }
 /**
+ * What starts work in a service (XS-20). `id` is not a node.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Entrypoint".
  */
 export interface Entrypoint {
+  /**
+   * Links into it, and declared clients.
+   */
   consumers: number;
   id: string;
   kind: EntrypointKind;
   label: string;
+  /**
+   * The file it starts in.
+   */
   node: NodeId;
+  /**
+   * Nodes it reaches ("Symbols reached"), counted on the links at the date.
+   */
+  reach: number;
+  service?: NodeId | null;
+}
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "EntrypointDetail".
+ */
+export interface EntrypointDetail {
+  consumers: Consumer[];
+  entrypoint: Entrypoint;
+  reach: ReachSummary;
+}
+/**
+ * What an entrypoint reaches over the links valid at the date, by service, biggest first.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ReachSummary".
+ */
+export interface ReachSummary {
+  nodes: number;
+  services: ServiceReach[];
+  /**
+   * A bound (64 hops, 50,000 nodes) stopped the walk.
+   */
+  truncated: boolean;
+}
+/**
+ * The nodes an entrypoint reaches in one service.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ServiceReach".
+ */
+export interface ServiceReach {
+  nodes: number;
   service: NodeId;
 }
 /**
