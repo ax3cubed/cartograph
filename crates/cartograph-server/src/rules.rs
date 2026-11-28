@@ -20,14 +20,20 @@ use crate::routes::{App, error, json, ok};
 use crate::writes::blocking;
 
 fn report(data: &Path, ws: &str) -> Result<Report, ApiError> {
-    let manifest = crate::sync::manifest_path(data, ws).ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::NotFound,
-            "no such workspace",
-            "the registry has no workspace with this id",
-            "list workspaces with GET /api/v1/workspaces",
-        )
-    })?;
+    let Some(manifest) = crate::sync::manifest_path(data, ws) else {
+        // An index nobody registered (`cartograph index`) has no manifest, so no rules.
+        let indexed = cartograph_core::paths::workspace_dir(data, ws)
+            .join("index.cartograph")
+            .is_file();
+        return indexed.then(Report::default).ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::NotFound,
+                "no such workspace",
+                "the registry has no workspace with this id",
+                "list workspaces with GET /api/v1/workspaces",
+            )
+        });
+    };
     let (w, _) = crate::sync::workspace_checked(data, ws)
         .map_err(|p| ApiError::new(ErrorCode::Unprocessable, &p.what, &p.why, &p.action))?;
     rules::report(&manifest, &w.index_path()).map_err(|(what, why, action)| {

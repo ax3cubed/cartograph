@@ -27,9 +27,14 @@ pub async fn get(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Respons
         let Ok((reg, _)) = Registry::load(&app.data_dir) else {
             return unknown();
         };
-        let Some(entry) = reg.workspaces.iter().find(|w| w.id == ws) else {
+        let entry = reg.workspaces.iter().find(|w| w.id == ws);
+        // An index nobody registered still has the built-in adapters; it has no manifest to add more.
+        let indexed = cartograph_core::paths::workspace_dir(&app.data_dir, &ws)
+            .join("index.cartograph")
+            .is_file();
+        if entry.is_none() && !indexed {
             return unknown();
-        };
+        }
         let mut out: Vec<Adapter> = AdapterSet::builtin()
             .adapters()
             .iter()
@@ -41,8 +46,10 @@ pub async fn get(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Respons
             })
             .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
-        let base = entry.manifest.parent().unwrap_or(std::path::Path::new("/"));
-        if let Ok(parsed) = manifest::read(&entry.manifest) {
+        if let Some(entry) = entry
+            && let Ok(parsed) = manifest::read(&entry.manifest)
+        {
+            let base = entry.manifest.parent().unwrap_or(std::path::Path::new("/"));
             // A folder that doesn't load is left out: its reason is `cartograph adapters list`'s.
             out.extend(parsed.manifest.adapters.iter().filter_map(|f| {
                 let d = Declared::load(base, f).ok()?;
