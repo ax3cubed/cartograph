@@ -64,7 +64,14 @@ export type SpecKind = "openapi" | "events";
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Method".
  */
-export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "EVENT";
+export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | "EVENT";
+/**
+ * Whether the code agrees with the spec about an operation (XS-08 drift).
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "OperationStatus".
+ */
+export type OperationStatus = "sync" | "spec-only";
 /**
  * H3's four verbs (ruling R6).
  *
@@ -706,14 +713,33 @@ export interface ConfigWrite {
  * via the `definition` "Contract".
  */
 export interface Contract {
+  counts: ContractCounts;
   file: string;
   id: string;
   kind: SpecKind;
   name: string;
   operations: Operation[];
   service: NodeId;
+  /**
+   * The service's undocumented routes, on its first spec.
+   */
+  undocumented: UndocumentedRoute[];
 }
 /**
+ * The four counts of the Contracts view.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ContractCounts".
+ */
+export interface ContractCounts {
+  operations: number;
+  spec_only: number;
+  sync: number;
+  undocumented: number;
+}
+/**
+ * An operation of a spec. `id` is `o<row>`, not a node.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Operation".
  */
@@ -722,7 +748,16 @@ export interface Operation {
   handler?: NodeId | null;
   id: NodeId;
   method: Method;
+  operation_id?: string | null;
+  /**
+   * With the spec's base path, as the spec writes it: `/v1/orders/{id}`.
+   */
   path: string;
+  status: OperationStatus;
+  /**
+   * From the spec: untrusted text (F8), at most 200 characters.
+   */
+  summary?: string | null;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -731,6 +766,23 @@ export interface Operation {
 export interface Caller {
   confidence: Confidence;
   node: NodeId;
+}
+/**
+ * A route of a service that has a spec, which no spec lists.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "UndocumentedRoute".
+ */
+export interface UndocumentedRoute {
+  /**
+   * The file that serves it.
+   */
+  handler: NodeId;
+  method: Method;
+  /**
+   * The route's template: `/orders/{}`.
+   */
+  path: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema

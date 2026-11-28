@@ -653,6 +653,9 @@
       "Contract": {
         "description": "`lib/model.ts` Spec. Served from `…/contracts`.",
         "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/ContractCounts"
+          },
           "file": {
             "type": "string"
           },
@@ -673,6 +676,13 @@
           },
           "service": {
             "$ref": "#/components/schemas/NodeId"
+          },
+          "undocumented": {
+            "description": "The service's undocumented routes, on its first spec.",
+            "items": {
+              "$ref": "#/components/schemas/UndocumentedRoute"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -681,7 +691,41 @@
           "file",
           "kind",
           "service",
-          "operations"
+          "operations",
+          "undocumented",
+          "counts"
+        ],
+        "type": "object"
+      },
+      "ContractCounts": {
+        "description": "The four counts of the Contracts view.",
+        "properties": {
+          "operations": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "spec_only": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sync": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "undocumented": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operations",
+          "sync",
+          "spec_only",
+          "undocumented"
         ],
         "type": "object"
       },
@@ -2299,6 +2343,9 @@
           "PUT",
           "PATCH",
           "DELETE",
+          "OPTIONS",
+          "HEAD",
+          "TRACE",
           "EVENT"
         ],
         "type": "string"
@@ -2544,6 +2591,7 @@
         "type": "string"
       },
       "Operation": {
+        "description": "An operation of a spec. `id` is `o<row>`, not a node.",
         "properties": {
           "callers": {
             "items": {
@@ -2567,17 +2615,50 @@
           "method": {
             "$ref": "#/components/schemas/Method"
           },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "path": {
+            "description": "With the spec's base path, as the spec writes it: `/v1/orders/{id}`.",
             "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OperationStatus"
+          },
+          "summary": {
+            "description": "From the spec: untrusted text (F8), at most 200 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id",
           "method",
           "path",
+          "status",
           "callers"
         ],
         "type": "object"
+      },
+      "OperationStatus": {
+        "description": "Whether the code agrees with the spec about an operation (XS-08 drift).",
+        "oneOf": [
+          {
+            "const": "sync",
+            "description": "A parsed route serves it.",
+            "type": "string"
+          },
+          {
+            "const": "spec-only",
+            "description": "The spec lists it and no route serves it.",
+            "type": "string"
+          }
+        ]
       },
       "Owner": {
         "properties": {
@@ -4134,6 +4215,28 @@
           "budget_tokens",
           "blocks",
           "system_prompt"
+        ],
+        "type": "object"
+      },
+      "UndocumentedRoute": {
+        "description": "A route of a service that has a spec, which no spec lists.",
+        "properties": {
+          "handler": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The file that serves it."
+          },
+          "method": {
+            "$ref": "#/components/schemas/Method"
+          },
+          "path": {
+            "description": "The route's template: `/orders/{}`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "path",
+          "handler"
         ],
         "type": "object"
       },

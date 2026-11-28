@@ -634,6 +634,9 @@
     "Contract": {
       "description": "`lib/model.ts` Spec. Served from `…/contracts`.",
       "properties": {
+        "counts": {
+          "$ref": "#/definitions/ContractCounts"
+        },
         "file": {
           "type": "string"
         },
@@ -654,6 +657,13 @@
         },
         "service": {
           "$ref": "#/definitions/NodeId"
+        },
+        "undocumented": {
+          "description": "The service's undocumented routes, on its first spec.",
+          "items": {
+            "$ref": "#/definitions/UndocumentedRoute"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -662,7 +672,41 @@
         "file",
         "kind",
         "service",
-        "operations"
+        "operations",
+        "undocumented",
+        "counts"
+      ],
+      "type": "object"
+    },
+    "ContractCounts": {
+      "description": "The four counts of the Contracts view.",
+      "properties": {
+        "operations": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spec_only": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sync": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "undocumented": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operations",
+        "sync",
+        "spec_only",
+        "undocumented"
       ],
       "type": "object"
     },
@@ -2369,6 +2413,9 @@
         "PUT",
         "PATCH",
         "DELETE",
+        "OPTIONS",
+        "HEAD",
+        "TRACE",
         "EVENT"
       ],
       "type": "string"
@@ -2614,6 +2661,7 @@
       "type": "string"
     },
     "Operation": {
+      "description": "An operation of a spec. `id` is `o<row>`, not a node.",
       "properties": {
         "callers": {
           "items": {
@@ -2637,17 +2685,50 @@
         "method": {
           "$ref": "#/definitions/Method"
         },
+        "operation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
+          "description": "With the spec's base path, as the spec writes it: `/v1/orders/{id}`.",
           "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/OperationStatus"
+        },
+        "summary": {
+          "description": "From the spec: untrusted text (F8), at most 200 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "id",
         "method",
         "path",
+        "status",
         "callers"
       ],
       "type": "object"
+    },
+    "OperationStatus": {
+      "description": "Whether the code agrees with the spec about an operation (XS-08 drift).",
+      "oneOf": [
+        {
+          "const": "sync",
+          "description": "A parsed route serves it.",
+          "type": "string"
+        },
+        {
+          "const": "spec-only",
+          "description": "The spec lists it and no route serves it.",
+          "type": "string"
+        }
+      ]
     },
     "Owner": {
       "properties": {
@@ -4242,6 +4323,32 @@
         "budget_tokens",
         "blocks",
         "system_prompt"
+      ],
+      "type": "object"
+    },
+    "UndocumentedRoute": {
+      "description": "A route of a service that has a spec, which no spec lists.",
+      "properties": {
+        "handler": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            }
+          ],
+          "description": "The file that serves it."
+        },
+        "method": {
+          "$ref": "#/definitions/Method"
+        },
+        "path": {
+          "description": "The route's template: `/orders/{}`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "path",
+        "handler"
       ],
       "type": "object"
     },

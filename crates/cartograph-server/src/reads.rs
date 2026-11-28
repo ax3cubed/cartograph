@@ -53,6 +53,7 @@ pub(crate) fn router() -> Router<Arc<App>> {
         .route("/api/v1/w/{ws}/extractors", get(extractors))
         .route("/api/v1/w/{ws}/services", get(services))
         .route("/api/v1/w/{ws}/owners", get(owners))
+        .route("/api/v1/w/{ws}/contracts", get(contracts))
         .route("/api/v1/mcp/tools", get(mcp_tools))
         .route("/api/v1/agents", get(agents))
         .route(
@@ -645,6 +646,19 @@ async fn extractors(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Resp
 
 async fn services(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
     read(app, ws, |s| s.services()).await
+}
+
+/// The Contracts view (XS-08): specs, their operations and the drift between spec and code.
+async fn contracts(
+    State(app): State<Arc<App>>,
+    Path(ws): Path<String>,
+    q: Result<Query<ReadParams>, QueryRejection>,
+) -> Response {
+    let at = match params(q).and_then(|p| at(p.at.as_deref())) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| s.contracts(&at)).await
 }
 
 /// Owners from CODEOWNERS (XS-23): who owns how many files now.

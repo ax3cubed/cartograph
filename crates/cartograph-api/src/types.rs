@@ -755,6 +755,9 @@ pub enum Method {
     Put,
     Patch,
     Delete,
+    Options,
+    Head,
+    Trace,
     Event,
 }
 
@@ -764,13 +767,48 @@ pub struct Caller {
     pub confidence: Confidence,
 }
 
+/// Whether the code agrees with the spec about an operation (XS-08 drift).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum OperationStatus {
+    /// A parsed route serves it.
+    Sync,
+    /// The spec lists it and no route serves it.
+    SpecOnly,
+}
+
+/// An operation of a spec. `id` is `o<row>`, not a node.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Operation {
     pub id: NodeId,
     pub method: Method,
+    /// With the spec's base path, as the spec writes it: `/v1/orders/{id}`.
     pub path: String,
+    pub operation_id: Option<String>,
+    /// From the spec: untrusted text (F8), at most 200 characters.
+    pub summary: Option<String>,
+    pub status: OperationStatus,
     pub handler: Option<NodeId>,
     pub callers: Vec<Caller>,
+}
+
+/// A route of a service that has a spec, which no spec lists.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UndocumentedRoute {
+    pub method: Method,
+    /// The route's template: `/orders/{}`.
+    pub path: String,
+    /// The file that serves it.
+    pub handler: NodeId,
+}
+
+/// The four counts of the Contracts view.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ContractCounts {
+    pub operations: u32,
+    pub sync: u32,
+    pub spec_only: u32,
+    pub undocumented: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -789,6 +827,9 @@ pub struct Contract {
     pub kind: SpecKind,
     pub service: NodeId,
     pub operations: Vec<Operation>,
+    /// The service's undocumented routes, on its first spec.
+    pub undocumented: Vec<UndocumentedRoute>,
+    pub counts: ContractCounts,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]

@@ -710,9 +710,13 @@ impl Snapshot<'_> {
             opened: self.commit(e.from)?,
             closed: (e.to != NONE).then(|| self.commit(e.to)).transpose()?,
             link,
-            // ponytail: no precedence layers exist yet (XS-08 onwards), so an HTTP link has no
-            // layer to name; imports are parsed from the source.
-            layer: (!http).then_some(Layer::Base),
+            // The contract layer outranks what the code says (parsed < contract); config and
+            // corrections are not built yet, so a parsed HTTP link names no layer.
+            layer: if http {
+                (!evidence.contract.is_empty()).then_some(Layer::Contract)
+            } else {
+                Some(Layer::Base)
+            },
             interval: Interval {
                 from_seq: u64::from(e.from),
                 to_seq: (e.to != NONE).then_some(u64::from(e.to)),
@@ -762,7 +766,9 @@ impl Snapshot<'_> {
                 snippet: blob
                     .and_then(|b| repos.snippet(&r.get::<_, String>(8).ok()?, &b, line, end_line)),
             };
-            if caller {
+            if site.kind == "contract" {
+                out.contract.push(site);
+            } else if caller {
                 // The call site names the operation; the first one wins.
                 operation = operation.or(r.get(5)?);
                 out.caller.push(site);
@@ -770,7 +776,6 @@ impl Snapshot<'_> {
                 out.handler.push(site);
             }
         }
-        // Contract rows wait for contracts (XS-08): until then `contract` stays empty.
         let operation = operation.and_then(|o| {
             let (method, template) = o.split_once(' ')?;
             Some(LinkOperation {
