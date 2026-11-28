@@ -1,0 +1,13 @@
+---
+source: crates/cartograph-index/tests/corrections.rs
+expression: d.diff
+---
+--- /dev/null
++++ b/cartograph.overrides.yaml
+@@ -0,0 +1,6 @@
++version: 1
++corrections:
++  - action: set
++    key: {kind: http, from: "web:web/src/api.ts", to: "orders:orders/src/server.ts", op: "GET /orders/{id}"}
++    confidence: exact
++    reason: "the contract says so"

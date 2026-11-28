@@ -105,6 +105,7 @@ pub fn workspace_checked(data: &Path, ws: &str) -> Result<(Workspace, Vec<String
                 })
                 .collect(),
             default_environment: parsed.manifest.default_environment.clone(),
+            overrides: Some(base.join(cartograph_discovery::overrides::FILE_NAME)),
         },
         not_added,
     ))

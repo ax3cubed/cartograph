@@ -1,0 +1,11 @@
+---
+source: crates/cartograph-index/tests/corrections.rs
+expression: "format!(\"{}\\n--\\n{}\", e.links().join(\"\\n\"), statuses(&e).join(\"\\n\"))"
+---
+web/src/api.ts -> orders/src/server.ts exact 0.95 correction [0-open] was likely 0.89
+web/src/other.ts -> orders/src/legacy.ts guessed 0.45 correction [0-open] was likely 0.89
+--
+3:set web:web/src/api.ts -> orders:orders/src/server.ts GET /orders/{id} bound links=1
+7:retarget web -> orders GET /legacy bound links=1
+11:add web:web/src/other.ts -> orders:orders/src/legacy.ts bound links=1
+15:remove web:web/src/api.ts -> orders GET /nothing stale links=0

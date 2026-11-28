@@ -303,6 +303,15 @@ impl Snapshot<'_> {
 
     /// Calls `each(src, dst, from_seq, to_seq, link, kind, score)` for every live link at `seq`
     /// the filters keep.
+    /// The links a correction changed (XS-12): the few rows of `correction_base`.
+    fn corrected(&self) -> Result<std::collections::HashSet<i64>, QueryError> {
+        Ok(self
+            .conn()
+            .prepare_cached("SELECT link FROM correction_base")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
     fn live_links(
         &self,
         q: &GraphQuery,
@@ -407,6 +416,7 @@ impl Snapshot<'_> {
 
         let mut links = empty_links();
         let n = nodes.id.len();
+        let corrected = self.corrected()?;
         self.live_links(q, seq, |src, dst, from_seq, to_seq, id, kind, score| {
             let (Some(&from), Some(&to)) = (index.get(&src), index.get(&dst)) else {
                 // With repo=, a link into another repo has its other end outside the slice.
@@ -435,7 +445,7 @@ impl Snapshot<'_> {
             links.kind.push(kind);
             links.level.push(level(score));
             links.score.push(score);
-            links.corrected.push(false);
+            links.corrected.push(corrected.contains(&id));
             links.weight.push(1);
             links.added_seq.push(from_seq as u64);
             links.removed_seq.push(to_seq.unwrap_or(-1));
@@ -590,7 +600,8 @@ impl Snapshot<'_> {
                 .and_then(|i| slot.get(i))
                 .filter(|i| **i != u32::MAX)
         };
-        self.live_links(q, seq, |src, dst, from_seq, _, _, kind, score| {
+        let corrected = self.corrected()?;
+        self.live_links(q, seq, |src, dst, from_seq, _, id, kind, score| {
             let (Some(a), Some(b)) = (slot_of(src), slot_of(dst)) else {
                 return Ok(());
             };
@@ -598,6 +609,7 @@ impl Snapshot<'_> {
                 return Ok(());
             }
             if let Some(&j) = pair.get(&(*a, *b)) {
+                links.corrected[j] |= corrected.contains(&id);
                 links.weight[j] += 1;
                 links.added_seq[j] = links.added_seq[j].min(from_seq as u64);
                 return Ok(());
@@ -613,7 +625,7 @@ impl Snapshot<'_> {
             links.kind.push(kind);
             links.level.push(level(score));
             links.score.push(score);
-            links.corrected.push(false);
+            links.corrected.push(corrected.contains(&id));
             links.weight.push(1);
             links.added_seq.push(from_seq as u64);
             links.removed_seq.push(-1);

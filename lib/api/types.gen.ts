@@ -1121,7 +1121,7 @@ export interface GraphSlice {
 export interface LinkColumns {
   added_seq: number[];
   /**
-   * A correction decides this link (FE-14/XS-12); false until those exist.
+   * A correction in `cartograph.overrides.yaml` decides this link (XS-12).
    */
   corrected: boolean[];
   from: number[];
@@ -1300,12 +1300,19 @@ export interface LinkChange {
  * via the `definition` "LinkDetail".
  */
 export interface LinkDetail {
+  /**
+   * What the passes found, when a correction changed this link (`layer` is `correction`).
+   */
+  base?: LinkBase | null;
   closed?: Commit | null;
   /**
    * How `env` resolves the call, in order: the key the call site reads, the value it has there
    * and the host that value names.
    */
   config: LinkConfig[];
+  /**
+   * The entry of `cartograph.overrides.yaml` that decided this link, `c<position>-<fingerprint>`.
+   */
   correction_id?: string | null;
   /**
    * The environment `config` is for (`?env=`, else the default); null when the link doesn't
@@ -1338,6 +1345,20 @@ export interface LinkDetail {
    * A link between the same two services that closed in the commit this one opened.
    */
   replaced?: LinkId | null;
+}
+/**
+ * A link's values before a correction (XS-12), for the inspector and for undo.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "LinkBase".
+ */
+export interface LinkBase {
+  level: ConfidenceLevel;
+  score: number;
+  /**
+   * The far end the passes found; null when it is unchanged.
+   */
+  to?: NodeId | null;
 }
 /**
  * One step of the chain from a call site to a service: key, value, host (XS-09).

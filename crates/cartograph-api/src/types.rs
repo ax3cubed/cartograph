@@ -444,7 +444,7 @@ pub struct LinkColumns {
     pub kind: Vec<LinkKind>,
     pub level: Vec<ConfidenceLevel>,
     pub score: Vec<f32>,
-    /// A correction decides this link (FE-14/XS-12); false until those exist.
+    /// A correction in `cartograph.overrides.yaml` decides this link (XS-12).
     pub corrected: Vec<bool>,
     /// How many file-level links this aggregated link stands for.
     pub weight: Vec<u32>,
@@ -502,6 +502,8 @@ pub struct LinkDetail {
     pub link: Link,
     /// The layer whose answer the map shows. Null until precedence layers exist (XS-08 onwards).
     pub layer: Option<Layer>,
+    /// What the passes found, when a correction changed this link (`layer` is `correction`).
+    pub base: Option<LinkBase>,
     pub interval: Interval,
     /// The commit that opened the link, and the one that closed it (null while live).
     pub opened: Commit,
@@ -512,6 +514,7 @@ pub struct LinkDetail {
     pub evidence: EvidenceGroups,
     /// A link between the same two services that closed in the commit this one opened.
     pub replaced: Option<LinkId>,
+    /// The entry of `cartograph.overrides.yaml` that decided this link, `c<position>-<fingerprint>`.
     pub correction_id: Option<String>,
     /// The environment `config` is for (`?env=`, else the default); null when the link doesn't
     /// depend on one (XS-09).
@@ -521,6 +524,15 @@ pub struct LinkDetail {
     /// How `env` resolves the call, in order: the key the call site reads, the value it has there
     /// and the host that value names.
     pub config: Vec<LinkConfig>,
+}
+
+/// A link's values before a correction (XS-12), for the inspector and for undo.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkBase {
+    pub level: ConfidenceLevel,
+    pub score: f32,
+    /// The far end the passes found; null when it is unchanged.
+    pub to: Option<NodeId>,
 }
 
 /// One step of the chain from a call site to a service: key, value, host (XS-09).

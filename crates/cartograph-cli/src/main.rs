@@ -6,6 +6,7 @@
 
 mod agents;
 mod app;
+mod check;
 mod doctor;
 mod hooks;
 mod init;
@@ -459,6 +460,7 @@ fn run(cli: Cli, out: &Out, name: &str) -> Result<(), Report> {
             },
             g.yes,
         )?,
+        Command::Check { dir } => check::run(out, &named(&g, dir.or_cwd()))?,
         Command::Doctor { dir, fix } => doctor::run(out, &named(&g, dir.or_cwd()), fix)?,
         _ => return Err(not_built(name)),
     }

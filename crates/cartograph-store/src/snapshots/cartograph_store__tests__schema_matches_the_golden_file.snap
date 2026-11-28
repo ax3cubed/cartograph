@@ -82,6 +82,39 @@ CREATE TABLE contract_version (
   summary TEXT NOT NULL,
   PRIMARY KEY (contract, n)
 ) STRICT, WITHOUT ROWID;
+CREATE TABLE correction (
+  id INTEGER PRIMARY KEY,
+  line INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  src INTEGER,
+  dst INTEGER,
+  new_dst INTEGER,
+  confidence TEXT,
+  reason TEXT NOT NULL,
+  anchor_seq INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  links INTEGER NOT NULL,
+  by TEXT,
+  at INTEGER,
+  -- The entry's content hash (Entry::fingerprint): with id, the entry's id in the API.
+  fingerprint TEXT NOT NULL
+) STRICT;
+CREATE TABLE correction_base (
+  id INTEGER PRIMARY KEY,
+  link INTEGER NOT NULL UNIQUE REFERENCES link (id),
+  correction INTEGER NOT NULL REFERENCES correction (id),
+  added INTEGER NOT NULL,
+  dst INTEGER NOT NULL,
+  level TEXT,
+  score REAL
+) STRICT;
+CREATE TABLE correction_interval (
+  link INTEGER NOT NULL REFERENCES link (id),
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
 CREATE TABLE derived (
   kind TEXT NOT NULL,
   scope TEXT NOT NULL,
@@ -176,6 +209,11 @@ CREATE TABLE link (
   -- when it doesn't depend on one.
   envs INTEGER,
   -- XS-09 config (end)
+  -- XS-12 corrections (begin): NULL for what the passes found, 'correction' when an entry of the
+  -- overrides file decided it (level, score and dst are then the corrected values; the base ones
+  -- are in correction_base).
+  layer TEXT,
+  -- XS-12 corrections (end)
   UNIQUE (kind, src, dst)
 ) STRICT;
 CREATE TABLE link_config (
@@ -313,6 +351,7 @@ CREATE INDEX commits_time ON commits (corrected_time);
 CREATE INDEX config_value_key ON config_value (key, valid_from);
 CREATE UNIQUE INDEX contract_file ON contract (file);
 CREATE INDEX contract_schema_contract ON contract_schema (contract);
+CREATE INDEX correction_interval_link ON correction_interval (link);
 CREATE INDEX evidence_file ON evidence (file);
 CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX fact_extractor ON fact (extractor);
@@ -326,6 +365,7 @@ CREATE INDEX interval_at ON interval (from_seq, to_seq, link);
 CREATE INDEX interval_link ON interval (link);
 CREATE INDEX layout_node ON layout (node, from_seq);
 CREATE INDEX link_config_link ON link_config (link);
+CREATE INDEX link_dst ON link (dst) WHERE kind = 'http';
 CREATE INDEX node_file ON node (file);
 CREATE UNIQUE INDEX node_key ON node (key);
 CREATE INDEX node_parent ON node (parent);

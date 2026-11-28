@@ -160,6 +160,10 @@ pub fn run(out: &Out, dir: &Path, no_index: bool, g: &Global) -> Result<(), Repo
                 })
                 .collect(),
             default_environment: plan.manifest.default_environment.clone(),
+            overrides: plan
+                .manifest_path
+                .parent()
+                .map(|d| d.join(cartograph_discovery::overrides::FILE_NAME)),
         };
         let cache_path = paths::facts_cache(&data);
         let mut cache = FactCache::open(&cache_path).map_err(|e| Report {

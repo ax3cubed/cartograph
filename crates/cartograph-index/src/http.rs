@@ -1264,6 +1264,7 @@ pub(crate) fn refresh(conn: &Connection, config: Option<&str>) -> rusqlite::Resu
 
     conn.execute_batch(
         "DELETE FROM link_config;
+         DELETE FROM correction_interval; DELETE FROM correction_base;
          DELETE FROM evidence WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM interval WHERE link IN (SELECT id FROM link WHERE kind = 'http');
          DELETE FROM link WHERE kind = 'http';

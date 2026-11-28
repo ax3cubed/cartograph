@@ -140,8 +140,14 @@ CREATE TABLE link (
   -- when it doesn't depend on one.
   envs INTEGER,
   -- XS-09 config (end)
+  -- XS-12 corrections (begin): NULL for what the passes found, 'correction' when an entry of the
+  -- overrides file decided it (level, score and dst are then the corrected values; the base ones
+  -- are in correction_base).
+  layer TEXT,
+  -- XS-12 corrections (end)
   UNIQUE (kind, src, dst)
 ) STRICT;
+CREATE INDEX link_dst ON link (dst) WHERE kind = 'http';
 
 -- A link is live at step s when from_seq <= s AND (to_seq IS NULL OR to_seq > s).
 CREATE TABLE interval (
@@ -452,3 +458,49 @@ CREATE TABLE blob_ref (
   payload BLOB NOT NULL
 ) STRICT, WITHOUT ROWID;
 -- XS-11 generated clients (end)
+
+-- XS-12 corrections (begin): the entries of cartograph.overrides.yaml and what each did. The index
+-- is a cache of the file: apply rebuilds all three tables when the file's hash, or the links it
+-- was applied to, change. id is the entry's position; src and dst are the nodes the ends of its
+-- key bound to (a file lineage's node follows renames; NULL when an end is a whole service, binds
+-- to several nodes or none); status is bound, stale (nothing live at the tip) or ambiguous; by and
+-- at are the blame of the entry's first line, anchor_seq the step of the commit that added it (the
+-- tip when it is not committed). key, reason and by are untrusted text (F8).
+CREATE TABLE correction (
+  id INTEGER PRIMARY KEY,
+  line INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  src INTEGER,
+  dst INTEGER,
+  new_dst INTEGER,
+  confidence TEXT,
+  reason TEXT NOT NULL,
+  anchor_seq INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  links INTEGER NOT NULL,
+  by TEXT,
+  at INTEGER,
+  -- The entry's content hash (Entry::fingerprint): with id, the entry's id in the API.
+  fingerprint TEXT NOT NULL
+) STRICT;
+-- The base values of each link a correction changed, in the order they were changed (id), so
+-- undo is the reverse; an added link has no base and is deleted on undo.
+CREATE TABLE correction_base (
+  id INTEGER PRIMARY KEY,
+  link INTEGER NOT NULL UNIQUE REFERENCES link (id),
+  correction INTEGER NOT NULL REFERENCES correction (id),
+  added INTEGER NOT NULL,
+  dst INTEGER NOT NULL,
+  level TEXT,
+  score REAL
+) STRICT;
+-- The intervals of a link a correction removed.
+CREATE TABLE correction_interval (
+  link INTEGER NOT NULL REFERENCES link (id),
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX correction_interval_link ON correction_interval (link);
+-- XS-12 corrections (end)

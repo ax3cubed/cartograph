@@ -181,7 +181,7 @@ jobs:
       - name: Gates
         env:
           CARTOGRAPH_PERF_CSV: ${{ github.workspace }}/perf.csv
-        run: cargo nextest run --locked --cargo-profile perf -p cartograph-fixtures -p cartograph-cli -E 'test(/^perf_/)' --no-tests=warn
+        run: cargo nextest run --locked --cargo-profile perf -p cartograph-fixtures -p cartograph-cli -p cartograph-index -E 'test(/^perf_/)' --no-tests=warn
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

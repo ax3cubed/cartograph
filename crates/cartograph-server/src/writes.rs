@@ -1,5 +1,5 @@
 //! SRV-14, this phase's routes: preferences, the folder picker, discovery, adding a workspace, and
-//! the workspace's `cartograph.yaml`. Corrections land with XS-13 and indexing settings later.
+//! the workspace's `cartograph.yaml`. Corrections are in `corrections.rs`; indexing settings come later.
 //!
 //! The guard has already checked Host, Origin, the token and, for a write, `Content-Type:
 //! application/json`. Every body is parsed against a closed schema (unknown fields are refused).
@@ -29,7 +29,7 @@ fn bad(code: ErrorCode, what: &str, why: &str, action: &str) -> Response {
 }
 
 /// Runs `f` on the blocking pool; a panic becomes a plain 500.
-async fn blocking<F>(f: F) -> Response
+pub(crate) async fn blocking<F>(f: F) -> Response
 where
     F: FnOnce() -> Response + Send + 'static,
 {

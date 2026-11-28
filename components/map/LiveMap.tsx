@@ -16,6 +16,7 @@ import EmptyState from "../shell/EmptyState";
 import Timeline, { DAY, type Tick } from "../timeline/Timeline";
 import { nearest } from "../timeline/bins";
 import TableView from "./TableView";
+import CorrectionList from "./CorrectionList";
 import Details from "./Details";
 import { compare, hasLayout, layout as levelLayout, owners, placed, rollUp, type Compared, type DiffState, type Level } from "./levels";
 import { degrees, linked, sayFile, sayFolder, shown, topFolder } from "./table";
@@ -455,6 +456,7 @@ function LiveMap() {
               </div>
             )}
             {trace && <button type="button" className="lm-chip is-acc" onClick={() => setTrace(null)}>Tracing {nameOf(trace.id).split("/").pop()} · {trace.nodes.size} reached<X size={13} aria-label="Clear trace" /></button>}
+            {ws && <CorrectionList ws={ws} />}
             {gl && <span className="lm-chip">{NOUN[glLevel].one[0].toUpperCase() + NOUN[glLevel].one.slice(1)} level</span>}
             <span id="lm-at-note" className="lm-note" aria-live="polite">
               {s && !g.error ? <>{counts}{cmp ? <> · comparing {earlier} with {later}</> : s.at && <> · at commit <code>{s.at.sha.slice(0, 7)}</code></>}</> : null}
