@@ -2066,6 +2066,34 @@
       ],
       "type": "object"
     },
+    "LinkBase": {
+      "description": "A link's values before a correction (XS-12), for the inspector and for undo.",
+      "properties": {
+        "level": {
+          "$ref": "#/definitions/ConfidenceLevel"
+        },
+        "score": {
+          "format": "float",
+          "type": "number"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The far end the passes found; null when it is unchanged."
+        }
+      },
+      "required": [
+        "level",
+        "score"
+      ],
+      "type": "object"
+    },
     "LinkChange": {
       "description": "One row of `…/nodes/{id}/changes`: a commit that added or removed a link touching the scope.",
       "properties": {
@@ -2097,7 +2125,7 @@
           "type": "array"
         },
         "corrected": {
-          "description": "A correction decides this link (FE-14/XS-12); false until those exist.",
+          "description": "A correction in `cartograph.overrides.yaml` decides this link (XS-12).",
           "items": {
             "type": "boolean"
           },
@@ -2206,6 +2234,17 @@
     },
     "LinkDetail": {
       "properties": {
+        "base": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LinkBase"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the passes found, when a correction changed this link (`layer` is `correction`)."
+        },
         "closed": {
           "anyOf": [
             {
@@ -2224,6 +2263,7 @@
           "type": "array"
         },
         "correction_id": {
+          "description": "The entry of `cartograph.overrides.yaml` that decided this link, `c<position>`.",
           "type": [
             "string",
             "null"

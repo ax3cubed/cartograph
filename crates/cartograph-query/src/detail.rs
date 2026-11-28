@@ -9,8 +9,9 @@ use std::collections::{BTreeSet, HashMap};
 
 use cartograph_api::types::{
     Change, Commit, CommitRef, Confidence, ConfidenceLevel, DensityBin, Evidence, EvidenceGroups,
-    EvidenceKind, EvidenceSite, Interval, Lang, Layer, Lineage, LineageVia, Link, LinkChange,
-    LinkDetail, LinkKind, LinkOperation, Metrics, Node, NodeDetail, NodeKind, RankedNode,
+    EvidenceKind, EvidenceSite, Interval, Lang, Layer, Lineage, LineageVia, Link, LinkBase,
+    LinkChange, LinkDetail, LinkKind, LinkOperation, Metrics, Node, NodeDetail, NodeKind,
+    RankedNode,
 };
 use cartograph_core::{LinkId, NodeId};
 use cartograph_store::rusqlite::{self, OptionalExtension};
@@ -735,17 +736,45 @@ impl Snapshot<'_> {
             })
             .flatten()
             .map(|x| LinkId(link_id(x.link)));
+        // A correction (XS-12) decides over every other layer, and keeps what it replaced.
+        let corrected: Option<(i64, Option<(f64, i64)>)> = self
+            .conn()
+            .prepare_cached(
+                "SELECT b.correction, b.added, b.score, b.dst FROM link l
+                 JOIN correction_base b ON b.link = l.id WHERE l.id = ?1 AND l.layer = 'correction'",
+            )?
+            .query_row([row], |r| {
+                let added: bool = r.get(1)?;
+                let base = if added {
+                    None
+                } else {
+                    Some((r.get::<_, Option<f64>>(2)?.unwrap_or(0.0), r.get(3)?))
+                };
+                Ok((r.get(0)?, base))
+            })
+            .optional()?;
+        let base = corrected
+            .as_ref()
+            .and_then(|(_, b)| *b)
+            .map(|(score, dst)| LinkBase {
+                level: level(score as f32),
+                score: score as f32,
+                to: (dst != g.row[e.dst as usize]).then(|| NodeId(node_id(dst))),
+            });
         Ok(LinkDetail {
             opened: self.commit(e.from)?,
             closed: (e.to != NONE).then(|| self.commit(e.to)).transpose()?,
             link,
-            // The contract layer outranks what the code says (parsed < contract); config and
-            // corrections are not built yet, so a parsed HTTP link names no layer.
-            layer: if http {
+            // The contract layer outranks what the code says (parsed < contract); config names
+            // no layer yet, and a parsed HTTP link none either.
+            layer: if corrected.is_some() {
+                Some(Layer::Correction)
+            } else if http {
                 (!evidence.contract.is_empty()).then_some(Layer::Contract)
             } else {
                 Some(Layer::Base)
             },
+            base,
             interval: Interval {
                 from_seq: u64::from(e.from),
                 to_seq: (e.to != NONE).then_some(u64::from(e.to)),
@@ -753,7 +782,7 @@ impl Snapshot<'_> {
             operation,
             evidence,
             replaced,
-            correction_id: None,
+            correction_id: corrected.map(|(id, _)| format!("c{id}")),
             env: resolved.env,
             envs: resolved.envs,
             config: resolved.config,
