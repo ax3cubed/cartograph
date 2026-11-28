@@ -104,7 +104,14 @@ pub fn canonical(c: &Contract) -> Vec<u8> {
     let mut ids: Vec<String> = c
         .operations
         .iter()
-        .filter_map(|o| Some(format!("id {} {} {}\n", o.method, o.path, o.operation_id.as_ref()?)))
+        .filter_map(|o| {
+            Some(format!(
+                "id {} {} {}\n",
+                o.method,
+                o.path,
+                o.operation_id.as_ref()?
+            ))
+        })
         .collect();
     ids.sort();
     out += &ids.concat();
@@ -174,7 +181,12 @@ pub fn diff(old: &Contract, new: &Contract) -> Vec<Change> {
                 } else {
                     (ChangeKind::FieldOptional, "optional")
                 };
-                push(kind, &subject, now.required, format!("Made {subject} {word}"));
+                push(
+                    kind,
+                    &subject,
+                    now.required,
+                    format!("Made {subject} {word}"),
+                );
             }
             if was.ty == now.ty {
                 continue;
@@ -295,7 +307,11 @@ mod tests {
         let cases: Vec<(Contract, Vec<&str>)> = vec![
             (
                 spec(
-                    &[("get", "/orders"), ("delete", "/orders/{id}"), ("post", "/orders")],
+                    &[
+                        ("get", "/orders"),
+                        ("delete", "/orders/{id}"),
+                        ("post", "/orders"),
+                    ],
                     same.clone(),
                 ),
                 vec!["Added POST /orders"],
@@ -355,6 +371,38 @@ mod tests {
         b.operations[0].line = 99;
         assert!(diff(&a, &b).is_empty());
         assert_eq!(canonical(&a), canonical(&b));
+    }
+
+    #[test]
+    fn two_500_operation_specs_diff_within_50_ms() {
+        let build = |skew: usize| {
+            let paths: Vec<(String, String)> = (0..500 + skew)
+                .map(|i| ("get".to_owned(), format!("/r{}/{{id}}", i + skew)))
+                .collect();
+            let mut c = spec(
+                &[],
+                (0..40)
+                    .map(|i| field(&format!("f{i}"), "string", i % 2 == 0))
+                    .collect(),
+            );
+            c.operations = paths.iter().map(|(m, p)| op(m, p)).collect();
+            c.schemas = (0..300)
+                .map(|i| Schema {
+                    name: format!("S{i}"),
+                    fields: (0..10)
+                        .map(|j| field(&format!("f{j}"), "string{a,b}", j % 2 == 0))
+                        .collect(),
+                })
+                .collect();
+            c
+        };
+        let (a, b) = (build(0), build(5));
+        let t = std::time::Instant::now();
+        let n = diff(&a, &b).len();
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        eprintln!("diff of two 500-operation specs: {n} changes in {ms:.2} ms");
+        assert!(n > 0);
+        assert!(ms < if cfg!(debug_assertions) { 500.0 } else { 50.0 });
     }
 
     proptest! {
