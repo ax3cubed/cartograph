@@ -79,6 +79,8 @@ pub struct Workspace {
     pub environments: Vec<crate::config::EnvSpec>,
     /// The manifest's `default_environment`.
     pub default_environment: Option<String>,
+    /// `cartograph.overrides.yaml` beside the manifest (XS-12), when there is a manifest.
+    pub overrides: Option<PathBuf>,
 }
 
 impl Workspace {
@@ -455,6 +457,7 @@ pub fn restructure(ws: &Workspace, repo: &str) -> Result<DerivedStats, SyncError
         environments: &ws.environments,
         default_environment: ws.default_environment.as_deref(),
         exclude: &ws.exclude,
+        overrides: ws.overrides.as_deref(),
         config_hash: ws.config_hash.as_deref(),
         ..Default::default()
     };
@@ -1076,6 +1079,7 @@ fn round_on(
         environments: &ws.environments,
         default_environment: ws.default_environment.as_deref(),
         exclude: &ws.exclude,
+        overrides: ws.overrides.as_deref(),
         config_hash: ws.config_hash.as_deref(),
         moved,
         carried: carried.take(),

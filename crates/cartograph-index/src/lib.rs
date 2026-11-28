@@ -4,6 +4,7 @@ pub mod aliases;
 pub mod build;
 pub mod config;
 pub mod contracts;
+pub mod corrections;
 pub mod derive;
 pub mod extract;
 pub mod freshness;

@@ -50,6 +50,8 @@ pub struct Inputs<'a> {
     pub environments: &'a [crate::config::EnvSpec],
     pub default_environment: Option<&'a str>,
     pub exclude: &'a [String],
+    /// `cartograph.overrides.yaml`, when the workspace has the file (XS-12).
+    pub overrides: Option<&'a std::path::Path>,
     pub config_hash: Option<&'a str>,
     /// Lineages that got a new path this run.
     pub moved: HashSet<i64>,
@@ -341,6 +343,8 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     crate::config::refresh(conn, inputs.environments, inputs.default_environment)?;
     // HTTP links (XS-04) need every repository's services and host aliases, and the config values.
     crate::http::refresh(conn, config)?;
+    // Corrections (XS-12) sit on the links that pass wrote, before anything counts them.
+    crate::corrections::refresh(conn, inputs.overrides, seq)?;
 
     let mut c_in = structure_keys;
     c_in.push(hash.digest().to_vec());
