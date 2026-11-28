@@ -6,6 +6,10 @@ import { useState } from "react";
 import { ArrowRight, Check, ChevronLeft, GitCommitHorizontal } from "lucide-react";
 import type { EvidenceKind, Layer, LinkDetail } from "@/lib/api";
 import { useWsRead } from "@/lib/api/live";
+import { RequestError } from "@/lib/api/client";
+import { undoCorrection } from "@/lib/api/corrections";
+import { toast } from "../shell/toast";
+import CorrectionDialog from "./CorrectionDialog";
 import { opText, roles, siteLabel } from "./linkEvidence";
 import "./map.css";
 
@@ -13,7 +17,7 @@ const EV: Record<EvidenceKind, string> = { parsed: "Parsed", contract: "Contract
 /** H3: the layer whose answer the map shows. */
 const LAYER: Record<Layer, string> = {
   base: "Parsed from the source", config: "From cartograph.yaml", contract: "From a contract",
-  correction: "From a correction (the override file)", overlay: "From a working-tree overlay",
+  correction: "Corrected by an entry in cartograph.overrides.yaml", overlay: "From a working-tree overlay",
 };
 const KIND = { imports: "Import", calls: "Call", http: "HTTP", event: "Event", db: "Table read" } as const;
 /** The server's truncation is the cap; this is a guard for a very long note. */
@@ -30,6 +34,9 @@ export default function LinkInspector({ ws, id, at, name, dateOf, onBack, onOpen
 }) {
   // XS-09: the environment the call is resolved in; none until the reader picks one, then the workspace's default.
   const [env, setEnv] = useState<string | null>(null);
+  // FE-14: the dialog that writes a correction, and the message when an undo is refused.
+  const [fixing, setFixing] = useState(false);
+  const [undoErr, setUndoErr] = useState<string | null>(null);
   const r = useWsRead<LinkDetail>(ws, `links/${encodeURIComponent(id)}`, { at: at || "now", env });
   const d = r.data;
   return (
@@ -97,10 +104,21 @@ export default function LinkInspector({ ws, id, at, name, dateOf, onBack, onOpen
             <dd>{d.closed ? <>Closed in <code>{d.closed.sha.slice(0, 7)}</code> · {d.closed.author}{dateOf(d.closed.sha) ? ` · ${dateOf(d.closed.sha)}` : ""}</> : "Live, not closed"}</dd>
             {d.replaced && <><dt>Replaces</dt><dd><code>{d.replaced}</code>, closed in the same commit</dd></>}
           </dl>
+          {undoErr && <p className="lm-none" role="alert">{undoErr}</p>}
           <div className="map-actions">
+            <button type="button" className="btn" onClick={() => setFixing(true)}>Correct this link</button>
+            {d.correction_id && (
+              <button type="button" className="btn" onClick={() => {
+                undoCorrection(ws, d.correction_id!).then(
+                  () => { setUndoErr(null); toast("Removed from cartograph.overrides.yaml. The link changes back when the index has applied it."); },
+                  (e) => setUndoErr(e instanceof RequestError ? `${e.what}. ${e.why}. ${e.try_}.` : "Something went wrong. Try again."),
+                );
+              }}>Undo the correction</button>
+            )}
             <button type="button" className="btn" onClick={() => onOpen(d.link.from)}>Open {name(d.link.from).split("/").pop()}</button>
             <button type="button" className="btn" onClick={() => onOpen(d.link.to)}>Open {name(d.link.to).split("/").pop()}</button>
           </div>
+          {fixing && <CorrectionDialog ws={ws} d={d} onClose={() => setFixing(false)} />}
         </>
       )}
     </section>

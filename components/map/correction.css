@@ -1,0 +1,30 @@
+/* FE-14: the correction dialog and the list of corrections. */
+.cd { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 0; border-radius: 16px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-3), inset 0 0 0 1px var(--line); }
+.cd::backdrop { background: color-mix(in oklab, black, transparent 55%); }
+.cd form, .cd-body { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px; }
+.cd h2 { margin: 0; font-size: 1.0625rem; font-weight: 600; }
+.cd code { font: 0.8125rem var(--font-mono), monospace; overflow-wrap: anywhere; }
+.cd-sub { margin: 0; font-size: 0.8125rem; color: var(--muted); }
+.cd-verbs { display: grid; gap: 6px; border: 0; margin: 0; padding: 0; }
+.cd-verbs legend { padding: 0; margin-bottom: 6px; font-size: 0.75rem; color: var(--muted); }
+.cd-verbs label { display: flex; gap: 8px; align-items: baseline; font-size: 0.875rem; }
+.cd-help { color: var(--muted); font-size: 0.8125rem; }
+.cd-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; color: var(--muted); }
+.cd-field input, .cd-field select, .cd-field textarea { font: 0.875rem var(--font-sans, inherit); color: var(--text); background: var(--bg); border: 0; border-radius: 10px; padding: 8px 10px; box-shadow: inset 0 0 0 1px var(--line); }
+.cd-field input[type="text"] { font-family: var(--font-mono), monospace; font-size: 0.8125rem; }
+.cd-field textarea { resize: vertical; }
+.cd-count { margin: -6px 0 0; font-size: 0.75rem; color: var(--muted); }
+.cd-count.is-over { color: var(--down, var(--text)); }
+.cd-err { margin: 0; font-size: 0.8125rem; color: var(--down, var(--text)); }
+.cd-k { font-size: 0.75rem; color: var(--muted); }
+.cd-preview pre { margin: 4px 0 0; max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); font: 0.75rem/1.5 var(--font-mono), monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cd-preview .is-add { color: var(--up); }
+.cd-preview .is-del { color: var(--down, var(--text)); }
+.cd-none { margin: 4px 0 0; font-size: 0.8125rem; color: var(--muted); }
+.cd-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+.cl ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.cl li { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line); }
+.cl li > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.8125rem; }
+.cl-reason { margin: 0; font-size: 0.8125rem; color: var(--body); overflow-wrap: anywhere; }
+.cl-by { color: var(--muted); font-size: 0.75rem; }
