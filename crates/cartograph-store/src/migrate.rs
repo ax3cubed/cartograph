@@ -48,6 +48,9 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-19 spec versions: begin ----
+    "DROP TABLE contract_version;\n",
+    // ---- XS-19 spec versions: end ----
     // ---- XS-08 contracts: begin ----
     "DROP TABLE binding; DROP TABLE contract_schema; DROP TABLE operation; DROP TABLE contract;\n",
     // ---- XS-08 contracts: end ----
@@ -84,6 +87,12 @@ pub fn undo_to_v2() -> String {
 /// The tables and columns format 4 adds, as `schema.sql` declares them; one delimited block per
 /// phase-4 item.
 const V4: &str = concat!(
+    // ---- XS-19 spec versions: begin ----
+    "CREATE TABLE contract_version (contract INTEGER NOT NULL REFERENCES contract (id),
+       n INTEGER NOT NULL, seq INTEGER NOT NULL, blob BLOB NOT NULL, spec_hash BLOB NOT NULL,
+       changes INTEGER NOT NULL, breaking_count INTEGER NOT NULL, breaking TEXT NOT NULL,
+       summary TEXT NOT NULL, PRIMARY KEY (contract, n)) STRICT, WITHOUT ROWID;\n",
+    // ---- XS-19 spec versions: end ----
     // ---- XS-08 contracts: begin ----
     "CREATE TABLE contract (id INTEGER PRIMARY KEY, file INTEGER NOT NULL REFERENCES file (id),
        service INTEGER REFERENCES node (id), title TEXT NOT NULL, version TEXT NOT NULL) STRICT;

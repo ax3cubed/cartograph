@@ -47,6 +47,18 @@ CREATE TABLE contract_schema (
   from_seq INTEGER NOT NULL,
   to_seq INTEGER
 ) STRICT;
+CREATE TABLE contract_version (
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  n INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  blob BLOB NOT NULL,
+  spec_hash BLOB NOT NULL,
+  changes INTEGER NOT NULL,
+  breaking_count INTEGER NOT NULL,
+  breaking TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  PRIMARY KEY (contract, n)
+) STRICT, WITHOUT ROWID;
 CREATE TABLE derived (
   kind TEXT NOT NULL,
   scope TEXT NOT NULL,

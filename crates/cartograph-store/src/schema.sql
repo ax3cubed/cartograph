@@ -368,3 +368,23 @@ CREATE TABLE binding (
 CREATE INDEX binding_operation ON binding (operation);
 CREATE INDEX binding_kind ON binding (kind, from_seq);
 -- XS-08 contracts (end)
+
+-- XS-19 spec versions (begin)
+-- One row per distinct spec of a contract along first-parent history (the file lineage follows
+-- renames): n counts from 1, seq is the commit where that spec came to be, spec_hash is the hash
+-- of its canonical operations and schemas, blob is the root spec's blob (for a diff on request).
+-- Only the breaking changes are kept (JSON array of {kind, subject, breaking, summary}), with the
+-- number of all changes and a one-line summary built from the diff; full diffs are recomputed.
+CREATE TABLE contract_version (
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  n INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  blob BLOB NOT NULL,
+  spec_hash BLOB NOT NULL,
+  changes INTEGER NOT NULL,
+  breaking_count INTEGER NOT NULL,
+  breaking TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  PRIMARY KEY (contract, n)
+) STRICT, WITHOUT ROWID;
+-- XS-19 spec versions (end)
