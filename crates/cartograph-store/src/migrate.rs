@@ -48,6 +48,10 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-12 corrections: begin ----
+    "DROP TABLE correction_interval; DROP TABLE correction_base; DROP TABLE correction;
+     DROP INDEX link_dst; ALTER TABLE link DROP COLUMN layer;\n",
+    // ---- XS-12 corrections: end ----
     // ---- XS-19 spec versions: begin ----
     "DROP TABLE contract_version;\n",
     // ---- XS-19 spec versions: end ----
@@ -94,6 +98,20 @@ pub fn undo_to_v2() -> String {
 /// The tables and columns format 4 adds, as `schema.sql` declares them; one delimited block per
 /// phase-4 item.
 const V4: &str = concat!(
+    // ---- XS-12 corrections: begin (after the table it alters) ----
+    "ALTER TABLE link ADD COLUMN layer TEXT;
+     CREATE INDEX link_dst ON link (kind, dst);
+     CREATE TABLE correction (id INTEGER PRIMARY KEY, line INTEGER NOT NULL, action TEXT NOT NULL,
+       kind TEXT NOT NULL, key TEXT NOT NULL, src INTEGER, dst INTEGER, new_dst INTEGER,
+       confidence TEXT, reason TEXT NOT NULL, anchor_seq INTEGER NOT NULL, status TEXT NOT NULL,
+       links INTEGER NOT NULL, by TEXT, at INTEGER) STRICT;
+     CREATE TABLE correction_base (id INTEGER PRIMARY KEY, link INTEGER NOT NULL UNIQUE REFERENCES link (id),
+       correction INTEGER NOT NULL REFERENCES correction (id), added INTEGER NOT NULL,
+       dst INTEGER NOT NULL, level TEXT, score REAL) STRICT;
+     CREATE TABLE correction_interval (link INTEGER NOT NULL REFERENCES link (id),
+       from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX correction_interval_link ON correction_interval (link);\n",
+    // ---- XS-12 corrections: end ----
     // ---- XS-19 spec versions: begin ----
     "CREATE TABLE contract_version (contract INTEGER NOT NULL REFERENCES contract (id),
        n INTEGER NOT NULL, seq INTEGER NOT NULL, blob BLOB NOT NULL, spec_hash BLOB NOT NULL,
