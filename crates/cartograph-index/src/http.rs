@@ -1076,6 +1076,46 @@ fn timeline(
             },
         );
     }
+    // gRPC servers (XS-18): registering a generated service serves each rpc of its proto.
+    for s in codegen::serve(&defs, &called, &views) {
+        let t = normalise_route(&s.method, &s.path);
+        let key = SiteKey {
+            file: s.file,
+            span: [s.at[0], s.at[1], s.op as u32, 0],
+            env: 0,
+            kind: Kind::Route,
+        };
+        if infos.contains_key(&(key.clone(), s.span.0)) {
+            continue;
+        }
+        if let Some(to) = s.span.1 {
+            deltas.entry(to).or_default().remove.push(key.clone());
+        }
+        deltas
+            .entry(s.span.0)
+            .or_default()
+            .add
+            .push(Site::Route(RouteSite {
+                key: key.clone(),
+                service: s.service,
+                method: t.method.clone(),
+                segs: t.segs.clone(),
+            }));
+        infos.insert(
+            (key, s.span.0),
+            Info {
+                file: s.file,
+                kind: "generated",
+                text: cut(&format!("{} -> {} {}", s.name, s.method, s.path)),
+                span: s.at,
+                extractor: s.extractor,
+                raw: s.path.clone(),
+                template: t.to_string(),
+                host: false,
+                cfg: None,
+            },
+        );
+    }
     // The operations: sites of the contract layer only.
     let mut op_deltas: BTreeMap<i64, Delta> = BTreeMap::new();
     let extractor = contracts::extractor();

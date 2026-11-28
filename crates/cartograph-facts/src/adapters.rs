@@ -742,6 +742,10 @@ static BUILTIN: &[Embedded] = &[
                 "aliases.scm",
                 include_str!("../adapters/codegen/queries/aliases.scm"),
             ),
+            (
+                "grpc.scm",
+                include_str!("../adapters/codegen/queries/grpc.scm"),
+            ),
         ],
     ),
     (
@@ -754,6 +758,10 @@ static BUILTIN: &[Embedded] = &[
             (
                 "aliases.scm",
                 include_str!("../adapters/codegen-go/queries/aliases.scm"),
+            ),
+            (
+                "grpc.scm",
+                include_str!("../adapters/codegen-go/queries/grpc.scm"),
             ),
         ],
     ),
