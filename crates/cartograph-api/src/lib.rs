@@ -139,6 +139,8 @@ pub fn json_schema() -> Value {
         PathResult,
         Reach,
         Contract,
+        ContractVersion,
+        ContractDiff,
         Entrypoint,
         EntrypointDetail,
         EntrypointCounts,

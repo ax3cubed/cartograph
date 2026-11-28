@@ -450,6 +450,8 @@ export interface CartographApi {
   ConfigWrite: ConfigWrite;
   Consumer: Consumer;
   Contract: Contract;
+  ContractDiff: ContractDiff;
+  ContractVersion: ContractVersion;
   Correction: Correction;
   CorrectionRequest: CorrectionRequest;
   CoverageRow: CoverageRow;
@@ -815,6 +817,85 @@ export interface UndocumentedRoute {
    * The route's template: `/orders/{}`.
    */
   path: string;
+}
+/**
+ * `…/contracts/{id}/diff`: every change between two versions, recomputed on request.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ContractDiff".
+ */
+export interface ContractDiff {
+  /**
+   * The spec reads other files; the diff is of the root file alone.
+   */
+  approximate: boolean;
+  changes: SpecChange[];
+  from: number;
+  to: number;
+}
+/**
+ * One change of a diff, breaking or not.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "SpecChange".
+ */
+export interface SpecChange {
+  breaking: boolean;
+  kind: string;
+  subject: string;
+  summary: string;
+}
+/**
+ * A spec's history (XS-19): one row per distinct spec along first-parent history, oldest first.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ContractVersion".
+ */
+export interface ContractVersion {
+  breaking: BreakingChange[];
+  /**
+   * How many of them are breaking; `breaking` lists the first 200.
+   */
+  breaking_count: number;
+  /**
+   * Changes from the version before; 0 for v1.
+   */
+  changes: number;
+  /**
+   * The commit where this spec came to be.
+   */
+  commit: Commit;
+  /**
+   * 1 for the first spec the file had.
+   */
+  n: number;
+  /**
+   * Hex SHA-256 of the canonical operations and schemas.
+   */
+  spec_hash: string;
+  /**
+   * Built from the diff, never by a model. Untrusted text (names from the spec).
+   */
+  summary: string;
+}
+/**
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "BreakingChange".
+ */
+export interface BreakingChange {
+  /**
+   * Who called the operation in the commit before the change; empty for a schema change.
+   */
+  callers: Caller[];
+  /**
+   * `operation_removed`, `field_removed`, `type_narrowed`, ...
+   */
+  kind: string;
+  /**
+   * `get /orders/{id}` or `Order.status`.
+   */
+  subject: string;
+  summary: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
