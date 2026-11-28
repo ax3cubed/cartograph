@@ -634,6 +634,9 @@
     "Contract": {
       "description": "`lib/model.ts` Spec. Served from `…/contracts`.",
       "properties": {
+        "counts": {
+          "$ref": "#/definitions/ContractCounts"
+        },
         "file": {
           "type": "string"
         },
@@ -654,6 +657,13 @@
         },
         "service": {
           "$ref": "#/definitions/NodeId"
+        },
+        "undocumented": {
+          "description": "The service's undocumented routes, on its first spec.",
+          "items": {
+            "$ref": "#/definitions/UndocumentedRoute"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -662,7 +672,41 @@
         "file",
         "kind",
         "service",
-        "operations"
+        "operations",
+        "undocumented",
+        "counts"
+      ],
+      "type": "object"
+    },
+    "ContractCounts": {
+      "description": "The four counts of the Contracts view.",
+      "properties": {
+        "operations": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spec_only": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sync": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "undocumented": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operations",
+        "sync",
+        "spec_only",
+        "undocumented"
       ],
       "type": "object"
     },
@@ -1034,6 +1078,10 @@
     },
     "Environment": {
       "properties": {
+        "is_default": {
+          "description": "The workspace's default: `default_environment`, else `prod`, else the first.",
+          "type": "boolean"
+        },
         "name": {
           "type": "string"
         },
@@ -1041,11 +1089,13 @@
           "additionalProperties": {
             "type": "string"
           },
+          "description": "Key to value, as of the newest commit: only values that classify as locators (XS-10).",
           "type": "object"
         }
       },
       "required": [
         "name",
+        "is_default",
         "values"
       ],
       "type": "object"
@@ -2126,6 +2176,34 @@
       ],
       "type": "object"
     },
+    "LinkConfig": {
+      "description": "One step of the chain from a call site to a service: key, value, host (XS-09).",
+      "properties": {
+        "host": {
+          "description": "The host in `value`: the column the inspector shows per environment.",
+          "type": "string"
+        },
+        "key": {
+          "description": "`CATALOG_URL`.",
+          "type": "string"
+        },
+        "source": {
+          "description": "The file that sets it, repo-relative as the index sees paths; `cartograph.yaml` for a\nvalue set by hand.",
+          "type": "string"
+        },
+        "value": {
+          "description": "What the key is set to: a URL without userinfo, query or fragment, or `host[:port]`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "host",
+        "source"
+      ],
+      "type": "object"
+    },
     "LinkDetail": {
       "properties": {
         "closed": {
@@ -2138,11 +2216,32 @@
             }
           ]
         },
+        "config": {
+          "description": "How `env` resolves the call, in order: the key the call site reads, the value it has there\nand the host that value names.",
+          "items": {
+            "$ref": "#/definitions/LinkConfig"
+          },
+          "type": "array"
+        },
         "correction_id": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "env": {
+          "description": "The environment `config` is for (`?env=`, else the default); null when the link doesn't\ndepend on one (XS-09).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "envs": {
+          "description": "Every environment the link holds in.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "evidence": {
           "allOf": [
@@ -2204,7 +2303,9 @@
         "link",
         "interval",
         "opened",
-        "evidence"
+        "evidence",
+        "envs",
+        "config"
       ],
       "type": "object"
     },
@@ -2369,6 +2470,9 @@
         "PUT",
         "PATCH",
         "DELETE",
+        "OPTIONS",
+        "HEAD",
+        "TRACE",
         "EVENT"
       ],
       "type": "string"
@@ -2614,6 +2718,7 @@
       "type": "string"
     },
     "Operation": {
+      "description": "An operation of a spec. `id` is `o<row>`, not a node.",
       "properties": {
         "callers": {
           "items": {
@@ -2637,17 +2742,50 @@
         "method": {
           "$ref": "#/definitions/Method"
         },
+        "operation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
+          "description": "With the spec's base path, as the spec writes it: `/v1/orders/{id}`.",
           "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/OperationStatus"
+        },
+        "summary": {
+          "description": "From the spec: untrusted text (F8), at most 200 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "id",
         "method",
         "path",
+        "status",
         "callers"
       ],
       "type": "object"
+    },
+    "OperationStatus": {
+      "description": "Whether the code agrees with the spec about an operation (XS-08 drift).",
+      "oneOf": [
+        {
+          "const": "sync",
+          "description": "A parsed route serves it.",
+          "type": "string"
+        },
+        {
+          "const": "spec-only",
+          "description": "The spec lists it and no route serves it.",
+          "type": "string"
+        }
+      ]
     },
     "Owner": {
       "properties": {
@@ -2982,6 +3120,13 @@
           ]
         },
         "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "description": "An environment name (XS-09), for the reads that depend on one. Absent: the workspace's\ndefault, `default_environment` in the manifest, else `prod`, else the first.",
           "type": [
             "string",
             "null"
@@ -4242,6 +4387,32 @@
         "budget_tokens",
         "blocks",
         "system_prompt"
+      ],
+      "type": "object"
+    },
+    "UndocumentedRoute": {
+      "description": "A route of a service that has a spec, which no spec lists.",
+      "properties": {
+        "handler": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NodeId"
+            }
+          ],
+          "description": "The file that serves it."
+        },
+        "method": {
+          "$ref": "#/definitions/Method"
+        },
+        "path": {
+          "description": "The route's template: `/orders/{}`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "path",
+        "handler"
       ],
       "type": "object"
     },

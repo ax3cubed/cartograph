@@ -11,3 +11,5 @@ full_path_match = 0.70
 partial_path_match = 0.45
 unique_across_workspace = 0.40
 name_similarity = 0.15
+# A spec operation named by a generated client: as sure as a template URL, less than a matched contract.
+generated_client_spec = 0.80

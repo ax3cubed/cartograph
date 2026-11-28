@@ -46,7 +46,9 @@ fn push_lit(out: &mut Vec<Seg>, s: &str) {
 
 fn collect(n: Node, src: &[u8], out: &mut Vec<Seg>) {
     match n.kind() {
-        "string" => push_lit(out, unquote(text(n, src))),
+        "string" | "interpreted_string_literal" | "raw_string_literal" => {
+            push_lit(out, unquote(text(n, src)))
+        }
         // A name the code spells out (`.get` in `axios.get(…)`), not a value worked out at run time.
         "property_identifier" => push_lit(out, text(n, src)),
         "template_string" => {
@@ -112,4 +114,18 @@ pub fn value_of(n: Node, src: &[u8]) -> AttrValue {
 /// True when every piece of the value is spelled out in the source.
 pub fn is_literal(v: &AttrValue) -> bool {
     matches!(v, AttrValue::Str(_))
+}
+
+/// The text of a value, its parts joined.
+pub fn plain(v: &AttrValue) -> String {
+    match v {
+        AttrValue::Str(s) => s.as_str().to_owned(),
+        AttrValue::Parts { parts } => parts
+            .as_slice()
+            .iter()
+            .map(|p| match p {
+                Part::Lit(s) | Part::Expr(s) => s.as_str(),
+            })
+            .collect(),
+    }
 }

@@ -16,6 +16,8 @@
 
 mod adjacency;
 mod at;
+mod config;
+mod contracts;
 mod coverage;
 mod detail;
 mod error;
@@ -30,6 +32,7 @@ mod snippet;
 mod store;
 mod timeline;
 mod traverse;
+mod versions;
 
 pub use at::{At, parse_instant, rfc3339};
 pub use cartograph_store::FORMAT_VERSION;

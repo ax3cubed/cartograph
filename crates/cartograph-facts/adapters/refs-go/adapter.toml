@@ -1,0 +1,6 @@
+name = "refs-go"
+version = "1.0.0"
+language = "go"
+files = ["**/*.go"]
+# A name is held once per file.
+unique = "name"

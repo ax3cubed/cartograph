@@ -42,9 +42,30 @@
         "null"
       ]
     },
+    "contracts": {
+      "description": "OpenAPI and Swagger files by glob (XS-08), besides the ones named `openapi.*` or\n`swagger.*`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Contract"
+      }
+    },
     "retrieval": {
       "description": "What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).",
       "$ref": "#/$defs/Retrieval"
+    },
+    "default_environment": {
+      "description": "The environment the map shows when none is asked for; else `prod`, else the first (XS-09).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "environments": {
+      "description": "Named environments (XS-09): which files give their values, and values set by hand.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Environment"
+      }
     }
   },
   "required": [
@@ -165,6 +186,26 @@
         "repo"
       ]
     },
+    "Contract": {
+      "description": "A spec the index reads (XS-08).",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "A glob relative to each repo's root: `docs/api/*.yaml`. It picks among YAML and JSON files.",
+          "type": "string"
+        },
+        "service": {
+          "description": "The service that owns the specs it matches; absent, the service whose root holds each file.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
     "Retrieval": {
       "type": "object",
       "properties": {
@@ -221,6 +262,26 @@
           "const": "commit_messages"
         }
       ]
+    },
+    "Environment": {
+      "description": "One environment of `environments:` (XS-09).",
+      "type": "object",
+      "properties": {
+        "sources": {
+          "description": "Globs over the files that give this environment its values, as the index sees paths\n(`deploy/prod/**`). They win over the environment a file's name implies.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "set": {
+          "description": "Values set by hand, key to value: what \"Save values\" writes. Only a URL, `host[:port]` or\na short identifier is kept; anything else is ignored.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

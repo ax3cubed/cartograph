@@ -18,6 +18,9 @@ pub struct ManifestDeploy;
 
 const COMPOSE: &str = "manifest-deploy/compose";
 const K8S: &str = "manifest-deploy/k8s";
+const DOTENV: &str = "manifest-deploy/dotenv";
+const HELM_VALUES: &str = "manifest-deploy/helm-values";
+const HELM_TEMPLATE: &str = "manifest-deploy/helm-template";
 
 /// The most hosts one blob may give; a hostile file can't flood the facts.
 const MAX_HOSTS: usize = 5_000;
@@ -98,6 +101,7 @@ fn compose(doc: &Value, out: &mut Vec<Fact>) {
             Some(b) => b.get("context").and_then(Value::as_str),
             None => None,
         };
+        crate::config::compose_env(def, out);
         let Some(context) = context else { continue };
         let mut hosts = vec![name.as_str()];
         if let Some(c) = def.get("container_name").and_then(Value::as_str) {
@@ -129,6 +133,7 @@ fn compose(doc: &Value, out: &mut Vec<Fact>) {
 }
 
 fn k8s(doc: &Value, out: &mut Vec<Fact>) {
+    crate::config::k8s_env(doc, out);
     if doc.get("kind").and_then(Value::as_str) != Some("Service") {
         return;
     }
@@ -165,14 +170,20 @@ impl Extractor for ManifestDeploy {
         "manifest-deploy"
     }
     fn version(&self) -> &'static str {
-        "1.0.0"
+        "1.1.0"
     }
     fn kinds(&self) -> &'static [&'static str] {
-        &[COMPOSE, K8S]
+        &[COMPOSE, K8S, DOTENV, HELM_VALUES, HELM_TEMPLATE]
     }
     fn handles(&self, path: &str) -> Option<&'static str> {
         let yaml = path.ends_with(".yml") || path.ends_with(".yaml");
-        if is_k8s_dir(path) {
+        if crate::config::is_dotenv_example(path) {
+            Some(DOTENV)
+        } else if crate::config::is_helm_template(path) {
+            Some(HELM_TEMPLATE)
+        } else if yaml && crate::config::is_values_name(path) {
+            Some(HELM_VALUES)
+        } else if is_k8s_dir(path) {
             yaml.then_some(K8S)
         } else {
             is_compose_name(path).then_some(COMPOSE)
@@ -186,16 +197,26 @@ impl Extractor for ManifestDeploy {
             return BlobFacts::Facts(vec![]);
         };
         let mut out = Vec::new();
-        for doc in yaml_docs(text) {
-            if kind == K8S {
-                k8s(&doc, &mut out);
-            } else {
-                compose(&doc, &mut out);
+        match kind {
+            DOTENV => crate::config::dotenv(text, &mut out),
+            HELM_TEMPLATE => {
+                for doc in yaml_docs(&crate::config::helm_strip(text)) {
+                    crate::config::helm_template_env(&doc, &mut out);
+                }
+            }
+            _ => {
+                for doc in yaml_docs(text) {
+                    match kind {
+                        K8S => k8s(&doc, &mut out),
+                        HELM_VALUES => crate::config::helm_values(&doc, &mut out),
+                        _ => compose(&doc, &mut out),
+                    }
+                }
             }
         }
         out.sort();
         out.dedup();
-        out.truncate(MAX_HOSTS);
+        out.truncate(MAX_HOSTS.max(crate::config::MAX_CONFIG));
         BlobFacts::Facts(out)
     }
 }

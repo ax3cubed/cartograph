@@ -374,6 +374,8 @@ pub enum Kind {
 pub struct SiteKey {
     pub file: i64,
     pub span: [u32; 4],
+    /// 0 for a site no environment decides; else the environment id plus one (XS-09).
+    pub env: u8,
     pub kind: Kind,
 }
 

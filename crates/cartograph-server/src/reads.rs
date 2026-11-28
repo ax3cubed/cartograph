@@ -52,7 +52,14 @@ pub(crate) fn router() -> Router<Arc<App>> {
         .route("/api/v1/w/{ws}/runs", get(runs))
         .route("/api/v1/w/{ws}/extractors", get(extractors))
         .route("/api/v1/w/{ws}/services", get(services))
+        .route("/api/v1/w/{ws}/environments", get(environments))
         .route("/api/v1/w/{ws}/owners", get(owners))
+        .route("/api/v1/w/{ws}/contracts", get(contracts))
+        .route(
+            "/api/v1/w/{ws}/contracts/{id}/versions",
+            get(contract_versions),
+        )
+        .route("/api/v1/w/{ws}/contracts/{id}/diff", get(contract_diff))
         .route("/api/v1/mcp/tools", get(mcp_tools))
         .route("/api/v1/agents", get(agents))
         .route(
@@ -138,7 +145,11 @@ node_read!(series, |s, id, at, p| s.series(
 ));
 node_read!(history, |s, id, _at, _p| s.history(&id));
 node_read!(symbols, |s, id, _at, _p| s.symbols(&id));
-node_read!(link, |s, id, at, _p| s.link_detail(&id, &at));
+node_read!(link, |s, id, at, p| s.link_detail_in(
+    &id,
+    &at,
+    p.env.as_deref()
+));
 node_page!(children, |s, id, at, page| s.children(&id, &at, page));
 node_page!(neighbors, |s, id, at, page| s.neighbors(&id, &at, page));
 node_page!(changes, |s, id, at, page| s.changes(&id, &at, page));
@@ -645,6 +656,50 @@ async fn extractors(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Resp
 
 async fn services(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
     read(app, ws, |s| s.services()).await
+}
+
+/// The Contracts view (XS-08): specs, their operations and the drift between spec and code.
+async fn contracts(
+    State(app): State<Arc<App>>,
+    Path(ws): Path<String>,
+    q: Result<Query<ReadParams>, QueryRejection>,
+) -> Response {
+    let at = match params(q).and_then(|p| at(p.at.as_deref())) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| s.contracts(&at)).await
+}
+
+/// Spec versions with their breaking changes and callers (XS-19).
+async fn contract_versions(
+    State(app): State<Arc<App>>,
+    Path((ws, id)): Path<(String, String)>,
+) -> Response {
+    read(app, ws, move |s| s.contract_versions(&id)).await
+}
+
+#[derive(Deserialize)]
+struct DiffParams {
+    from: u32,
+    to: u32,
+}
+
+/// The full diff between two versions of a spec, recomputed (XS-19).
+async fn contract_diff(
+    State(app): State<Arc<App>>,
+    Path((ws, id)): Path<(String, String)>,
+    q: Result<Query<DiffParams>, QueryRejection>,
+) -> Response {
+    let p = match params(q) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    read(app, ws, move |s| s.contract_diff(&id, p.from, p.to)).await
+}
+
+async fn environments(State(app): State<Arc<App>>, Path(ws): Path<String>) -> Response {
+    read(app, ws, |s| s.environments()).await
 }
 
 /// Owners from CODEOWNERS (XS-23): who owns how many files now.

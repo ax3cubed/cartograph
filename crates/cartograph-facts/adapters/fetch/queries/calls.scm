@@ -50,3 +50,30 @@
   (#eq? @_p "create")
   (#eq? @_k "baseURL")
 )
+
+; const api = axios.create({ baseURL: BASE }): the name the calls through the client use.
+(
+  (variable_declarator
+    name: (identifier) @client.base.name
+    value: (call_expression
+      function: (member_expression
+        object: (identifier) @_c
+        property: (property_identifier) @_p)
+      arguments: (arguments
+        (object (pair key: (property_identifier) @_k value: (_) @client.base.url)))) @client.base)
+  (#eq? @_c "axios")
+  (#eq? @_p "create")
+  (#eq? @_k "baseURL")
+)
+
+; api.get("/orders"): a call through a named client. The index keeps it only when a client.base
+; of that name is in the same file.
+(
+  (call_expression
+    function: (member_expression
+      object: (identifier) @http.call.client
+      property: (property_identifier) @http.call.method)
+    arguments: (arguments . (_) @http.call.url)) @http.call
+  (#any-of? @http.call.method "get" "post" "put" "patch" "delete" "head" "options")
+  (#match? @http.call.url "^[\"'`]/")
+)

@@ -424,6 +424,7 @@ dependencies = [
  "toml",
  "tracing",
  "tree-sitter",
+ "tree-sitter-go",
  "tree-sitter-javascript",
  "tree-sitter-typescript",
 ]

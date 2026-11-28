@@ -109,7 +109,9 @@ CREATE TABLE node (
   service INTEGER,
   detected_by TEXT,
   detect_source TEXT,
-  fan_in INTEGER NOT NULL DEFAULT 0
+  fan_in INTEGER NOT NULL DEFAULT 0,
+  -- XS-11: the generator that made this file (orval, oapi-codegen, ...) at the last run, else NULL.
+  generated TEXT
 ) STRICT;
 CREATE INDEX node_file ON node (file);
 CREATE UNIQUE INDEX node_key ON node (key);
@@ -134,6 +136,10 @@ CREATE TABLE link (
   level TEXT,
   score REAL,
   -- XS-05 confidence (end)
+  -- XS-09 config (begin): the environments the link holds in, bit i for environment id i; NULL
+  -- when it doesn't depend on one.
+  envs INTEGER,
+  -- XS-09 config (end)
   UNIQUE (kind, src, dst)
 ) STRICT;
 
@@ -197,6 +203,43 @@ CREATE TABLE host_alias (
 CREATE INDEX host_alias_host ON host_alias (host, valid_from);
 CREATE INDEX host_alias_service ON host_alias (service_id);
 -- XS-02 host aliases (end)
+
+-- XS-09 config (begin)
+-- Environments: the manifest's `environments:` and the ones file names imply (values-prod.yaml,
+-- overlays/staging/, compose and .env.example are `local`). id is the bit the `link.envs` mask
+-- uses, so at most 32; is_default marks the one the map shows when none is asked for.
+CREATE TABLE environment (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  is_default INTEGER NOT NULL
+) STRICT;
+-- What a key is set to in an environment while (env_id NULL: every one), with the file and blob
+-- that say so. value is stored only when it classifies as a locator (XS-10): a URL without
+-- userinfo, query or fragment, host[:port] or a short identifier; value_kind is `locator`, or
+-- `opaque` with a NULL value (a key whose value isn't kept, a Secret's keys).
+CREATE TABLE config_value (
+  key TEXT NOT NULL,
+  env_id INTEGER REFERENCES environment (id),
+  value TEXT,
+  value_kind TEXT NOT NULL,
+  source TEXT NOT NULL,
+  blob_id BLOB NOT NULL,
+  valid_from INTEGER NOT NULL,
+  valid_to INTEGER
+) STRICT;
+CREATE INDEX config_value_key ON config_value (key, valid_from);
+-- The key and value an HTTP link was resolved through, per environment, while that held.
+CREATE TABLE link_config (
+  link INTEGER NOT NULL REFERENCES link (id),
+  env_id INTEGER NOT NULL REFERENCES environment (id),
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  source TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX link_config_link ON link_config (link);
+-- XS-09 config (end)
 
 -- One row per derived artefact (B6, IDX-21): what it was built from. A run rebuilds an artefact only
 -- when its key changes; AI output is marked stale instead.
@@ -316,3 +359,96 @@ CREATE TABLE evidence (
 CREATE INDEX evidence_link ON evidence (link);
 CREATE INDEX evidence_file ON evidence (file);
 -- <<< XS-01
+
+-- XS-08 contracts (begin)
+-- OpenAPI and Swagger specs (the `manifest-openapi` facts of the spec files) with intervals. One
+-- contract per spec file lineage; service is the node that owns it (the manifest's contracts[].service,
+-- else the service whose root holds the file). An operation is a method on a path (base path
+-- included, as written: path; with parameters as `{}`: template) over the time that version of the
+-- spec had it. summary is cut to 200 characters and is untrusted text. fields is a JSON array of
+-- {name, ty, required}. A binding joins an operation to code: handled_by (file is the route's),
+-- consumes (file is the call's), or, with no operation, undocumented (a route of a service that has
+-- a spec and is in none). Unresolved `$ref`s are `unresolved` rows of fact_kind openapi.ref.
+CREATE TABLE contract (
+  id INTEGER PRIMARY KEY,
+  file INTEGER NOT NULL REFERENCES file (id),
+  service INTEGER REFERENCES node (id),
+  title TEXT NOT NULL,
+  version TEXT NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX contract_file ON contract (file);
+CREATE TABLE operation (
+  id INTEGER PRIMARY KEY,
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  template TEXT NOT NULL,
+  operation_id TEXT,
+  summary TEXT,
+  line INTEGER NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX operation_contract ON operation (contract);
+CREATE TABLE contract_schema (
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  name TEXT NOT NULL,
+  fields TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX contract_schema_contract ON contract_schema (contract);
+CREATE TABLE binding (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  operation INTEGER REFERENCES operation (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  line INTEGER NOT NULL,
+  template TEXT NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX binding_operation ON binding (operation);
+CREATE INDEX binding_kind ON binding (kind, from_seq);
+-- XS-08 contracts (end)
+
+-- XS-19 spec versions (begin)
+-- One row per distinct spec of a contract along first-parent history (the file lineage follows
+-- renames): n counts from 1, seq is the commit where that spec came to be, spec_hash is the hash
+-- of its canonical operations and schemas, blob is the root spec's blob (for a diff on request).
+-- Only the breaking changes are kept (JSON array of {kind, subject, breaking, summary}), with the
+-- number of all changes and a one-line summary built from the diff; full diffs are recomputed.
+CREATE TABLE contract_version (
+  contract INTEGER NOT NULL REFERENCES contract (id),
+  n INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  blob BLOB NOT NULL,
+  spec_hash BLOB NOT NULL,
+  changes INTEGER NOT NULL,
+  breaking_count INTEGER NOT NULL,
+  breaking TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  PRIMARY KEY (contract, n)
+) STRICT, WITHOUT ROWID;
+-- XS-19 spec versions (end)
+-- XS-11 generated clients (begin)
+-- A function of a generated client that is an operation of a spec: found by the method and path
+-- the function spells out, not by its name, so a regenerated client keeps its alias row. file is the
+-- generated file, line the function's.
+CREATE TABLE client_alias (
+  operation INTEGER NOT NULL REFERENCES operation (id),
+  file INTEGER NOT NULL REFERENCES file (id),
+  symbol TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  from_seq INTEGER NOT NULL,
+  to_seq INTEGER
+) STRICT;
+CREATE INDEX client_alias_operation ON client_alias (operation);
+-- The names the files that import a generated client call, per blob (the `refs` adapters), made
+-- when the client is found. A cache of the derived pass, not a fact: it is not in the fact hash.
+CREATE TABLE blob_ref (
+  blob BLOB PRIMARY KEY,
+  version TEXT NOT NULL,
+  payload BLOB NOT NULL
+) STRICT, WITHOUT ROWID;
+-- XS-11 generated clients (end)

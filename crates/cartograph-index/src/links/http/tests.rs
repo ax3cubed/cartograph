@@ -421,6 +421,7 @@ fn key(file: i64, line: u32, kind: Kind) -> SiteKey {
     SiteKey {
         file,
         span: [line, 0, line, 9],
+        env: 0,
         kind,
     }
 }

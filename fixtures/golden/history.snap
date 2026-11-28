@@ -2,8 +2,9 @@
 source: fixtures/gen/tests/golden.rs
 expression: text
 ---
-sha256:7fd4f9996d1694517d64dd7d409442fc33e39c331f632ea8e17464799b35ef53
+sha256:d7432f2d3fa26b6bdc0be5a7225db8441ef818e5ba094e3193b48e8c2bba308a
 
+extractor adapters express@1.0.0+fetch@1.1.0+codegen@1.0.0+codegen-go@1.0.0
 extractor manifest-js/package 1.0.0
 extractor ts-imports/ts 1.0.0
 commit 860aed9d77bf27a37c409c234e34e61cf432ec7e Ada: start

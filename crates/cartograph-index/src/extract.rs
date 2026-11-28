@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use cartograph_facts::FactCache;
 use cartograph_git::{GitError, ObjectId, Repo, read_blob};
-use cartograph_parse::{BlobFacts, EXTRACTORS, Extractor, MAX_BLOB_BYTES, SkipReason};
+use cartograph_parse::{BlobFacts, EXTRACTORS, Extractor, SkipReason};
 use rayon::prelude::*;
 
 pub type Facts = HashMap<(ObjectId, &'static str), Arc<BlobFacts>>;
@@ -62,7 +62,8 @@ pub fn extract(
                 .map_init(
                     || repo.local(),
                     |local, &(oid, kind)| {
-                        let facts = match read_blob(local, oid, MAX_BLOB_BYTES) {
+                        let facts = match read_blob(local, oid, extractor_of(kind).max_bytes(kind))
+                        {
                             Ok(bytes) => extractor_of(kind).extract(kind, &bytes),
                             Err(GitError::TooLarge { .. }) => {
                                 BlobFacts::Skipped(SkipReason::TooLarge)

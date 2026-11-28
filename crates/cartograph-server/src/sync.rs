@@ -88,6 +88,23 @@ pub fn workspace_checked(data: &Path, ws: &str) -> Result<(Workspace, Vec<String
                     path: s.path.clone(),
                 })
                 .collect(),
+            contracts: parsed
+                .manifest
+                .contracts
+                .iter()
+                .map(cartograph_index::contracts::ContractSpec::from)
+                .collect(),
+            environments: parsed
+                .manifest
+                .environments
+                .iter()
+                .map(|(name, e)| cartograph_index::config::EnvSpec {
+                    name: name.clone(),
+                    sources: e.sources.clone(),
+                    set: e.set.clone(),
+                })
+                .collect(),
+            default_environment: parsed.manifest.default_environment.clone(),
         },
         not_added,
     ))

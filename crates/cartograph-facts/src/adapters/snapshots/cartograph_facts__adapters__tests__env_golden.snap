@@ -1,0 +1,11 @@
+---
+source: crates/cartograph-facts/src/adapters/tests.rs
+expression: pretty(&e)
+---
+fetch {"kind":"http.call","span":[5,26,5,43],"attrs":{"client":{"parts":[{"expr":"api"}]},"method":"GET","url":"/items"},"evidence":{"type":"template","text":"api.get(\"/items\")"}}
+fetch {"kind":"http.call","span":[6,36,6,67],"attrs":{"method":"GET","url":{"parts":[{"expr":"CATALOG"},{"lit":"/items/"},{"expr":"id"}]}},"evidence":{"type":"template","text":"fetch(`${CATALOG}/items/${id}`)"}}
+fetch {"kind":"env.read","span":[1,16,1,39],"attrs":{"key":"CATALOG_URL","name":{"parts":[{"expr":"CATALOG"}]}},"evidence":{"type":"template","text":"process.env.CATALOG_URL"}}
+fetch {"kind":"env.read","span":[2,16,2,42],"attrs":{"key":"PRICING_URL"},"evidence":{"type":"literal","text":"process.env[\"PRICING_URL\"]"}}
+fetch {"kind":"env.read","span":[3,17,3,41],"attrs":{"key":"VITE_API"},"evidence":{"type":"literal","text":"import.meta.env.VITE_API"}}
+fetch {"kind":"env.read","span":[4,43,4,62],"attrs":{"key":"API_URL"},"evidence":{"type":"literal","text":"process.env.API_URL"}}
+fetch {"kind":"client.base","span":[4,19,4,65],"attrs":{"name":{"parts":[{"expr":"api"}]},"url":{"parts":[{"expr":"process.env.API_URL"}]}},"evidence":{"type":"template","text":"axios.create({ baseURL: process.env.API_URL })"}}

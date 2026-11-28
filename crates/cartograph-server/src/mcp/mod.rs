@@ -143,7 +143,7 @@ pub struct NeighborsArgs {
     /// Only links between two services.
     pub cross_service: Option<bool>,
     pub min_confidence: Option<ConfidenceLevel>,
-    /// An environment name; environments arrive with the config layer.
+    /// An environment name: only links that hold in it (and links that depend on none).
     pub env: Option<String>,
     pub at: Option<String>,
     #[schemars(range(min = 1, max = 200))]
@@ -829,9 +829,6 @@ impl Tools {
                 "pass depth from 1 to 5",
             );
         }
-        // ponytail: environments arrive with the config layer (XS items); env is accepted and
-        // changes nothing until then.
-        let _ = a.env;
         let (inbound, outbound) = match a.direction {
             None => (true, true),
             Some(Direction::Callers | Direction::Dependents) => (true, false),
@@ -848,6 +845,7 @@ impl Tools {
                 Some(ConfidenceLevel::Likely) => 0.6,
                 _ => 0.3,
             },
+            env: a.env,
         };
         let got = self.read(|s| {
             let p = s.neighborhood(&a.node, &q, &at, page)?;

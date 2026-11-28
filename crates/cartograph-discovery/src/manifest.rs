@@ -4,6 +4,7 @@
 //! expanded, and its paths are only ever shown and canonicalised, never written to. `index_path`
 //! isn't a manifest field at all, so a repo can't redirect where Cartograph writes.
 
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
@@ -42,9 +43,32 @@ pub struct Manifest {
     /// The baseline file of known rule violations, relative to the manifest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<String>,
+    /// OpenAPI and Swagger files by glob (XS-08), besides the ones named `openapi.*` or
+    /// `swagger.*`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contracts: Vec<Contract>,
     /// What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).
     #[serde(default, skip_serializing_if = "Retrieval::is_empty")]
     pub retrieval: Retrieval,
+    /// The environment the map shows when none is asked for; else `prod`, else the first (XS-09).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_environment: Option<String>,
+    /// Named environments (XS-09): which files give their values, and values set by hand.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub environments: BTreeMap<String, Environment>,
+}
+
+/// One environment of `environments:` (XS-09).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Environment {
+    /// Globs over the files that give this environment its values, as the index sees paths
+    /// (`deploy/prod/**`). They win over the environment a file's name implies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
+    /// Values set by hand, key to value: what "Save values" writes. Only a URL, `host[:port]` or
+    /// a short identifier is kept; anything else is ignored.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub set: BTreeMap<String, String>,
 }
 
 /// The kinds of text search indexes for Ask and MCP.
@@ -122,6 +146,16 @@ impl Options {
     fn is_empty(&self) -> bool {
         self == &Self::default()
     }
+}
+
+/// A spec the index reads (XS-08).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Contract {
+    /// A glob relative to each repo's root: `docs/api/*.yaml`. It picks among YAML and JSON files.
+    pub path: String,
+    /// The service that owns the specs it matches; absent, the service whose root holds each file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -770,7 +804,8 @@ services:
                     scopes: vec![],
                 }).collect(),
                 options: Options::default(),
-                services: vec![], rules: vec![], baseline: None, retrieval: Default::default(),
+                services: vec![], rules: vec![], baseline: None, contracts: vec![], retrieval: Default::default(),
+                default_environment: None, environments: Default::default(),
             };
             let again = parse(&to_yaml(&m)).unwrap().manifest;
             proptest::prop_assert_eq!(again, m);

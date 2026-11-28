@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use cartograph_facts::Replay;
 use cartograph_git::{GitError, ObjectId, Repo};
-use cartograph_parse::{BlobFacts, extractor_for};
+use cartograph_parse::{BlobFacts, SkipReason, extractor_for};
 use cartograph_store::FactHash;
 use cartograph_store::derived::{KeyInputs, changed, inputs_key, record};
 use cartograph_store::rusqlite::{self, Connection, params};
@@ -44,6 +44,11 @@ pub struct RepoInput<'a> {
 pub struct Inputs<'a> {
     pub repos: Vec<RepoInput<'a>>,
     pub services: &'a [ServiceSpec],
+    /// The manifest's `contracts:` entries (XS-08).
+    pub contracts: &'a [crate::contracts::ContractSpec],
+    /// The manifest's `environments:` and `default_environment` (XS-09).
+    pub environments: &'a [crate::config::EnvSpec],
+    pub default_environment: Option<&'a str>,
     pub exclude: &'a [String],
     pub config_hash: Option<&'a str>,
     /// Lineages that got a new path this run.
@@ -76,6 +81,10 @@ pub fn coverage(replay: &Replay) -> (i64, i64, i64, i64) {
     let (mut total, mut parsed) = (0, 0);
     for (path, f) in replay.tree() {
         if extractor_for(path).is_some_and(|(_, k)| !k.starts_with("manifest-")) {
+            // A generated file isn't a gap: nobody means to read it (XS-11).
+            if matches!(**f, BlobFacts::Skipped(SkipReason::Generated)) {
+                continue;
+            }
             total += 1;
             parsed += i64::from(!matches!(**f, BlobFacts::Skipped(_)));
         }
@@ -324,7 +333,13 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
         structure_keys.push(sk.to_vec());
     }
 
-    // HTTP links (XS-04) need every repository's services and host aliases.
+    // Contracts (XS-08) need the services; the HTTP pass binds them to routes and calls.
+    crate::contracts::refresh::<E>(conn, inputs)?;
+    // What the files that import a generated client call (XS-11).
+    crate::contracts::codegen::extract_refs::<E>(conn, inputs)?;
+    // Config values and environments (XS-09) come from every repository's value-source files.
+    crate::config::refresh(conn, inputs.environments, inputs.default_environment)?;
+    // HTTP links (XS-04) need every repository's services and host aliases, and the config values.
     crate::http::refresh(conn, config)?;
 
     let mut c_in = structure_keys;

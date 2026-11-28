@@ -178,6 +178,9 @@ pub struct ReadParams {
     pub cursor: Option<String>,
     /// Comma-separated optional parts, e.g. `summary,metrics`.
     pub include: Option<String>,
+    /// An environment name (XS-09), for the reads that depend on one. Absent: the workspace's
+    /// default, `default_environment` in the manifest, else `prod`, else the first.
+    pub env: Option<String>,
 }
 
 // ---------------------------------------------------------------- meta and workspaces
@@ -510,6 +513,28 @@ pub struct LinkDetail {
     /// A link between the same two services that closed in the commit this one opened.
     pub replaced: Option<LinkId>,
     pub correction_id: Option<String>,
+    /// The environment `config` is for (`?env=`, else the default); null when the link doesn't
+    /// depend on one (XS-09).
+    pub env: Option<String>,
+    /// Every environment the link holds in.
+    pub envs: Vec<String>,
+    /// How `env` resolves the call, in order: the key the call site reads, the value it has there
+    /// and the host that value names.
+    pub config: Vec<LinkConfig>,
+}
+
+/// One step of the chain from a call site to a service: key, value, host (XS-09).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkConfig {
+    /// `CATALOG_URL`.
+    pub key: String,
+    /// What the key is set to: a URL without userinfo, query or fragment, or `host[:port]`.
+    pub value: String,
+    /// The host in `value`: the column the inspector shows per environment.
+    pub host: String,
+    /// The file that sets it, repo-relative as the index sees paths; `cartograph.yaml` for a
+    /// value set by hand.
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -755,6 +780,9 @@ pub enum Method {
     Put,
     Patch,
     Delete,
+    Options,
+    Head,
+    Trace,
     Event,
 }
 
@@ -764,13 +792,48 @@ pub struct Caller {
     pub confidence: Confidence,
 }
 
+/// Whether the code agrees with the spec about an operation (XS-08 drift).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum OperationStatus {
+    /// A parsed route serves it.
+    Sync,
+    /// The spec lists it and no route serves it.
+    SpecOnly,
+}
+
+/// An operation of a spec. `id` is `o<row>`, not a node.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Operation {
     pub id: NodeId,
     pub method: Method,
+    /// With the spec's base path, as the spec writes it: `/v1/orders/{id}`.
     pub path: String,
+    pub operation_id: Option<String>,
+    /// From the spec: untrusted text (F8), at most 200 characters.
+    pub summary: Option<String>,
+    pub status: OperationStatus,
     pub handler: Option<NodeId>,
     pub callers: Vec<Caller>,
+}
+
+/// A route of a service that has a spec, which no spec lists.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UndocumentedRoute {
+    pub method: Method,
+    /// The route's template: `/orders/{}`.
+    pub path: String,
+    /// The file that serves it.
+    pub handler: NodeId,
+}
+
+/// The four counts of the Contracts view.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ContractCounts {
+    pub operations: u32,
+    pub sync: u32,
+    pub spec_only: u32,
+    pub undocumented: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -789,6 +852,57 @@ pub struct Contract {
     pub kind: SpecKind,
     pub service: NodeId,
     pub operations: Vec<Operation>,
+    /// The service's undocumented routes, on its first spec.
+    pub undocumented: Vec<UndocumentedRoute>,
+    pub counts: ContractCounts,
+}
+
+/// A spec's history (XS-19): one row per distinct spec along first-parent history, oldest first.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ContractVersion {
+    /// 1 for the first spec the file had.
+    pub n: u32,
+    /// The commit where this spec came to be.
+    pub commit: Commit,
+    /// Hex SHA-256 of the canonical operations and schemas.
+    pub spec_hash: String,
+    /// Changes from the version before; 0 for v1.
+    pub changes: u32,
+    /// How many of them are breaking; `breaking` lists the first 200.
+    pub breaking_count: u32,
+    /// Built from the diff, never by a model. Untrusted text (names from the spec).
+    pub summary: String,
+    pub breaking: Vec<BreakingChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BreakingChange {
+    /// `operation_removed`, `field_removed`, `type_narrowed`, ...
+    pub kind: String,
+    /// `get /orders/{id}` or `Order.status`.
+    pub subject: String,
+    pub summary: String,
+    /// Who called the operation in the commit before the change; empty for a schema change.
+    pub callers: Vec<Caller>,
+}
+
+/// One change of a diff, breaking or not.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SpecChange {
+    pub kind: String,
+    pub subject: String,
+    pub breaking: bool,
+    pub summary: String,
+}
+
+/// `…/contracts/{id}/diff`: every change between two versions, recomputed on request.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ContractDiff {
+    pub from: u32,
+    pub to: u32,
+    /// The spec reads other files; the diff is of the root file alone.
+    pub approximate: bool,
+    pub changes: Vec<SpecChange>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -920,6 +1034,9 @@ pub struct Service {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Environment {
     pub name: String,
+    /// The workspace's default: `default_environment`, else `prod`, else the first.
+    pub is_default: bool,
+    /// Key to value, as of the newest commit: only values that classify as locators (XS-10).
     pub values: BTreeMap<String, String>,
 }
 

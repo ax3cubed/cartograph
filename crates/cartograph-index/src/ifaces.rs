@@ -7,10 +7,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cartograph_facts::FactCache;
-use cartograph_facts::adapters::{AdapterSet, Limits};
+use cartograph_facts::adapters::{AdapterSet, Limits, MAX_GENERATED_BYTES};
 use cartograph_facts::schema::BlobFact;
 use cartograph_git::{GitError, ObjectId, Repo, read_blob};
-use cartograph_parse::MAX_BLOB_BYTES;
 
 /// The extractor name in the `fact` table.
 pub const EXTRACTOR: &str = "adapters";
@@ -19,7 +18,7 @@ pub const EXTRACTOR: &str = "adapters";
 pub type IfaceFacts = Vec<(String, String, Vec<BlobFact>)>;
 pub type Ifaces = HashMap<ObjectId, Arc<IfaceFacts>>;
 
-/// `express@1.0.0+fetch@1.0.0`: changes whenever a built-in adapter does.
+/// `express@1.0.0+fetch@1.1.0`: changes whenever a built-in adapter does.
 pub fn version() -> String {
     AdapterSet::builtin()
         .adapters()
@@ -34,7 +33,7 @@ pub fn applies(path: &str) -> bool {
     cartograph_parse::extractor_for(path).is_some()
         && matches!(
             path.rsplit_once('.').map(|x| x.1),
-            Some("ts" | "mts" | "cts" | "tsx" | "js" | "jsx" | "mjs" | "cjs")
+            Some("ts" | "mts" | "cts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "go")
         )
 }
 
@@ -57,7 +56,7 @@ pub fn extract(
             cache,
             oid.as_bytes(),
             &path,
-            || read_blob(&local, oid, MAX_BLOB_BYTES).ok(),
+            || read_blob(&local, oid, MAX_GENERATED_BYTES as u64).ok(),
             &Limits::default(),
         );
         let mine: IfaceFacts = got

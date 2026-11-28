@@ -48,6 +48,19 @@ pub const MIGRATIONS: &[Step] = &[
 /// reverse order of `V4`.
 #[doc(hidden)]
 pub const UNDO_V4: &str = concat!(
+    // ---- XS-19 spec versions: begin ----
+    "DROP TABLE contract_version;\n",
+    // ---- XS-19 spec versions: end ----
+    // ---- XS-11 generated clients: begin ----
+    "DROP TABLE blob_ref; DROP TABLE client_alias; ALTER TABLE node DROP COLUMN generated;\n",
+    // ---- XS-11 generated clients: end ----
+    // ---- XS-08 contracts: begin ----
+    "DROP TABLE binding; DROP TABLE contract_schema; DROP TABLE operation; DROP TABLE contract;\n",
+    // ---- XS-08 contracts: end ----
+    // ---- XS-09 config: begin ----
+    "DROP TABLE link_config; DROP TABLE config_value; DROP TABLE environment;
+     ALTER TABLE link DROP COLUMN envs;\n",
+    // ---- XS-09 config: end ----
     // ---- XS-06 link detail: begin ----
     "ALTER TABLE evidence DROP COLUMN operation;\n",
     // ---- XS-06 link detail: end ----
@@ -81,6 +94,30 @@ pub fn undo_to_v2() -> String {
 /// The tables and columns format 4 adds, as `schema.sql` declares them; one delimited block per
 /// phase-4 item.
 const V4: &str = concat!(
+    // ---- XS-19 spec versions: begin ----
+    "CREATE TABLE contract_version (contract INTEGER NOT NULL REFERENCES contract (id),
+       n INTEGER NOT NULL, seq INTEGER NOT NULL, blob BLOB NOT NULL, spec_hash BLOB NOT NULL,
+       changes INTEGER NOT NULL, breaking_count INTEGER NOT NULL, breaking TEXT NOT NULL,
+       summary TEXT NOT NULL, PRIMARY KEY (contract, n)) STRICT, WITHOUT ROWID;\n",
+    // ---- XS-19 spec versions: end ----
+    // ---- XS-08 contracts: begin ----
+    "CREATE TABLE contract (id INTEGER PRIMARY KEY, file INTEGER NOT NULL REFERENCES file (id),
+       service INTEGER REFERENCES node (id), title TEXT NOT NULL, version TEXT NOT NULL) STRICT;
+     CREATE UNIQUE INDEX contract_file ON contract (file);
+     CREATE TABLE operation (id INTEGER PRIMARY KEY, contract INTEGER NOT NULL REFERENCES contract (id),
+       method TEXT NOT NULL, path TEXT NOT NULL, template TEXT NOT NULL, operation_id TEXT,
+       summary TEXT, line INTEGER NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX operation_contract ON operation (contract);
+     CREATE TABLE contract_schema (contract INTEGER NOT NULL REFERENCES contract (id),
+       name TEXT NOT NULL, fields TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX contract_schema_contract ON contract_schema (contract);
+     CREATE TABLE binding (id INTEGER PRIMARY KEY, kind TEXT NOT NULL,
+       operation INTEGER REFERENCES operation (id), file INTEGER NOT NULL REFERENCES file (id),
+       line INTEGER NOT NULL, template TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER)
+       STRICT;
+     CREATE INDEX binding_operation ON binding (operation);
+     CREATE INDEX binding_kind ON binding (kind, from_seq);\n",
+    // ---- XS-08 contracts: end ----
     // ---- XS-05 confidence: begin ----
     "ALTER TABLE link ADD COLUMN level TEXT; ALTER TABLE link ADD COLUMN score REAL;\n",
     // ---- XS-05 confidence: end ----
@@ -120,6 +157,28 @@ const V4: &str = concat!(
      CREATE INDEX host_alias_host ON host_alias (host, valid_from);
      CREATE INDEX host_alias_service ON host_alias (service_id);\n",
     // ---- XS-02 host aliases: end ----
+    // ---- XS-09 config: begin ----
+    "CREATE TABLE environment (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+       is_default INTEGER NOT NULL) STRICT;
+     CREATE TABLE config_value (key TEXT NOT NULL, env_id INTEGER REFERENCES environment (id),
+       value TEXT, value_kind TEXT NOT NULL, source TEXT NOT NULL, blob_id BLOB NOT NULL,
+       valid_from INTEGER NOT NULL, valid_to INTEGER) STRICT;
+     CREATE INDEX config_value_key ON config_value (key, valid_from);
+     ALTER TABLE link ADD COLUMN envs INTEGER;
+     CREATE TABLE link_config (link INTEGER NOT NULL REFERENCES link (id),
+       env_id INTEGER NOT NULL REFERENCES environment (id), key TEXT NOT NULL, value TEXT NOT NULL,
+       source TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX link_config_link ON link_config (link);\n",
+    // ---- XS-09 config: end ----
+    // ---- XS-11 generated clients: begin (after the tables it refers to) ----
+    "CREATE TABLE client_alias (operation INTEGER NOT NULL REFERENCES operation (id),
+       file INTEGER NOT NULL REFERENCES file (id), symbol TEXT NOT NULL, line INTEGER NOT NULL,
+       from_seq INTEGER NOT NULL, to_seq INTEGER) STRICT;
+     CREATE INDEX client_alias_operation ON client_alias (operation);
+     CREATE TABLE blob_ref (blob BLOB PRIMARY KEY, version TEXT NOT NULL, payload BLOB NOT NULL)
+       STRICT, WITHOUT ROWID;
+     ALTER TABLE node ADD COLUMN generated TEXT;\n",
+    // ---- XS-11 generated clients: end ----
 );
 
 /// Takes a format 3 file back to format 2 (test support: tests build an older file from a new one

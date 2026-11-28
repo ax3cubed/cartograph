@@ -64,7 +64,14 @@ export type SpecKind = "openapi" | "events";
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Method".
  */
-export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "EVENT";
+export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | "EVENT";
+/**
+ * Whether the code agrees with the spec about an operation (XS-08 drift).
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "OperationStatus".
+ */
+export type OperationStatus = "sync" | "spec-only";
 /**
  * H3's four verbs (ruling R6).
  *
@@ -706,14 +713,33 @@ export interface ConfigWrite {
  * via the `definition` "Contract".
  */
 export interface Contract {
+  counts: ContractCounts;
   file: string;
   id: string;
   kind: SpecKind;
   name: string;
   operations: Operation[];
   service: NodeId;
+  /**
+   * The service's undocumented routes, on its first spec.
+   */
+  undocumented: UndocumentedRoute[];
 }
 /**
+ * The four counts of the Contracts view.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "ContractCounts".
+ */
+export interface ContractCounts {
+  operations: number;
+  spec_only: number;
+  sync: number;
+  undocumented: number;
+}
+/**
+ * An operation of a spec. `id` is `o<row>`, not a node.
+ *
  * This interface was referenced by `CartographApi`'s JSON-Schema
  * via the `definition` "Operation".
  */
@@ -722,7 +748,16 @@ export interface Operation {
   handler?: NodeId | null;
   id: NodeId;
   method: Method;
+  operation_id?: string | null;
+  /**
+   * With the spec's base path, as the spec writes it: `/v1/orders/{id}`.
+   */
   path: string;
+  status: OperationStatus;
+  /**
+   * From the spec: untrusted text (F8), at most 200 characters.
+   */
+  summary?: string | null;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -731,6 +766,23 @@ export interface Operation {
 export interface Caller {
   confidence: Confidence;
   node: NodeId;
+}
+/**
+ * A route of a service that has a spec, which no spec lists.
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "UndocumentedRoute".
+ */
+export interface UndocumentedRoute {
+  /**
+   * The file that serves it.
+   */
+  handler: NodeId;
+  method: Method;
+  /**
+   * The route's template: `/orders/{}`.
+   */
+  path: string;
 }
 /**
  * This interface was referenced by `CartographApi`'s JSON-Schema
@@ -915,7 +967,14 @@ export interface Entrypoint {
  * via the `definition` "Environment".
  */
 export interface Environment {
+  /**
+   * The workspace's default: `default_environment`, else `prod`, else the first.
+   */
+  is_default: boolean;
   name: string;
+  /**
+   * Key to value, as of the newest commit: only values that classify as locators (XS-10).
+   */
   values: {
     [k: string]: string;
   };
@@ -1242,7 +1301,21 @@ export interface LinkChange {
  */
 export interface LinkDetail {
   closed?: Commit | null;
+  /**
+   * How `env` resolves the call, in order: the key the call site reads, the value it has there
+   * and the host that value names.
+   */
+  config: LinkConfig[];
   correction_id?: string | null;
+  /**
+   * The environment `config` is for (`?env=`, else the default); null when the link doesn't
+   * depend on one (XS-09).
+   */
+  env?: string | null;
+  /**
+   * Every environment the link holds in.
+   */
+  envs: string[];
   /**
    * The code behind the link, by its role in it.
    */
@@ -1265,6 +1338,31 @@ export interface LinkDetail {
    * A link between the same two services that closed in the commit this one opened.
    */
   replaced?: LinkId | null;
+}
+/**
+ * One step of the chain from a call site to a service: key, value, host (XS-09).
+ *
+ * This interface was referenced by `CartographApi`'s JSON-Schema
+ * via the `definition` "LinkConfig".
+ */
+export interface LinkConfig {
+  /**
+   * The host in `value`: the column the inspector shows per environment.
+   */
+  host: string;
+  /**
+   * `CATALOG_URL`.
+   */
+  key: string;
+  /**
+   * The file that sets it, repo-relative as the index sees paths; `cartograph.yaml` for a
+   * value set by hand.
+   */
+  source: string;
+  /**
+   * What the key is set to: a URL without userinfo, query or fragment, or `host[:port]`.
+   */
+  value: string;
 }
 /**
  * Evidence by role. Contract rows wait for contracts (XS-08).
@@ -1533,6 +1631,11 @@ export interface Reach {
 export interface ReadParams {
   at?: string | null;
   cursor?: string | null;
+  /**
+   * An environment name (XS-09), for the reads that depend on one. Absent: the workspace's
+   * default, `default_environment` in the manifest, else `prod`, else the first.
+   */
+  env?: string | null;
   /**
    * Comma-separated optional parts, e.g. `summary,metrics`.
    */
