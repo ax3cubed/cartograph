@@ -58,7 +58,7 @@ struct Cfg {
 
 /// What a site says about itself, for evidence rows.
 #[derive(Clone)]
-struct Info {
+pub(crate) struct Info {
     file: i64,
     kind: &'static str,
     text: String,
@@ -67,7 +67,7 @@ struct Info {
     /// The URL as the source spells it (`${expr}` for what it doesn't), for unresolved rows.
     raw: String,
     /// `get /orders/{}`.
-    template: String,
+    pub(crate) template: String,
     /// The call spells a host out.
     host: bool,
     /// The environment value the call's base came from.
@@ -242,7 +242,7 @@ pub(crate) fn attr<'a>(a: &'a Attrs, k: &str) -> Option<&'a AttrValue> {
 }
 
 /// A call whose base is an environment variable: the sites it has depend on the environment.
-struct EnvCall {
+pub(crate) struct EnvCall {
     key: SiteKey,
     /// The URL's pieces; the first is the expression that reads the variable.
     pieces: Vec<(bool, String)>,
@@ -255,7 +255,7 @@ struct EnvCall {
     info: Info,
 }
 
-enum Prep {
+pub(crate) enum Prep {
     Site(Site, Box<Info>),
     Env(Box<EnvCall>),
 }
@@ -332,7 +332,7 @@ impl Prefixes {
 }
 
 /// The sites of one version of a file.
-fn sites(row: &Row, out: &mut Vec<Prep>) {
+pub(crate) fn sites(row: &Row, out: &mut Vec<Prep>) {
     let Some(per) = ifaces::decode(&row.payload) else {
         return;
     };

@@ -48,6 +48,10 @@ pub struct Manifest {
     /// `swagger.*`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contracts: Vec<Contract>,
+    /// Callers outside the workspace (XS-20): each is shown as a consumer, with an override chip,
+    /// of the entrypoints whose operations it lists.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clients: Vec<Client>,
     /// What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).
     #[serde(default, skip_serializing_if = "Retrieval::is_empty")]
     pub retrieval: Retrieval,
@@ -161,6 +165,17 @@ pub struct Contract {
     /// The service that owns the specs it matches; absent, the service whose root holds each file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
+}
+
+/// A caller the index can't see (XS-20): a mobile app, a partner's integration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Client {
+    pub name: String,
+    /// The service that serves the calls; absent, any service that has the operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    /// The operations it calls, as `GET /orders/{id}`.
+    pub calls: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -815,7 +830,7 @@ services:
                     scopes: vec![],
                 }).collect(),
                 options: Options::default(),
-                services: vec![], rules: vec![], baseline: None, contracts: vec![], retrieval: Default::default(),
+                services: vec![], rules: vec![], baseline: None, contracts: vec![], clients: vec![], retrieval: Default::default(),
                 default_environment: None, environments: Default::default(), adapters: vec![],
             };
             let again = parse(&to_yaml(&m)).unwrap().manifest;

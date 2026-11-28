@@ -46,6 +46,8 @@ pub struct Inputs<'a> {
     pub services: &'a [ServiceSpec],
     /// The manifest's `contracts:` entries (XS-08).
     pub contracts: &'a [crate::contracts::ContractSpec],
+    /// The manifest's `clients:` (XS-20).
+    pub clients: &'a [crate::entrypoints::ClientSpec],
     /// The manifest's `environments:` and `default_environment` (XS-09).
     pub environments: &'a [crate::config::EnvSpec],
     pub default_environment: Option<&'a str>,
@@ -349,6 +351,10 @@ pub fn refresh<E: From<GitError> + From<rusqlite::Error>>(
     crate::tables::refresh(conn, config)?;
     // Corrections (XS-12) sit on the links that pass wrote, before anything counts them.
     crate::corrections::refresh(conn, inputs.overrides, seq)?;
+    // Entrypoints (XS-20) read the facts, the channels and the paths; their reach at HEAD reads
+    // the links, so it comes last.
+    crate::entrypoints::refresh(conn, inputs.clients, config, &structure_keys)?;
+    crate::entrypoints::reach(conn, config, &hash.digest(), &structure_keys)?;
 
     let mut c_in = structure_keys;
     c_in.push(hash.digest().to_vec());

@@ -114,6 +114,7 @@ pub fn plan(dir: &Path, workspace_file: Option<&Path>) -> Result<Plan, Discovery
         rules: vec![],
         baseline: None,
         contracts: vec![],
+        clients: vec![],
         retrieval: Default::default(),
         default_environment: None,
         environments: Default::default(),

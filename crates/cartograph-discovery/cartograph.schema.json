@@ -51,6 +51,13 @@
         "$ref": "#/$defs/Contract"
       }
     },
+    "clients": {
+      "description": "Callers outside the workspace (XS-20): each is shown as a consumer, with an override chip,\nof the entrypoints whose operations it lists.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Client"
+      }
+    },
     "retrieval": {
       "description": "What Ask and the editor's agent can search (FE-13, board S06 under G7: no embeddings).",
       "$ref": "#/$defs/Retrieval"
@@ -331,6 +338,33 @@
       },
       "required": [
         "path"
+      ]
+    },
+    "Client": {
+      "description": "A caller the index can't see (XS-20): a mobile app, a partner's integration.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "service": {
+          "description": "The service that serves the calls; absent, any service that has the operation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "calls": {
+          "description": "The operations it calls, as `GET /orders/{id}`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "calls"
       ]
     },
     "Retrieval": {

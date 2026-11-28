@@ -75,6 +75,8 @@ pub struct Workspace {
     pub services: Vec<ServiceSpec>,
     /// The manifest's `contracts:` entries (XS-08).
     pub contracts: Vec<crate::contracts::ContractSpec>,
+    /// The manifest's `clients:` (XS-20).
+    pub clients: Vec<crate::entrypoints::ClientSpec>,
     /// The manifest's `environments:` (XS-09).
     pub environments: Vec<crate::config::EnvSpec>,
     /// The manifest's `default_environment`.
@@ -458,6 +460,7 @@ pub fn restructure(ws: &Workspace, repo: &str) -> Result<DerivedStats, SyncError
         }],
         services: &ws.services,
         contracts: &ws.contracts,
+        clients: &ws.clients,
         environments: &ws.environments,
         default_environment: ws.default_environment.as_deref(),
         exclude: &ws.exclude,
@@ -1083,6 +1086,7 @@ fn round_on(
             .collect(),
         services: &ws.services,
         contracts: &ws.contracts,
+        clients: &ws.clients,
         environments: &ws.environments,
         default_environment: ws.default_environment.as_deref(),
         exclude: &ws.exclude,

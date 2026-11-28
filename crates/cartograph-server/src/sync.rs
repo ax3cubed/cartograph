@@ -94,6 +94,12 @@ pub fn workspace_checked(data: &Path, ws: &str) -> Result<(Workspace, Vec<String
                 .iter()
                 .map(cartograph_index::contracts::ContractSpec::from)
                 .collect(),
+            clients: parsed
+                .manifest
+                .clients
+                .iter()
+                .map(cartograph_index::entrypoints::ClientSpec::from)
+                .collect(),
             environments: parsed
                 .manifest
                 .environments

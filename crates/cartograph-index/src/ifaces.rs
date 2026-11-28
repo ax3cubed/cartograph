@@ -12,7 +12,7 @@ use cartograph_facts::adapters::{AdapterSet, Limits, MAX_GENERATED_BYTES};
 use cartograph_facts::schema::{BlobFact, FactKind};
 use cartograph_git::{GitError, ObjectId, Repo, read_blob};
 
-use crate::links::tables;
+use crate::links::{entries, tables};
 
 /// The `meta` key counting the blobs with a generated-client marker (XS-11). Absent: unknown.
 /// It can overcount after a rewrite drops facts (a wasted look), never undercount.
@@ -66,6 +66,10 @@ pub fn applies(path: &str) -> bool {
 /// them off: the table pass reads them without the HTTP pass's payloads.
 pub const TABLES: &str = "tables";
 
+/// The pseudo-adapter name of the entrypoint facts no query adapter makes (XS-20): they are stored
+/// in the `adapters` row of the blob, like any adapter's.
+pub const ENTRIES: &str = "entries";
+
 /// Interface facts for each (blob, path) not in `seen`, from the fact cache or by running the
 /// built-in adapters, and the approved subprocess adapters (`sub`), on the blob. The table facts
 /// (XS-17) of the same blob are an entry named [`TABLES`].
@@ -82,7 +86,8 @@ pub fn extract(
     for (oid, path) in items {
         let builtin = applies(&path);
         let tables = tables::applies(&path);
-        if (!builtin && !tables && sub.is_idle()) || !seen.insert(oid) {
+        let entry = entries::applies(&path);
+        if (!builtin && !tables && !entry && sub.is_idle()) || !seen.insert(oid) {
             continue;
         }
         // One read of the blob for the adapters and the table scan.
@@ -114,6 +119,16 @@ pub fn extract(
             let facts = tables::scan(&path, b);
             if !facts.is_empty() {
                 mine.push((TABLES.into(), tables::VERSION.into(), facts));
+            }
+        }
+        if entry
+            && let Some(b) = read()
+                .as_deref()
+                .filter(|b| b.len() as u64 <= cartograph_parse::MAX_BLOB_BYTES)
+        {
+            let facts = entries::scan(&path, b);
+            if !facts.is_empty() {
+                mine.push((ENTRIES.into(), entries::VERSION.into(), facts));
             }
         }
         if !mine.is_empty() {
@@ -229,9 +244,9 @@ pub(crate) fn current(
     Ok(stored.as_deref() == Some(stamp(subs).as_str()))
 }
 
-/// What `adapters_version` holds: the adapters' version and the table scan's.
+/// What `adapters_version` holds: the adapters' version, the table scan's and the entrypoint scan's.
 fn stamp(subs: &SubSet) -> String {
-    format!("{}|{}", version(subs), tables::VERSION)
+    format!("{}|{}|{}", version(subs), tables::VERSION, entries::VERSION)
 }
 
 pub(crate) fn mark_current(
